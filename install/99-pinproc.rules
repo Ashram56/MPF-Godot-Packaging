@@ -1,0 +1,7 @@
+# Multimorphic P-ROC / P3-ROC: USB access for libpinproc (libftdi) without root.
+# The boards use an FTDI chip: FT245RL (0403:6001, P-ROC) or FT240X (0403:6015, newer boards).
+# These are FTDI's generic IDs, so the rule also opens other FTDI USB-serial adapters to local users.
+# Installed to /etc/udev/rules.d/ by scripts/install/install_prereqs_linux.sh --proc; reload with
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6015", MODE="0666", TAG+="uaccess"

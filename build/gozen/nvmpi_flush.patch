@@ -1,0 +1,477 @@
+Jetson-specific patch to jetson-ffmpeg (github.com/gjrtimmer/jetson-ffmpeg) at 8d70c17, for libnvmpi and its
+FFmpeg wrapper (ffmpeg/dev/common/libavcodec/nvmpi_dec.c). Applied by build/gozen/build_gozen.sh and
+platforms/jetson/install_jetson_hwdec.sh (git apply ignores this text).
+
+Platform: tested on Jetson AGX Orin (t234), L4T R36.4.3 / JetPack 6.2, Ubuntu 22.04, and on Jetson Xavier NX
+          (t194), L4T R35.6.4 / JetPack 5.1.4, Ubuntu 20.04 (platforms/jetson/jetson_selftest.sh --stock).
+
+- nvmpi_dec.c: a flush closes the decoder and the next packet creates a new one (in-place reset hangs on R36).
+- libnvmpi: close() in ~55 ms instead of ~1 s, and no crash when closed mid-stream.
+- libnvmpi: decoders are set up and torn down one at a time, and a decoder whose capture thread stops on an
+  error fails its packets instead of blocking forever (game froze with three screens switching videos).
+- libnvmpi: a frame buffer's planes are mapped for the CPU once and stay mapped until the buffer is destroyed,
+  instead of being mapped and unmapped for every frame (1080p decode 74 -> 203 fps, CPU 17 -> 4 ms per frame on
+  the Xavier NX).
+Upstream reports: fixes/jetson-ffmpeg/.
+
+diff --git a/ffmpeg/dev/common/libavcodec/nvmpi_dec.c b/ffmpeg/dev/common/libavcodec/nvmpi_dec.c
+index a11f1d7..57b84eb 100644
+--- a/ffmpeg/dev/common/libavcodec/nvmpi_dec.c
++++ b/ffmpeg/dev/common/libavcodec/nvmpi_dec.c
+@@ -112,6 +112,8 @@ typedef struct {
+ 	int disable_dpb;       //skip DPB reordering (low-latency, default off)
+ 	int wait_timeout;      //blocking wait timeout in ms (0 = default 500ms)
+ 	int output_format;     //requested output pixel format (AVPixelFormat; NONE = auto)
++	nvDecParam param;      //what the decoder was created with, to recreate it after a flush
++	int fed;               //packets went to the decoder since it was created (a flush then recreates it)
+ } nvmpiDecodeContext;
+ 
+ /* ------------------------------------------------------------------ */
+@@ -164,6 +166,49 @@ static nvCodingType nvmpi_get_codingtype(AVCodecContext *avctx)
+ };
+ 
+ 
++//Prime the decoder with out-of-band parameter sets (SPS/PPS), if any; after
++//nvmpi_create_decoder(), at init and when a flush recreated the decoder.
++static void nvmpi_prime_extradata(AVCodecContext *avctx)
++{
++	nvmpiDecodeContext *nvmpi_context = avctx->priv_data;
++
++	//RTSP/RTP streams commonly carry them only in the SDP
++	//(sprop-parameter-sets): FFmpeg stores those in avctx->extradata and
++	//never injects them into the packet stream (the *_mp4toannexb BSFs are
++	//pass-through for Annex-B input). The hardware decoder configures its
++	//capture plane only after parsing an in-band SPS, so without priming
++	//such streams decode zero frames (upstream Keylost/jetson-ffmpeg#14).
++	//Only Annex-B extradata (00 00 01 / 00 00 00 01 start code, plus at
++	//least one NAL byte) may be fed: avcC/hvcC extradata (MP4/MKV) is not
++	//parseable by the hardware and not needed — for those inputs the
++	//mp4toannexb BSF inserts the parameter sets in-band at every IDR.
++	//mpeg2/mpeg4 sequence/VOS headers are start-code-prefixed too and
++	//intentionally primed (same out-of-band failure class). Other
++	//CodecPrivate shapes (e.g. Matroska VP9 feature triples, VFW
++	//BITMAPINFOHEADER) never start with a start code and must not reach
++	//the parser. An empty payload must never be sent here: libnvmpi
++	//treats it as the EOS marker. The size cap protects libnvmpi's
++	//fixed-size bitstream buffers (4 MB) from hostile extradata — real
++	//parameter sets are tens of bytes.
++	if(avctx->extradata && avctx->extradata_size >= 4 &&
++	   avctx->extradata_size < (1 << 20) &&
++	   avctx->extradata[0] == 0 && avctx->extradata[1] == 0 &&
++	   (avctx->extradata[2] == 1 ||
++	    (avctx->extradata_size >= 5 && avctx->extradata[2] == 0 && avctx->extradata[3] == 1)))
++	{
++		nvPacket packet = {0};
++		packet.payload_size=avctx->extradata_size;
++		packet.payload=avctx->extradata;
++		packet.pts=0;
++
++		if(nvmpi_decoder_put_packet(nvmpi_context->ctx, &packet) < 0)
++		{
++			//not fatal: the stream may still carry in-band parameter sets
++			av_log(avctx, AV_LOG_WARNING, "Failed to prime decoder with extradata.\n");
++		}
++	}
++}
++
+ //AVCodec/FFCodec .init callback: validate options/pix_fmt, build the
+ //nvDecParam from the AVOptions, pre-allocate the first output AVFrame
+ //(bufFrame) and create the libnvmpi decoder (which starts its internal
+@@ -364,6 +409,8 @@ static int nvmpi_init_decoder(AVCodecContext *avctx)
+ 		nvmpi_context->bufFrame = NULL;
+ 	}
+ 
++	nvmpi_context->param = param;
++	nvmpi_context->fed = 0;
+ 	nvmpi_context->ctx=nvmpi_create_decoder(&param);
+ 
+ 	if(!nvmpi_context->ctx)
+@@ -374,42 +421,7 @@ static int nvmpi_init_decoder(AVCodecContext *avctx)
+ 		return AVERROR_EXTERNAL;
+ 	}
+ 
+-	//Prime the decoder with out-of-band parameter sets (SPS/PPS), if any.
+-	//RTSP/RTP streams commonly carry them only in the SDP
+-	//(sprop-parameter-sets): FFmpeg stores those in avctx->extradata and
+-	//never injects them into the packet stream (the *_mp4toannexb BSFs are
+-	//pass-through for Annex-B input). The hardware decoder configures its
+-	//capture plane only after parsing an in-band SPS, so without priming
+-	//such streams decode zero frames (upstream Keylost/jetson-ffmpeg#14).
+-	//Only Annex-B extradata (00 00 01 / 00 00 00 01 start code, plus at
+-	//least one NAL byte) may be fed: avcC/hvcC extradata (MP4/MKV) is not
+-	//parseable by the hardware and not needed — for those inputs the
+-	//mp4toannexb BSF inserts the parameter sets in-band at every IDR.
+-	//mpeg2/mpeg4 sequence/VOS headers are start-code-prefixed too and
+-	//intentionally primed (same out-of-band failure class). Other
+-	//CodecPrivate shapes (e.g. Matroska VP9 feature triples, VFW
+-	//BITMAPINFOHEADER) never start with a start code and must not reach
+-	//the parser. An empty payload must never be sent here: libnvmpi
+-	//treats it as the EOS marker. The size cap protects libnvmpi's
+-	//fixed-size bitstream buffers (4 MB) from hostile extradata — real
+-	//parameter sets are tens of bytes.
+-	if(avctx->extradata && avctx->extradata_size >= 4 &&
+-	   avctx->extradata_size < (1 << 20) &&
+-	   avctx->extradata[0] == 0 && avctx->extradata[1] == 0 &&
+-	   (avctx->extradata[2] == 1 ||
+-	    (avctx->extradata_size >= 5 && avctx->extradata[2] == 0 && avctx->extradata[3] == 1)))
+-	{
+-		nvPacket packet = {0};
+-		packet.payload_size=avctx->extradata_size;
+-		packet.payload=avctx->extradata;
+-		packet.pts=0;
+-
+-		if(nvmpi_decoder_put_packet(nvmpi_context->ctx, &packet) < 0)
+-		{
+-			//not fatal: the stream may still carry in-band parameter sets
+-			av_log(avctx, AV_LOG_WARNING, "Failed to prime decoder with extradata.\n");
+-		}
+-	}
++	nvmpi_prime_extradata(avctx);
+ 
+    return 0;
+ }
+@@ -448,6 +460,18 @@ static int nvmpi_decode(AVCodecContext *avctx, AVFrame *data, int *got_frame, AV
+ 	int res;
+ 	int decode_ret = avpkt->size;
+ 
++	//a flush closed the decoder: create it again for the new position
++	if(!nvmpi_context->ctx)
++	{
++		nvmpi_context->ctx = nvmpi_create_decoder(&nvmpi_context->param);
++		if(!nvmpi_context->ctx)
++		{
++			av_log(avctx, AV_LOG_ERROR, "nvmpi: could not recreate the decoder after a flush\n");
++			return AVERROR_EXTERNAL;
++		}
++		nvmpi_prime_extradata(avctx);
++	}
++
+ 	//Feed the compressed packet (if any — FFmpeg sends empty packets while
+ 	//draining). libnvmpi memcpy's the payload, so avpkt stays caller-owned.
+ 	if(avpkt->size)
+@@ -457,6 +481,7 @@ static int nvmpi_decode(AVCodecContext *avctx, AVFrame *data, int *got_frame, AV
+ 		packet.pts=avpkt->pts;
+ 
+ 		res=nvmpi_decoder_put_packet(nvmpi_context->ctx,&packet);
++		nvmpi_context->fed = 1;
+ 		if(res < 0)
+ 		{
+ 			//A decode callback must never return AVERROR(EAGAIN) for a
+@@ -648,27 +673,21 @@ static void nvmpi_flush_decoder(AVCodecContext *avctx)
+ {
+ 	nvmpiDecodeContext *nvmpi_context = avctx->priv_data;
+ 
+-	nvmpi_decoder_flush(nvmpi_context->ctx);
+-
+-	if(avctx->extradata && avctx->extradata_size >= 4 &&
+-	   avctx->extradata_size < (1 << 20) &&
+-	   avctx->extradata[0] == 0 && avctx->extradata[1] == 0 &&
+-	   (avctx->extradata[2] == 1 ||
+-	    (avctx->extradata_size >= 5 && avctx->extradata[2] == 0 && avctx->extradata[3] == 1)))
+-	{
+-		nvPacket packet = {0};
+-		packet.payload_size=avctx->extradata_size;
+-		packet.payload=avctx->extradata;
+-		packet.pts=0;
+-		{
+-			int put_ret = nvmpi_decoder_put_packet(nvmpi_context->ctx, &packet);
+-			if (put_ret < 0)
+-				av_log(avctx, AV_LOG_WARNING,
+-				       "nvmpi: failed to re-prime decoder with extradata "
+-				       "after flush (ret=%d); decode may produce artifacts\n",
+-				       put_ret);
+-		}
+-	}
++	//Nothing decoded since the decoder was created: nothing to reset (GoZen
++	//seeks to the start right after opening a video).
++	if(!nvmpi_context->ctx || !nvmpi_context->fed)
++		return;
++
++	//Close the decoder and create a new one with the next packet (in
++	//nvmpi_decode), rather than nvmpi_decoder_flush(): after that in-place
++	//reset (STREAMOFF/ON) the V4L2 decoder sends no new resolution-change
++	//event for the same stream, at least on JetPack 6 (L4T R36.4), so the
++	//capture plane never restarts and the next put_packet blocks forever in
++	//the OUTPUT-plane dqBuffer. Lazily, so that a flush right before the
++	//codec is freed (GoZen's close) does not create a decoder for nothing.
++	nvmpi_decoder_close(nvmpi_context->ctx);
++	nvmpi_context->ctx = NULL;
++	nvmpi_context->fed = 0;
+ }
+ 
+ //AVOption table: user-settable private options, resolved into
+diff --git a/src/nvmpi_dec_api.cpp b/src/nvmpi_dec_api.cpp
+index e0786c4..9ab2bff 100644
+--- a/src/nvmpi_dec_api.cpp
++++ b/src/nvmpi_dec_api.cpp
+@@ -26,6 +26,7 @@
+  *   nvmpi_dec_planes.cpp  — CAPTURE-plane allocation/teardown helpers.
+  */
+ #include "nvmpi_dec_internal.h"
++#include <chrono>
+ 
+ //Public API: feed one compressed packet to the decoder OUTPUT plane.
+ //Buffer acquisition strategy: first use each of the plane's buffers once
+@@ -52,6 +53,10 @@ int nvmpi_decoder_put_packet(nvmpictx* ctx,nvPacket* packet)
+ 		return -3;
+ 	}
+ 
++	//the capture thread stopped on a decoder error: the decoder will not take more data
++	if (ctx->dec->isInError())
++		return -1;
++
+ 	memset(&v4l2_buf, 0, sizeof(v4l2_buf));
+ 	memset(planes, 0, sizeof(planes));
+ 
+@@ -114,8 +119,13 @@ int copyNvBufToFrame(nvmpictx* ctx, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame
+ 	{
+ #ifdef WITH_NVUTILS
+ 		NvBufSurface *nvbuf_surf = nvmpiBuf->dst_dma_surface;
+-		ret = NvBufSurfaceMap(nvbuf_surf, 0, plane, NVBUF_MAP_READ_WRITE);
+-		NvBufSurfaceSyncForCpu (nvbuf_surf, 0, plane);
++		//Mapped once per buffer and kept until nvmpi_frame_buffer::destroy(): mapping and unmapping every plane
++		//of every frame cost about 11 ms of kernel time per 1080p frame on Xavier (L4T R35).
++		ret = 0;
++		if (nvbuf_surf->surfaceList[0].mappedAddr.addr[plane] == NULL)
++			ret = NvBufSurfaceMap(nvbuf_surf, 0, plane, NVBUF_MAP_READ_WRITE);
++		if (ret == 0)
++			NvBufSurfaceSyncForCpu (nvbuf_surf, 0, plane);
+ 		dataSrc = (char *)nvbuf_surf->surfaceList[0].mappedAddr.addr[plane];
+ #else
+ 		int dmabuf_fd = nvmpiBuf->dst_dma_fd;
+@@ -142,9 +152,7 @@ int copyNvBufToFrame(nvmpictx* ctx, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame
+ 			dataSrc += srcFrameLineSize;
+ 		}
+ 
+-#ifdef WITH_NVUTILS
+-		NvBufSurfaceUnMap(nvbuf_surf, 0, plane);
+-#else
++#ifndef WITH_NVUTILS
+ 		NvBufferMemUnMap(dmabuf_fd, plane, &psrc_data);
+ #endif
+ 	}
+@@ -357,6 +365,36 @@ int nvmpi_decoder_close(nvmpictx* ctx)
+ 	if (!ctx)
+ 		return -1;
+ 
++	/* Closing: the capture thread must not wait for a resolution-change
++	 * event that cannot come any more (a decoder closed before it saw a
++	 * keyframe, e.g. right after a flush). Without this, close() took
++	 * about 1 s on JetPack 6 (two 500 ms dqEvent waits), stalling every
++	 * video switch in an application. */
++	ctx->closing.store(true);
++
++	/* Let the decoder finish the bitstream already queued before tearing it
++	 * down: closed mid-stream (a video switched while playing), NVIDIA's
++	 * decoder thread crashed in libnvmmlite_video about 1 close in 20 on
++	 * JetPack 6 (inside v4l2_close or after the buffers were freed). Wait,
++	 * at most 300 ms, until the OUTPUT plane has nothing queued; the
++	 * capture thread keeps returning CAPTURE buffers meanwhile (it drops
++	 * frames instead of waiting for the pool while closing). */
++	if (ctx->numberCaptureBuffers > 0 && ctx->dec_capture_loop.joinable() && !ctx->eos.load())
++	{
++		auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
++		while (ctx->dec->output_plane.getNumQueuedBuffers() > 0 &&
++		       std::chrono::steady_clock::now() < deadline && !ctx->dec->isInError())
++		{
++			struct v4l2_buffer v4l2_buf;
++			struct v4l2_plane planes[MAX_PLANES];
++			memset(&v4l2_buf, 0, sizeof(v4l2_buf));
++			memset(planes, 0, sizeof(planes));
++			v4l2_buf.m.planes = planes;
++			if (ctx->dec->output_plane.dqBuffer(v4l2_buf, NULL, NULL, 0) < 0)
++				usleep(2000);
++		}
++		usleep(20000);   //the last buffer taken may still be decoding
++	}
+ 	ctx->eos.store(true);
+ 	/* Unblock any get_frame() caller blocked in dqFilledBuf(timeout)
+ 	 * before STREAMOFF — otherwise the consumer hangs until its timeout
+@@ -373,9 +411,23 @@ int nvmpi_decoder_close(nvmpictx* ctx)
+ 		NvBufferSessionDestroy(ctx->session);
+ #endif
+ 
++	/* after the join: the capture thread takes this lock in respondToResolutionEvent() */
++	std::lock_guard<std::mutex> lock(nvmpi_dec_setup_mutex);
+ 	ctx->dec->output_plane.setStreamStatus(false);
+ 	ctx->dec->output_plane.deinitPlane();
+ 
++	/* Close the decoder device before freeing the CAPTURE DMA buffers and
++	 * the frame pool: closed mid-stream (a video switched while playing),
++	 * NVIDIA's decoder thread could still write a frame into a buffer
++	 * already destroyed and crash (libnvmmlite_video, about 1 close in 10
++	 * on JetPack 6). deinitDecoderCapturePlane() is split around it. */
++	if (ctx->numberCaptureBuffers > 0)
++	{
++		ctx->dec->capture_plane.setStreamStatus(false);
++		ctx->dec->capture_plane.reqbufs(V4L2_MEMORY_DMABUF, 0);
++	}
++	delete ctx->dec;
++	ctx->dec = nullptr;
+ 	ctx->deinitDecoderCapturePlane();
+ 
+ 	/* Signal DRM_PRIME release callbacks that the pool is gone BEFORE
+@@ -390,9 +442,6 @@ int nvmpi_decoder_close(nvmpictx* ctx)
+ 	delete ctx->framePool;
+ 	ctx->framePool = nullptr;
+ 
+-	delete ctx->dec;
+-	ctx->dec = nullptr;
+-
+ 	delete ctx;
+ 
+ 	return 0;
+diff --git a/src/nvmpi_dec_capture.cpp b/src/nvmpi_dec_capture.cpp
+index 0952c5d..a560e9c 100644
+--- a/src/nvmpi_dec_capture.cpp
++++ b/src/nvmpi_dec_capture.cpp
+@@ -8,6 +8,7 @@ extern pthread_mutex_t nvmpi_transform_mutex;
+ void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop,nvmpictx* ctx)
+ {
+ 	int ret=0;
++	std::lock_guard<std::mutex> lock(nvmpi_dec_setup_mutex);   //capture plane and pool setup, one decoder at a time
+ 
+     /* Get capture plane format from the decoder.
+        This may change after resolution change event.
+@@ -148,7 +149,8 @@ void dec_capture_loop_fcn(void *arg)
+     do
+     {
+         /* Refer ioctl VIDIOC_DQEVENT */
+-        ret = dec->dqEvent(v4l2Event, 500);
++        /* 50 ms slices so close() never waits long for this loop to see eos */
++        ret = dec->dqEvent(v4l2Event, 50);
+         if (ret < 0)
+         {
+             if (errno == EAGAIN)
+@@ -181,7 +183,7 @@ void dec_capture_loop_fcn(void *arg)
+      * One additional 500 ms dqEvent covers the gap with margin; the
+      * extradata-to-event latency is normally single-digit ms. For
+      * nvmpi_decoder_close() the extra wait is within join tolerance. */
+-    if (!got_resolution_change && ctx->eos.load()) {
++    if (!got_resolution_change && ctx->eos.load() && !ctx->closing.load()) {
+         ret = dec->dqEvent(v4l2Event, 500);
+         if (ret == 0 && v4l2Event.type == V4L2_EVENT_RESOLUTION_CHANGE)
+             got_resolution_change = true;
+@@ -290,7 +292,8 @@ void dec_capture_loop_fcn(void *arg)
+ 				 * 500 µs busy-spin — eliminates ~2000 wakeups/s while
+ 				 * back-pressured. The V4L2 capture buffer is held back
+ 				 * meanwhile, eventually stalling the decoder hardware. */
+-				while(!ctx->eos.load())
++				//closing: drop the frame so the decoder can drain (nvmpi_decoder_close)
++				while(!ctx->eos.load() && !ctx->closing.load())
+ 				{
+ 					fb = ctx->framePool->dqEmptyBuf(std::chrono::milliseconds(100));
+ 					if(fb)
+@@ -332,6 +335,17 @@ void dec_capture_loop_fcn(void *arg)
+ 	}
+ 	/* Unblock any consumer waiting in dqFilledBuf(timeout) — all exit
+ 	 * paths converge here, so one shutdown() call covers every case. */
++	/* Stopped by a decoder error rather than by close() or the end of the
++	 * stream (seen on JetPack 6: the capture plane's DQBUF fails with EINVAL
++	 * now and then while other decoders start and stop): nothing returns
++	 * OUTPUT buffers any more, so a put_packet() blocked in its dqBuffer
++	 * would wait forever. STREAMOFF the OUTPUT plane to wake it with an
++	 * error; the caller sees a failed decode and can recreate the decoder. */
++	if (!ctx->closing.load() && dec->isInError())
++	{
++		NVMPI_LOG(NVMPI_LOG_ERROR, "decoder error: capture thread stopped, failing further packets");
++		dec->output_plane.setStreamStatus(false);
++	}
+ 	ctx->framePool->shutdown();
+ 	return;
+ }
+diff --git a/src/nvmpi_dec_init.cpp b/src/nvmpi_dec_init.cpp
+index cf79dae..f428a93 100644
+--- a/src/nvmpi_dec_init.cpp
++++ b/src/nvmpi_dec_init.cpp
+@@ -199,7 +199,7 @@ void nvmpictx::initFramePool()
+ //the first resolution-change event reveals the stream geometry.
+ //Returns the new context, or NULL on failure (V4L2 device unavailable,
+ //ioctl error, or unsupported configuration).
+-nvmpictx* nvmpi_create_decoder(nvDecParam* param)
++static nvmpictx* nvmpi_create_decoder_unlocked(nvDecParam* param)
+ {
+ 	int ret;
+ 	log_level = LOG_LEVEL_INFO;
+@@ -441,3 +441,12 @@ nvmpictx* nvmpi_create_decoder(nvDecParam* param)
+ 
+ 	return ctx;
+ }
++
++std::mutex nvmpi_dec_setup_mutex;
++
++//Public API: create a decoder, one at a time (nvmpi_dec_setup_mutex).
++nvmpictx* nvmpi_create_decoder(nvDecParam* param)
++{
++	std::lock_guard<std::mutex> lock(nvmpi_dec_setup_mutex);
++	return nvmpi_create_decoder_unlocked(param);
++}
+diff --git a/src/nvmpi_dec_internal.h b/src/nvmpi_dec_internal.h
+index 4f78e5b..bd2b384 100644
+--- a/src/nvmpi_dec_internal.h
++++ b/src/nvmpi_dec_internal.h
+@@ -1,5 +1,6 @@
+ #pragma once
+ 
++#include <mutex>
+ #include "nvmpi.h"
+ #include "NvVideoDecoder.h"
+ #include "nvUtils2NvBuf.h"
+@@ -48,6 +49,8 @@ struct nvmpictx
+ {
+ 	NvVideoDecoder *dec{nullptr};       //NVIDIA V4L2 decoder device wrapper
+ 	std::atomic<bool> eos{false};       //set on EOS or fatal error; stops capture loop
++	std::atomic<bool> closing{false};   //set by nvmpi_decoder_close(): the capture thread exits without waiting
++	                                    //for a resolution-change event
+ 	                                    //(atomic: read by user thread, written by capture thread)
+ 	int index{0};                       //next OUTPUT-plane buffer index until all are used once
+ 	unsigned int coded_width{0};        //stream resolution reported by the decoder (crop)
+@@ -133,3 +136,8 @@ NvBufferColorFormat getNvColorFormatFromV4l2Format(v4l2_format &format, bool wan
+ void dec_capture_loop_fcn(void *arg);
+ void respondToResolutionEvent(v4l2_format &format, v4l2_crop &crop, nvmpictx* ctx);
+ int copyNvBufToFrame(nvmpictx* ctx, nvmpi_frame_buffer *nvmpiBuf, nvFrame* frame);
++
++/* Serialises the V4L2 decoder's setup and teardown across decoders (nvmpi_dec_init.cpp): NVIDIA's
++ * libraries on JetPack 6 can leave a decoder without a working capture thread when another decoder is
++ * created or closed at the same time, and its put_packet then blocks forever. */
++extern std::mutex nvmpi_dec_setup_mutex;
+diff --git a/src/nvmpi_dec_planes.cpp b/src/nvmpi_dec_planes.cpp
+index 9d5f339..4ffc954 100644
+--- a/src/nvmpi_dec_planes.cpp
++++ b/src/nvmpi_dec_planes.cpp
+@@ -206,11 +206,14 @@ void nvmpictx::deinitDecoderCapturePlane()
+ 		return;
+ 
+ 	int ret = 0;
+-	dec->capture_plane.setStreamStatus(false);
+-	// bypass deinitPlane() — it calls waitForDQThread() which touches MMAPI
+-	// DQ thread state the decoder never uses (we use std::thread instead);
+-	// for DMABUF the only work deinitPlane() does beyond that is reqbufs(0)
+-	dec->capture_plane.reqbufs(V4L2_MEMORY_DMABUF, 0);
++	if (dec)   //nvmpi_decoder_close() stops the plane and deletes the decoder first
++	{
++		dec->capture_plane.setStreamStatus(false);
++		// bypass deinitPlane() — it calls waitForDQThread() which touches MMAPI
++		// DQ thread state the decoder never uses (we use std::thread instead);
++		// for DMABUF the only work deinitPlane() does beyond that is reqbufs(0)
++		dec->capture_plane.reqbufs(V4L2_MEMORY_DMABUF, 0);
++	}
+ 	for (int index = 0; index < numberCaptureBuffers; index++)
+ 	{
+ 		if (dmaBufferFileDescriptor[index] >= 0)
+diff --git a/src/nvmpi_frame_buffer.cpp b/src/nvmpi_frame_buffer.cpp
+index 93639c4..0cfb6d3 100644
+--- a/src/nvmpi_frame_buffer.cpp
++++ b/src/nvmpi_frame_buffer.cpp
+@@ -61,6 +61,11 @@ bool nvmpi_frame_buffer::destroy()
+ 	int ret = 0;
+ 	if(dst_dma_fd >= 0)
+ 	{
++#ifdef WITH_NVUTILS
++		//copyNvBufToFrame() keeps the planes mapped for the buffer's lifetime
++		if (dst_dma_surface && dst_dma_surface->surfaceList[0].mappedAddr.addr[0] != NULL)
++			NvBufSurfaceUnMap(dst_dma_surface, 0, -1);
++#endif
+ 		ret = NvBufferDestroy(dst_dma_fd);
+ 		if(ret<0)
+ 		{

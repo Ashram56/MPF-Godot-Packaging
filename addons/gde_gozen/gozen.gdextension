@@ -1,0 +1,14 @@
+[configuration]
+
+entry_symbol = "gozen_library_init"
+compatibility_minimum = "4.4"
+
+[libraries]
+
+; Linux and Windows x86_64 (pup_addons/gde_gozen/README.md); the release build serves the debug (editor binary) runs too
+linux.debug.x86_64 = "res://addons/gde_gozen/bin/libgozen.linux.template_release.x86_64.so"
+linux.release.x86_64 = "res://addons/gde_gozen/bin/libgozen.linux.template_release.x86_64.so"
+linux.debug.arm64 = "res://addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so"
+linux.release.arm64 = "res://addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so"
+windows.debug.x86_64 = "res://addons/gde_gozen/bin/libgozen.windows.template_release.x86_64.dll"
+windows.release.x86_64 = "res://addons/gde_gozen/bin/libgozen.windows.template_release.x86_64.dll"

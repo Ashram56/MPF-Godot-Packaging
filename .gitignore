@@ -1,0 +1,10 @@
+.venv/
+toolchain/
+__pycache__/
+*.pyc
+.pytest_cache/
+.cache/
+examples/*/.godot/
+examples/*/logs/
+examples/*/addons/mpf-gmc/
+*.import

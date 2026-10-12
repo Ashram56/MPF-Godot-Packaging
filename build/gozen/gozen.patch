@@ -1,0 +1,400 @@
+Patch to GDE GoZen (github.com/VoylinsGamedevJourney/gde_gozen) at f9448619, applied by build/gozen/build_gozen.sh
+(git apply ignores this text): asks FFmpeg for <codec>_nvmpi (the Jetson's hardware decoder) first and falls back
+to software; with the hardware decoder, frames come as NV12 and, after GoZenVideo.set_target_size(), scaled
+down by the hardware to the size they are shown at (fewer pixels to copy and upload); SConstruct lean=yes.
+On Windows (x86_64), FFmpeg's own decoder with the GPU decoding through Direct3D 11 Video, else DXVA2 (any GPU
+vendor), the frames copied back to memory as NV12; software when the GPU cannot (the Linux builds are unchanged).
+Hardware decoding tested on Jetson AGX Orin, L4T R36.4.3 / JetPack 6.2, and Jetson Xavier NX, L4T R35.6.4 /
+JetPack 5.1.4. Software decoding: any Linux x86_64 / arm64.
+
+diff --git a/SConstruct b/SConstruct
+index 5e7fcdf..8f91ba5 100644
+--- a/SConstruct
++++ b/SConstruct
+@@ -34,15 +34,26 @@ if "linux" in platform:
+         LIBPATH=["ffmpeg/bin/lib", "ffmpeg/bin/lib64"],
+         LIBS=LIBS_COMMON,
+     )
+-    env.Append(LIBS=["tls", "ssl", "crypto", "vpx", "aom"])
+-
+-    if arch != "arm64":
+-        env.Append(LIBS=["z"])
++    # lean=yes: FFmpeg built without libvpx, libaom, LibreSSL and zlib (the Jetson build of
++    # Tron-Legacy-MPF-PuP, scripts/build_gozen.sh)
++    # (and with FFmpeg's assembly, whose static objects need -Bsymbolic to link into a shared library)
++    if ARGUMENTS.get("lean", "no") == "yes":
++        env.Append(LINKFLAGS=["-Wl,-Bsymbolic"])
++    else:
++        env.Append(LIBS=["tls", "ssl", "crypto", "vpx", "aom"])
++
++        if arch != "arm64":
++            env.Append(LIBS=["z"])
+     env.Append(LIBS=["m", "pthread", "dl"])
+ elif "windows" in platform:
+     env.Append(LINKFLAGS=["-static"], LIBS=LIBS_COMMON)
+ 
+-    env.Append(LIBS=["vpx", "aom"])
++    # lean=yes: FFmpeg without libvpx and libaom, with Direct3D 11 Video / DXVA2 decoding (Tron-Legacy-MPF-PuP,
++    # scripts/build_gozen.sh windows); FFmpeg loads d3d11.dll, dxgi.dll, d3d9.dll and dxva2.dll at run time
++    if ARGUMENTS.get("lean", "no") == "yes":
++        env.Append(LIBS=["ole32", "user32"])
++    else:
++        env.Append(LIBS=["vpx", "aom"])
+     env.Append(
+         CPPPATH=["ffmpeg/bin/include"],
+         LIBPATH=["ffmpeg/bin/lib", "ffmpeg/bin/lib64"],
+diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
+index bf3796f..0b26b69 100644
+--- a/src/gozen_video.cpp
++++ b/src/gozen_video.cpp
+@@ -1,5 +1,120 @@
+ #include "gozen_video.hpp"
+ 
++#include <algorithm>
++#include <mutex>
++#include <string>
++
++
++// Windows hardware decoding (Direct3D 11 Video, else DXVA2: every GPU vendor, no extra library): one device for
++// every video, made on first use (FFmpeg locks it around each use), so opening a video does not make a device.
++static AVBufferRef* _hw_device(AVHWDeviceType type) {
++	static std::mutex mutex;
++	static AVBufferRef* devices[32] = {};
++	static bool failed[32] = {};
++	if ((int)type < 0 || (int)type >= 32)
++		return nullptr;
++	std::lock_guard<std::mutex> lock(mutex);
++	if (!devices[type] && !failed[type] && av_hwdevice_ctx_create(&devices[type], type, nullptr, nullptr, 0) < 0) {
++		devices[type] = nullptr;
++		failed[type] = true;
++		UtilityFunctions::print("GoZen: no ", av_hwdevice_get_type_name(type), " device on this PC");
++	}
++	return devices[type];
++}
++
++
++// FFmpeg asks for a pixel format when it meets the stream's parameters: the GPU's when it is offered, else the first
++// software one (FFmpeg offers software formats when the GPU cannot set itself up for this video).
++static enum AVPixelFormat _get_hw_format(AVCodecContext* ctx, const enum AVPixelFormat* formats) {
++	enum AVPixelFormat want = (enum AVPixelFormat)(intptr_t)ctx->opaque;
++	for (const enum AVPixelFormat* p = formats; *p != AV_PIX_FMT_NONE; p++)
++		if (*p == want)
++			return *p;
++	for (const enum AVPixelFormat* p = formats; *p != AV_PIX_FMT_NONE; p++) {
++		const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get(*p);
++		if (desc && !(desc->flags & AV_PIX_FMT_FLAG_HWACCEL))
++			return *p;
++	}
++	return AV_PIX_FMT_NONE;
++}
++
++
++bool GoZenVideo::_open_hwaccel(const AVCodec* codec, AVHWDeviceType type) {
++	hw_pix_fmt = AV_PIX_FMT_NONE;
++	for (int i = 0;; i++) {
++		const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i);
++		if (!config)
++			return false; // this decoder has no such hardware path in this FFmpeg
++		if ((config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && config->device_type == type) {
++			hw_pix_fmt = config->pix_fmt;
++			break;
++		}
++	}
++	AVBufferRef* device = _hw_device(type);
++	if (!device) {
++		hw_pix_fmt = AV_PIX_FMT_NONE;
++		return false;
++	}
++	av_codec_ctx = make_unique_ffmpeg<AVCodecContext, AVCodecCtxDeleter>(avcodec_alloc_context3(codec));
++	if (av_codec_ctx == NULL || avcodec_parameters_to_context(av_codec_ctx.get(), av_stream->codecpar)) {
++		hw_pix_fmt = AV_PIX_FMT_NONE;
++		return false;
++	}
++	av_codec_ctx->hw_device_ctx = av_buffer_ref(device);
++	av_codec_ctx->opaque = (void*)(intptr_t)hw_pix_fmt;
++	av_codec_ctx->get_format = _get_hw_format;
++	av_codec_ctx->thread_count = 1; // the GPU decodes: one thread feeds it, and fewer frames are held in flight
++	if (avcodec_open2(av_codec_ctx.get(), codec, nullptr) != 0) {
++		hw_pix_fmt = AV_PIX_FMT_NONE;
++		return false;
++	}
++	return true;
++}
++
++
++// A frame the GPU decoded is copied to system memory (NV12 for 8-bit video) before _copy_frame_data() reads it.
++bool GoZenVideo::_hw_download() {
++	if (hw_pix_fmt == AV_PIX_FMT_NONE || av_frame->format != hw_pix_fmt)
++		return true;
++	if (!av_hw_frame)
++		av_hw_frame = make_unique_avframe();
++	av_frame_unref(av_hw_frame.get());
++	if (av_hwframe_transfer_data(av_hw_frame.get(), av_frame.get(), 0) < 0) {
++		_log_err("Couldn't copy the frame from the GPU");
++		return false;
++	}
++	av_frame_copy_props(av_hw_frame.get(), av_frame.get());
++	av_frame_unref(av_frame.get());
++	av_frame_move_ref(av_frame.get(), av_hw_frame.get());
++	return true;
++}
++
++
++bool GoZenVideo::_open_decoder(const AVCodec* codec, bool hw) {
++	av_codec_ctx = make_unique_ffmpeg<AVCodecContext, AVCodecCtxDeleter>(avcodec_alloc_context3(codec));
++	if (av_codec_ctx == NULL)
++		return false;
++	if (avcodec_parameters_to_context(av_codec_ctx.get(), av_stream->codecpar))
++		return false;
++	FFmpeg::enable_multithreading(av_codec_ctx.get(), codec);
++	AVDictionary* codec_options = nullptr;
++	if (hw) {
++		// jetson-ffmpeg's nvmpi decoders: NV12 straight from the hardware (no conversion to YUV420P), and scaled down
++		// by the hardware (VIC) to the shown size, keeping the aspect (even sizes, never up)
++		av_dict_set(&codec_options, "output_format", "nv12", 0);
++		int w = av_stream->codecpar->width, h = av_stream->codecpar->height;
++		if (target_size.x > 0 && target_size.y > 0 && w > 0 && h > 0) {
++			double scale = std::min(1.0, std::min((double)target_size.x / w, (double)target_size.y / h));
++			int tw = std::max(2, (int)(w * scale + 1) & ~1), th = std::max(2, (int)(h * scale + 1) & ~1);
++			if (tw < w && th < h)
++				av_dict_set(&codec_options, "resize", (std::to_string(tw) + "x" + std::to_string(th)).c_str(), 0);
++		}
++	}
++	bool ok = avcodec_open2(av_codec_ctx.get(), codec, &codec_options) == 0;
++	av_dict_free(&codec_options);
++	return ok;
++}
++
+ 
+ int GoZenVideo::open(const String& video_path) {
+ 	if (loaded)
+@@ -142,33 +257,55 @@ int GoZenVideo::open(const String& video_path) {
+ 			}
+ 		}
+ 	}
+-	if (!av_codec) { // Set to normal decoder.
+-		av_codec = avcodec_find_decoder(av_stream->codecpar->codec_id);
+-	}
+-	if (!av_codec) { // Couldn't find decoder so exit.
+-		close();
+-		return _log_err("Couldn't find decoder");
+-	}
+-
+-	// Allocate codec context for decoder.
+-	av_codec_ctx = make_unique_ffmpeg<AVCodecContext, AVCodecCtxDeleter>(avcodec_alloc_context3(av_codec));
+-	if (av_codec_ctx == NULL) {
+-		close();
+-		return _log_err("Failed alloc codec");
++	// Hardware decoder first (NVIDIA Jetson: FFmpeg patched by jetson-ffmpeg registers <codec>_nvmpi, which
++	// loads libnvmpi.so at run time). GOZEN_HWDEC=0 turns it off. Falls back to the software decoder when the
++	// hardware one is missing or fails to open (no libnvmpi.so, not a Jetson).
++	bool hw_tried = false;
++	if (!av_codec && OS::get_singleton()->get_environment("GOZEN_HWDEC") != "0") {
++		const AVCodecDescriptor* desc = avcodec_descriptor_get(av_stream->codecpar->codec_id);
++		const AVCodec* hw_codec = desc ? avcodec_find_decoder_by_name((String(desc->name) + "_nvmpi").utf8().get_data())
++									   : nullptr;
++		if (hw_codec) {
++			hw_tried = true;
++			if (_open_decoder(hw_codec, true)) {
++				av_codec = hw_codec;
++				UtilityFunctions::print("GoZen: hardware decoder ", hw_codec->name);
++			} else {
++				UtilityFunctions::print("GoZen: hardware decoder ", hw_codec->name, " unavailable, using software");
++				av_codec_ctx.reset();
++			}
++		}
+ 	}
+-
+-	// Copying parameters.
+-	if (avcodec_parameters_to_context(av_codec_ctx.get(), av_stream->codecpar)) {
+-		close();
+-		return _log_err("Couldn't init codec");
++#ifdef _WIN32
++	// Windows: FFmpeg's own decoder with the GPU doing the decoding through Direct3D 11 Video, else DXVA2 (NVIDIA,
++	// AMD, Intel). GOZEN_HWDEC=0 turns it off, GOZEN_HWDEC=d3d11va or dxva2 asks for one of them only. A GPU that
++	// cannot decode this video makes FFmpeg fall back to software by itself (_get_hw_format()).
++	String hwdec = OS::get_singleton()->get_environment("GOZEN_HWDEC");
++	if (!av_codec && hwdec != "0") {
++		const AVCodec* sw_codec = avcodec_find_decoder(av_stream->codecpar->codec_id);
++		const AVHWDeviceType types[] = {AV_HWDEVICE_TYPE_D3D11VA, AV_HWDEVICE_TYPE_DXVA2};
++		for (AVHWDeviceType type : types) {
++			if (!sw_codec || (!hwdec.is_empty() && hwdec != "1" && hwdec != av_hwdevice_get_type_name(type)))
++				continue;
++			if (_open_hwaccel(sw_codec, type)) {
++				av_codec = sw_codec;
++				break;
++			}
++			av_codec_ctx.reset();
++		}
+ 	}
+-
+-	FFmpeg::enable_multithreading(av_codec_ctx.get(), av_codec);
+-
+-	// Open codec - Video.
+-	if (avcodec_open2(av_codec_ctx.get(), av_codec, NULL)) {
+-		close();
+-		return _log_err("Couldn't open codec");
++#endif
++	if (!av_codec || !av_codec_ctx) {
++		if (!av_codec || hw_tried)
++			av_codec = avcodec_find_decoder(av_stream->codecpar->codec_id);
++		if (!av_codec) { // Couldn't find decoder so exit.
++			close();
++			return _log_err("Couldn't find decoder");
++		}
++		if (!_open_decoder(av_codec)) {
++			close();
++			return _log_err("Couldn't open codec");
++		}
+ 	}
+ 
+ 	// Adjust resolution according to the aspect ratio.
+@@ -225,6 +362,21 @@ int GoZenVideo::open(const String& video_path) {
+ 		}
+ 	}
+ 
++	if (hw_pix_fmt != AV_PIX_FMT_NONE) {
++		if (av_frame->format == hw_pix_fmt)
++			UtilityFunctions::print("GoZen: hardware decoding ", av_codec->name, " (",
++									av_hwdevice_get_type_name(av_codec_ctx->hw_device_ctx
++																  ? ((AVHWDeviceContext*)av_codec_ctx->hw_device_ctx->data)->type
++																  : AV_HWDEVICE_TYPE_NONE),
++									")");
++		else
++			UtilityFunctions::print("GoZen: the GPU cannot decode this ", av_codec->name, " video, using software");
++		if (!_hw_download()) {
++			close();
++			return _log_err("Failed to copy the first frame from the GPU");
++		}
++	}
++
+ 	// Checking for interlacing and what type of interlacing.
+ 	if (av_frame->flags & AV_FRAME_FLAG_INTERLACED)
+ 		interlaced = av_frame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST ? 1 : 2;
+@@ -278,6 +430,14 @@ int GoZenVideo::open(const String& video_path) {
+ 	average_frame_duration = 10000000.0 / framerate; // eg. 1 sec / 25 fps = 400.000 ticks (40ms).
+ 	stream_time_base_video = av_q2d(av_stream->time_base) * 1000.0 * 10000.0; // Converting timebase to ticks.
+ 
++	// The decoder may scale (set_target_size()): the frames' own size is the one to copy
++	if (av_frame->width > 0 && av_frame->height > 0 &&
++		(av_frame->width != actual_resolution.x || av_frame->height != actual_resolution.y)) {
++		resolution = Vector2i(resolution.x * av_frame->width / std::max(1, actual_resolution.x),
++							  resolution.y * av_frame->height / std::max(1, actual_resolution.y));
++		actual_resolution = Vector2i(av_frame->width, av_frame->height);
++	}
++
+ 	// Check for alpha layer.
+ 	const AVPixFmtDescriptor* desc = av_pix_fmt_desc_get((AVPixelFormat)av_frame->format);
+ 	has_alpha = desc && (desc->flags & AV_PIX_FMT_FLAG_ALPHA);
+@@ -293,8 +453,14 @@ int GoZenVideo::open(const String& video_path) {
+ 	int uv_height = (actual_resolution.y + 1) / 2;
+ 	bool is_natively_supported = (av_frame->format == AV_PIX_FMT_YUV420P || av_frame->format == AV_PIX_FMT_YUVJ420P ||
+ 								  av_frame->format == AV_PIX_FMT_YUVA420P);
++	nv12 = av_frame->format == AV_PIX_FMT_NV12;
+ 
+-	if (is_natively_supported) {
++	if (nv12) {
++		padding = av_frame->linesize[0] - actual_resolution.x;
++		y_data = Image::create_empty(actual_resolution.x, actual_resolution.y, false, Image::FORMAT_R8);
++		u_data = Image::create_empty(uv_width, uv_height, false, Image::FORMAT_RG8);
++		v_data = Image::create_empty(1, 1, false, Image::FORMAT_R8);
++	} else if (is_natively_supported) {
+ 		padding = av_frame->linesize[0] - actual_resolution.x;
+ 		y_data = Image::create_empty(actual_resolution.x, actual_resolution.y, false, Image::FORMAT_R8);
+ 		u_data = Image::create_empty(uv_width, uv_height, false, Image::FORMAT_R8);
+@@ -366,6 +532,8 @@ void GoZenVideo::close() {
+ 	av_packet.reset();
+ 	av_frame.reset();
+ 	av_sws_frame.reset();
++	av_hw_frame.reset();
++	hw_pix_fmt = AV_PIX_FMT_NONE;
+ 	sws_ctx.reset();
+ 
+ 	if (av_codec_ctx) {
+@@ -562,6 +730,8 @@ Dictionary GoZenVideo::get_chapter_metadata(int chapter_index) {
+ }
+ 
+ void GoZenVideo::_copy_frame_data() {
++	if (!_hw_download())
++		return;
+ 	if (av_frame->data[0] == nullptr) {
+ 		_log("Frame is empty");
+ 		return;
+@@ -590,6 +760,14 @@ void GoZenVideo::_copy_frame_data() {
+ 		}
+ 
+ 		av_frame_unref(av_sws_frame.get());
++	} else if (nv12) {
++		for (int i = 0; i < actual_resolution.y; i++) {
++			memcpy(y_data->ptrw() + i * actual_resolution.x, av_frame->data[0] + i * av_frame->linesize[0],
++				   actual_resolution.x);
++		}
++		for (int i = 0; i < uv_height; i++) {
++			memcpy(u_data->ptrw() + i * uv_width * 2, av_frame->data[1] + i * av_frame->linesize[1], uv_width * 2);
++		}
+ 	} else {
+ 		for (int i = 0; i < actual_resolution.y; i++) {
+ 			memcpy(y_data->ptrw() + i * actual_resolution.x, av_frame->data[0] + i * av_frame->linesize[0],
+@@ -675,6 +853,9 @@ void GoZenVideo::_bind_methods() {
+ 
+ 	BIND_METHOD(is_full_color_range);
+ 	BIND_METHOD(is_using_sws);
++	BIND_METHOD_ARGS(set_target_size, "size");
++	BIND_METHOD(get_target_size);
++	BIND_METHOD(is_nv12);
+ 
+ 	BIND_METHOD(enable_debug);
+ 	BIND_METHOD(disable_debug);
+diff --git a/src/gozen_video.hpp b/src/gozen_video.hpp
+index ad7a971..d4a36a5 100644
+--- a/src/gozen_video.hpp
++++ b/src/gozen_video.hpp
+@@ -33,6 +33,8 @@ class GoZenVideo : public Resource {
+ 	UniqueAVPacket av_packet;
+ 	UniqueAVFrame av_frame;
+ 	UniqueAVFrame av_sws_frame;
++	UniqueAVFrame av_hw_frame; // a GPU-decoded frame copied to system memory (Windows hardware decoding)
++	enum AVPixelFormat hw_pix_fmt = AV_PIX_FMT_NONE; // the GPU's frame format while decoding on it (Windows)
+ 	UniqueSwsCtx sws_ctx;
+ 
+ 	enum AVColorPrimaries color_profile;
+@@ -62,6 +64,7 @@ class GoZenVideo : public Resource {
+ 	bool loaded = false; // Is true after open().
+ 	bool debug = false;
+ 	bool using_sws = false; // This is set for when the pixel format is foreign and not directly supported by the addon.
++	bool nv12 = false; // NV12 frames (the Jetson's hardware decoder): u_data holds U and V interleaved (RG8), no v_data.
+ 	bool full_color_range = true;
+ 
+ 	int sws_flag = SWS_BILINEAR;
+@@ -75,6 +78,7 @@ class GoZenVideo : public Resource {
+ 
+ 	Vector2i resolution = Vector2i(0, 0);
+ 	Vector2i actual_resolution = Vector2i(0, 0);
++	Vector2i target_size = Vector2i(0, 0); // set_target_size(): the size the video is shown at (0 = full size).
+ 
+ 	Ref<Image> y_data;
+ 	Ref<Image> u_data;
+@@ -99,6 +103,10 @@ class GoZenVideo : public Resource {
+ 		if (debug)
+ 			UtilityFunctions::print("GoZenVideo: ", message, ".");
+ 	}
++	bool _open_decoder(const AVCodec* codec, bool hw = false);
++	bool _open_hwaccel(const AVCodec* codec, AVHWDeviceType type);
++	bool _hw_download();
++
+ 	inline bool _log_err(String message) {
+ 		UtilityFunctions::printerr("GoZenVideo: ", message, "!");
+ 		return false;
+@@ -126,6 +134,12 @@ class GoZenVideo : public Resource {
+ 	void set_headers(const String& headers_str) { headers = headers_str; }
+ 	String get_headers() const { return headers; }
+ 
++	// Before open(): the size the video is shown at. The Jetson's hardware decoder then scales its frames down to fit
++	// it (keeping the aspect) and hands them over as NV12, so a smaller window copies and uploads fewer pixels.
++	inline void set_target_size(const Vector2i& size) { target_size = size; }
++	inline Vector2i get_target_size() const { return target_size; }
++	inline bool is_nv12() const { return nv12; }
++
+ 	inline void set_sws_flag_bilinear() { sws_flag = SWS_BILINEAR; }
+ 	inline void set_sws_flag_bicubic() { sws_flag = SWS_BICUBIC; }
+ 
