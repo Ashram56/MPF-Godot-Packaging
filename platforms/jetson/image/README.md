@@ -2,9 +2,9 @@
 
 How to build the minimal Xavier NX devkit image (`jetson-xavier-nx-l4t35.6.4-sd.img.xz`) and how to flash it to an
 SD card or to an NVMe SSD, from Windows through WSL2 (usbipd) or from a native Linux host. Every problem we hit
-on the way and its fix is listed in [Fixes](#fixes), and is already built into the scripts.
+on the way and its fix is listed in [Fixes](#fixes), and is already built into the scripts. Setting the board up for MPF and Godot afterwards: [platforms/jetson.md](../../jetson.md).
 
-The scripts live in [`scripts/jetson_image/`](../scripts/jetson_image/):
+The scripts live in this folder, in [`build/`](build/) and [`flash/`](flash/) (paths below are from the repository root):
 
 | Script | What it does |
 |---|---|
@@ -48,7 +48,7 @@ minutes, outbound HTTPS to `developer.download.nvidia.com`, `repo.download.nvidi
 `github.com`. No loop devices, device-mapper or vfat module are needed.
 
 ```bash
-cd scripts/jetson_image/build
+cd platforms/jetson/image/build
 sudo bash build-native.sh                       # everything; output in ./work/out/
 sudo EXTRAS="" bash build-native.sh             # bare image, without video/docker/x11
 sudo WIFI_SSID="MyNet" WIFI_PSK="secret" WIFI_COUNTRY=FR bash build-native.sh   # pre-seeds one Wi-Fi network
@@ -100,7 +100,7 @@ last flashed with JetPack 5 is fine. If the card does not boot, flash the QSPI o
 (see [NVMe](#flash-to-an-nvme-ssd)) up to its first pause, press Ctrl+C, then run `flash/qspi-flash.sh`.
 
 - **Windows:** balenaEtcher, pointed at the `.img.xz` (it decompresses it itself).
-- **Linux:** `sudo bash scripts/jetson_image/flash/sd-flash.sh jetson-xavier-nx-l4t35.6.4-sd.img.xz /dev/sdX`
+- **Linux:** `sudo bash platforms/jetson/image/flash/sd-flash.sh jetson-xavier-nx-l4t35.6.4-sd.img.xz /dev/sdX`
   (checks the sha256, asks for `YES`, unmounts and writes), or by hand:
   `xzcat jetson-xavier-nx-l4t35.6.4-sd.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress`.
 - **WSL:** the same `sd-flash.sh`, once a USB card reader is attached to WSL with usbipd (`usbipd list`, then
@@ -152,13 +152,13 @@ Needs WSL2 Ubuntu with systemd and usbipd-win 4.x (`usbipd --version`).
    `usbipd attach --wsl --busid <id>`.
 3. **WSL, as root:**
    ```bash
-   sudo bash scripts/jetson_image/flash/nvme-deps.sh
+   sudo bash platforms/jetson/image/flash/nvme-deps.sh
    ```
    It installs the host packages, loads the USB drivers and, if WSL is not running systemd, turns it on in
    `/etc/wsl.conf`. In that case run `wsl --shutdown` in PowerShell, reopen WSL and re-attach the board.
 4. **WSL, the guided flash:**
    ```bash
-   sudo IMG=/mnt/c/Users/<you>/Downloads/jetson-xavier-nx-l4t35.6.4-sd.img.xz bash scripts/jetson_image/flash/nvme-flash.sh
+   sudo IMG=/mnt/c/Users/<you>/Downloads/jetson-xavier-nx-l4t35.6.4-sd.img.xz bash platforms/jetson/image/flash/nvme-flash.sh
    ```
    `IMG` can also be the `.part0` of the split image or a raw `.img`. The work folder is `~/jetson-nvme` of the
    user who ran sudo (`WORKDIR=` to change it); keep it on the Linux filesystem. What it does:
@@ -197,8 +197,8 @@ Logs, in the work folder: `flash-A.log` and `flash-B.log` (image generation), `f
 Same scripts, same command, without the usbipd part:
 
 ```bash
-sudo bash scripts/jetson_image/flash/nvme-deps.sh
-sudo IMG=/path/to/jetson-xavier-nx-l4t35.6.4-sd.img.xz bash scripts/jetson_image/flash/nvme-flash.sh
+sudo bash platforms/jetson/image/flash/nvme-deps.sh
+sudo IMG=/path/to/jetson-xavier-nx-l4t35.6.4-sd.img.xz bash platforms/jetson/image/flash/nvme-flash.sh
 ```
 
 A native Ubuntu kernel has `rndis_host` and an NFS server, so step 5 flashes both the QSPI and the NVMe over the
@@ -229,7 +229,7 @@ startx                                        # from the console as jetson
 sudo apt-mark hold 'nvidia-l4t-*'             # stay on 35.6.4 (see Notes)
 ```
 
-Then bring up the game's hardware video decoding with [jetson.md](jetson.md#xavier-nx-checklist).
+Then install MPF, Godot and the hardware video decoder with the Linux one line: [platforms/jetson.md](../../jetson.md#install-order).
 
 ## Fixes
 

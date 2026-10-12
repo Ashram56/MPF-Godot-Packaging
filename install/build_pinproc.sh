@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds libpinproc and pypinproc (the P-ROC driver library and its Python module) and installs pypinproc
-# into a Python environment. Linux and macOS. Only needed for `run.py --hw proc` on the real machine: MPF has
+# into a Python environment. Linux and macOS. Only needed to drive a real machine through a P-ROC: MPF has
 # no pypinproc for Linux and its macOS one is an old Intel-only build (fixes/mpf/pinproc-linux-macos.md).
 #
 #   install/build_pinproc.sh                       # into .venv (run python -m mpf_godot setup first)
@@ -12,7 +12,7 @@
 # Safe to re-run: nothing is built when the Python environment can already `import pinproc` (--force rebuilds).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Pinned sources. libpinproc: the default (dev) branch of the upstream repo. pypinproc: the Python 3 port
 # that MPF uses (preble/pypinproc is Python 2 only).

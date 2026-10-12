@@ -15,6 +15,7 @@ Monitor too. What it does about each platform's traps (fixes/, platforms/):
 - Linux without a display: Godot under Xvfb (xvfb-run); Godot's --headless draws nothing;
 - Linux on a real X display: X's screen saver and DPMS off for the session (a cabinet's players touch no mouse);
 - Linux with 4+ cores: Godot's main thread gets a core of its own (MPF_GODOT_PIN=0 turns it off);
+- a project never opened in Godot is imported first (else GMC's classes are not found);
 - --no-render-thread: Godot draws on its main thread, should a GPU driver misbehave with the separate one.
 """
 import argparse
@@ -192,6 +193,21 @@ def keep_screen_on():
         subprocess.run(["xset", "s", "off", "-dpms"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def import_project(game, quiet=False):
+    """Godot's import of a project that has none yet (no .godot/ class cache): without it GMC's scripts fail with
+    'Could not find type "MPFDisplay"' and the MPF autoload does not start. Two passes: the first can report the
+    add-on's icons as missing, the second is clean (fixes/godot/import-before-first-run.md)."""
+    if os.path.exists(os.path.join(game, ".godot", "global_script_class_cache.cfg")):
+        return False
+    exe = tc.godot_path()
+    for _ in range(2):
+        cmd = [exe, "--headless", "--path", game, "--import"]
+        if not quiet:
+            print("   $ " + " ".join(cmd), flush=True)
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=900)
+    return True
+
+
 def run(game, *, configs="config", monitor=False, seconds=None, text_ui=False, godot_args=(), mpf_args=(),
         virtual_display=None, render_thread=True, timeout=120):
     """Godot, then MPF (and MPF Monitor); returns MPF's exit code. Everything is stopped on the way out."""
@@ -201,6 +217,8 @@ def run(game, *, configs="config", monitor=False, seconds=None, text_ui=False, g
     logs = os.path.join(game, "logs")
     os.makedirs(logs, exist_ok=True)
     godot_log = os.path.join(logs, "godot.log")
+    if import_project(game):
+        print("Imported the Godot project (first run)", flush=True)
     if port_in_use(tc.BCP_PORT):
         raise SystemExit("port {} is already taken: is another Godot/GMC running?".format(tc.BCP_PORT))
     if virtual_display is None:

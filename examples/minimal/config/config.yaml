@@ -1,0 +1,26 @@
+#config_version=6
+# The smallest MPF machine for a smoke test: virtual hardware, one start button, one trough switch.
+hardware:
+  platform: virtual
+
+switches:
+  s_start:
+    number: 1
+    tags: start
+  s_trough_1:
+    number: 2
+
+coils:
+  c_trough_eject:
+    number: 1
+
+ball_devices:
+  bd_trough:
+    ball_switches: s_trough_1
+    eject_coil: c_trough_eject
+    tags: trough, home, drain
+
+playfields:
+  playfield:
+    default_source_device: bd_trough
+    tags: default

@@ -232,7 +232,7 @@ function Test-VcRuntime {
 
 try {
     if (-not $OnWindows) {
-        if (-not $DryRun) { throw 'this script is for Windows (macOS and Linux: the install_prereqs_*.sh scripts)' }
+        if (-not $DryRun) { throw 'this script is for Windows (macOS and Linux: install_linux.sh and install_macos.sh)' }
         Write-Note 'not Windows: showing the plan only'
     }
     $winget = $null

@@ -129,7 +129,7 @@ root() { run ${SUDO[@]+"${SUDO[@]}"} "$@"; }
 
 # ------------------------------------------------------------------ distribution
 
-[ "$(uname -s)" = Linux ] || [ "$DRY" = 1 ] || die "this script is for Linux (macOS: install_prereqs_macos.sh)"
+[ "$(uname -s)" = Linux ] || [ "$DRY" = 1 ] || die "this script is for Linux (macOS: install_macos.sh)"
 [ -r "$OS_RELEASE" ] || die "cannot read $OS_RELEASE: unknown distribution"
 # shellcheck disable=SC1090
 DISTRO_ID="$(. "$OS_RELEASE"; echo "${ID:-}")"

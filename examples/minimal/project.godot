@@ -1,0 +1,24 @@
+; The smallest MPF + GMC game: a smoke test for the toolchain (tests/test_smoke.py) and a starting point.
+; `python -m mpf_godot addons examples/minimal` puts the patched GMC in addons/; `python -m mpf_godot run examples/minimal` starts it.
+config_version=5
+
+[application]
+config/name="MPF Godot minimal"
+run/main_scene="res://slides/window.tscn"
+config/features=PackedStringArray("4.6", "Mobile")
+
+[autoload]
+MPF="*res://addons/mpf-gmc/mpf_gmc.gd"
+
+[display]
+window/size/viewport_width=128
+window/size/viewport_height=32
+window/size/window_width_override=1024
+window/size/window_height_override=256
+window/stretch/mode="viewport"
+
+[editor_plugins]
+enabled=PackedStringArray("res://addons/mpf-gmc/plugin.cfg")
+
+[rendering]
+renderer/rendering_method="mobile"

@@ -10,7 +10,7 @@ macos.release = "libnative_video.macos.release.dylib"
 
 ; Windows — Media Foundation backend, cross-compiled with Zig's bundled
 ; mingw. No "lib" prefix, matching the extension's own build output.
-; Project build (M7-B10/B11): DLLs rebuilt from upstream v0.3.1 + gdzig heap.zig fix (see docs/qa/native_video_debug_report.md).
+; DLLs rebuilt from upstream v0.3.1 with the gdzig heap fix (fixes/native-video/gdzig-heap-overrun.md, build/native_video/).
 windows.debug.x86_64 = "native_video.windows.debug.x86_64.dll"
 windows.release.x86_64 = "native_video.windows.release.x86_64.dll"
 windows.debug.x86_32 = "native_video.windows.debug.x86_32.dll"

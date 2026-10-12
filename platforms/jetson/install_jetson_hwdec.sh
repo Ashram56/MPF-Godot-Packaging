@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # NVIDIA Jetson (JetPack 5 or 6): installs libnvmpi, which GDE GoZen's FFmpeg loads to decode videos on
 # the hardware decoder (addons/gde_gozen/README.md), and everything it and Godot need on the Jetson, so it
-# also works from a minimal or stripped root image. Safe to re-run. install_prereqs_linux.sh runs it by itself on
+# also works from a minimal or stripped root image. Safe to re-run. install/install_linux.sh runs it by itself on
 # a Jetson (MPF_GODOT_HWDEC=0 or --no-jetson skips it); on its own:
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/Ashram56/MPF-Godot-Packaging/main/platforms/jetson/install_jetson_hwdec.sh)

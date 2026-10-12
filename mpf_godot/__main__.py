@@ -40,6 +40,9 @@ def addons(argv):
             fsutil.copy_tree(src, dst)
     if not args.dry_run:
         print("   GMC: " + gmc_patch.patch(os.path.join(dest, "mpf-gmc"), quiet=True))
+        if os.path.exists(os.path.join(args.game, "project.godot")) and os.path.exists(tc.godot_path()):
+            from mpf_godot import launcher
+            launcher.import_project(os.path.abspath(args.game))
     print("The game's project.godot needs GMC enabled: [autoload] MPF=\"*res://addons/mpf-gmc/mpf_gmc.gd\" and "
           "[editor_plugins] enabled=PackedStringArray(\"res://addons/mpf-gmc/plugin.cfg\") (examples/minimal/).")
     return 0
