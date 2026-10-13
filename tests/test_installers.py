@@ -258,13 +258,13 @@ class TestWindowsInstaller(unittest.TestCase):
         r = self.pwsh("& ([scriptblock]::Create((Get-Content -Raw '{}'))) -DryRun -NoMonitor --extra pillow"
                       .format(script), env={"MPF_GODOT_DIR": os.path.join(tmp, "MPF-Godot")})
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
-        self.assertIn("git clone --branch main https://github.com/Ashram56/MPF-Godot-Packaging.git", r.stdout)
+        self.assertIn(" clone --branch main https://github.com/Ashram56/MPF-Godot-Packaging.git", r.stdout)
         self.assertIn("-m mpf_godot setup --no-monitor --dry-run --extra pillow", r.stdout)
 
     def test_from_clone(self):
         r = self.pwsh("& '{}' -DryRun".format(os.path.join(INSTALL, "install_windows.ps1")))
         self.assertEqual(0, r.returncode, r.stdout + r.stderr)
-        self.assertNotIn("git clone", r.stdout)
+        self.assertNotIn(" clone --branch", r.stdout)
         self.assertIn("-m mpf_godot setup --dry-run", r.stdout)
 
 

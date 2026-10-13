@@ -108,8 +108,9 @@ connects to GMC. CI (`.github/workflows/test.yml`) runs on pushes to `main` only
 
 Tested so far (2026-10-12): the Linux one line on Ubuntu 24.04 x86_64, both with Python 3.11 present and in a fresh
 Docker container as a sudo user, where the deadsnakes PPA was unreachable and Python 3.11 came from uv; the smoke
-test on both; the Windows installer's one-line form in dry run with pwsh 7.4 on Linux. macOS and Windows real runs
-are not done yet. Jetson results are in [platforms/jetson.md](platforms/jetson.md).
+test on both; the Windows installer's one-line form in dry run with pwsh 7.4 on Linux. The first CI run on `main`
+installed the whole toolchain from a clone on GitHub's Windows (x86_64) and macOS (arm64) runners; a game has not
+been played on a real Windows or macOS computer yet. Jetson results are in [platforms/jetson.md](platforms/jetson.md).
 
 ## Upstream
 
