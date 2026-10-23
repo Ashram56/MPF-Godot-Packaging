@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply /boot/firmware/mpf-network.txt (Wi-Fi, SSH key)
+Before=network-pre.target wpa_supplicant@wlan0.service ssh.service
+After=local-fs.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/mpf-netconfig
+ExecStart=/usr/local/bin/mpf_netconfig.py apply
+
+[Install]
+WantedBy=multi-user.target

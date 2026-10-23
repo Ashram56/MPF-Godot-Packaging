@@ -15,6 +15,7 @@
 #       x11    : Xorg (modesetting), startx, openbox, xrandr, Mesa Vulkan (v3dv) and GL drivers
 #       mpf    : MPF + Godot + GMC installed by install/install_linux.sh from this repository into
 #                /home/pi/MPF-Godot; automatic login on tty1 and startx (needs video and x11, added when missing)
+#   (Wi-Fi/SSH: edit mpf-network.txt on the boot partition, or use http://<ip>:8080; see common/netconfig/README.md)
 #   ROOT_PAD_MB=1024           free space left in the root filesystem of the image (grown at first boot anyway)
 # Output: $WORK/out/rpi4-debian13-sd.img.xz and .sha256
 
@@ -149,6 +150,17 @@ mkdir -p "$R/etc/wpa_supplicant"
 chmod 600 "$WPA"
 in_chroot "systemctl enable resizerootfs.service systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
 in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
+
+# Wi-Fi / SSH setup shared with the other images (common/netconfig): text file on the boot partition read at
+# every boot, setup web page on port 8080, access point "MPF-Setup" when no network comes up.
+in_chroot "apt-get install -y -qq python3 hostapd dnsmasq-base"
+in_chroot "systemctl disable hostapd >/dev/null 2>&1 || true; systemctl mask hostapd >/dev/null 2>&1 || true"
+NC="$REPO_ROOT/common/netconfig"
+install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
+install -m 644 "$NC"/mpf-netconfig-*.service "$R/etc/systemd/system/"
+install -m 644 "$NC/mpf-network.txt.template" "$FWDIR/mpf-network.txt"
+printf 'MPF_NETCONFIG_FILE=/boot/firmware/mpf-network.txt\nMPF_USER=pi\nMPF_WLAN=wlan0\n' > "$R/etc/default/mpf-netconfig"
+in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service >/dev/null 2>&1"
 
 in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
 

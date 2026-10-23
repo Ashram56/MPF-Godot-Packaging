@@ -13,6 +13,12 @@ but simpler: no vendor BSP, and no loop device is needed (FAT via mtools, ext4 v
 | First boot | root partition grows to fill the card; unique SSH host keys |
 | Extras (default on) | `video` GStreamer + FFmpeg (software decode); `x11` Xorg + openbox + Mesa Vulkan (v3dv); `mpf` MPF, Monitor, Godot, GMC via `install/install_linux.sh` in `/home/pi/MPF-Godot`, autologin + `startx` on tty1 |
 
+## Wi-Fi and SSH
+
+Edit `mpf-network.txt` on the FAT boot partition (visible from Windows/macOS after flashing), or open `http://<address>:8080`
+(login: `pi` and its password). With no network after 90 s the Pi opens a Wi-Fi access point `MPF-Setup` (password `mpf-setup`),
+page at `http://192.168.4.1:8080`. Details: [common/netconfig](../../../common/netconfig/README.md). Claude Code is not in the image (install it over SSH).
+
 ## Build (WSL2 Ubuntu or x86_64 Linux, about 15 GB free, 20 to 40 minutes)
 
 ```bash

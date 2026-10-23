@@ -1,0 +1,16 @@
+# MPF network settings, read at every boot. Edit this file from any computer (it sits on the FAT boot partition).
+# After a successful read the Wi-Fi password is erased from this file (it is kept hashed in the system).
+# Lines starting with # are ignored. Leave a value empty to leave that setting alone.
+
+WIFI_SSID=
+WIFI_PSK=
+WIFI_COUNTRY=
+
+# One public SSH key (a line of id_ed25519.pub), added to the user's authorized_keys
+SSH_AUTHORIZED_KEY=
+
+# Set to no to refuse SSH password logins (only keys); yes or empty keeps them
+SSH_PASSWORD_LOGIN=
+
+# Password of the setup web page http://<address>:8080 (empty: the password of the image user)
+WEB_PASSWORD=
