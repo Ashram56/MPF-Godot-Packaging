@@ -236,7 +236,13 @@ XRC
         # The repository's own Linux installer, run as the cabinet user in the chroot (Python 3.11 via uv, MPF,
         # MPF Monitor, Godot linux.arm64, GMC with our fixes).
         mkdir -p "$R/home/pi/MPF-Godot"
-        tar -C "$REPO_ROOT" --exclude=.git --exclude='platforms/*/image/build/work' -cf - . | tar -C "$R/home/pi/MPF-Godot" -xf -
+        # Only the files git tracks (with their local edits): not .cache/ (GoZen build tree), .venv/, toolchain/...
+        if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+            git -C "$REPO_ROOT" ls-files -z | tar -C "$REPO_ROOT" --null -T - -cf - | tar -C "$R/home/pi/MPF-Godot" -xf -
+        else
+            tar -C "$REPO_ROOT" --exclude=.git --exclude=.cache --exclude=.venv --exclude=toolchain \
+                --exclude='platforms/*/image/build/work' -cf - . | tar -C "$R/home/pi/MPF-Godot" -xf -
+        fi
         in_chroot "chown -R pi:pi /home/pi"
         in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
         # sudo cannot work in the chroot (qemu-user binfmt without the C flag ignores setuid), so the installer
