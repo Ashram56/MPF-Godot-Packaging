@@ -309,7 +309,7 @@ XRC
         rm -f "$R/etc/sudoers.d/99-build"
         # Cabinet boot: automatic login on tty1, X started from the login shell
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
-        printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin jetson --noclear %%I \$TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+        printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin jetson --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
         cat >> "$R/home/jetson/.profile" <<'PROF'
 # Start X on the first console (automatic login); remove this to get a plain shell
 if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then exec startx; fi
