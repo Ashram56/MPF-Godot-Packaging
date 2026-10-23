@@ -240,8 +240,9 @@ XRC
         in_chroot "chown -R pi:pi /home/pi"
         in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
         # sudo cannot work in the chroot (qemu-user binfmt without the C flag ignores setuid), so the installer
-        # runs twice: as root for the system packages only, then as pi, where it finds them all in place.
-        in_chroot "cd /home/pi/MPF-Godot && bash install/install_linux.sh --yes --no-setup"
+        # runs twice: as root for the system packages only, then as pi, where it finds them all in place
+        # (--xvfb: the pi pass has no DISPLAY and wants Xvfb, the root pass may inherit one from WSLg).
+        in_chroot "cd /home/pi/MPF-Godot && bash install/install_linux.sh --yes --no-setup --xvfb"
         rm -rf "$R/root/.local" "$R/root/.cache"   # root's copy of uv / Python 3.11, pi gets its own
         in_chroot "su - pi -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
