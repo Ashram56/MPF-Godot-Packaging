@@ -1,6 +1,6 @@
 # Raspberry Pi 4: minimal image
 
-Builds `rpi4-debian13-sd.img.xz`: Debian 13 (trixie) arm64 `minbase` with Debian's own kernel (`linux-image-arm64`)
+Builds `rpi4-debian13-sd.img.xz`: Debian 13 (trixie) arm64 `minbase` with the Raspberry Pi kernel (`linux-image-rpi-v8` from archive.raspberrypi.com, for the V4L2 hardware video decoders)
 and `raspi-firmware`, no desktop, no docs. Counterpart of the Xavier NX image ([platforms/jetson/image](../../jetson/image/README.md)),
 but simpler: no vendor BSP, and no loop device is needed (FAT via mtools, ext4 via `mke2fs -d`).
 
@@ -27,7 +27,7 @@ sudo bash wsl-build.sh        # installs host packages, work folder ~/pi4-build,
 ```
 
 `sudo EXTRAS="" bash wsl-build.sh` gives the bare image. Needs HTTPS/HTTP access to `deb.debian.org`,
-`security.debian.org` and `github.com`.
+`security.debian.org`, `archive.raspberrypi.com` and `github.com`.
 
 Flash the `.img.xz` with Raspberry Pi Imager ("Use custom") or `xzcat img.xz | sudo dd of=/dev/sdX bs=4M status=progress`.
 No hardware video decoder is wired in yet (the Pi 4 has V4L2 H.264/HEVC decoders; future work).

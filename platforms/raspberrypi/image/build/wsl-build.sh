@@ -9,7 +9,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 HOME_DIR="$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)"
 export WORK="${WORK:-$HOME_DIR/pi4-build}"
 apt-get update -qq
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq debootstrap debian-archive-keyring
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq debootstrap debian-archive-keyring gpg curl
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static binfmt-support 2>/dev/null \
     || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user qemu-user-binfmt
 ls /proc/sys/fs/binfmt_misc/ | grep -q aarch64 || { echo "qemu-aarch64 is not registered in binfmt_misc"; exit 1; }

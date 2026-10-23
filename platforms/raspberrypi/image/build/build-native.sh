@@ -72,7 +72,7 @@ mkdir -p "$WORK" "$OUT"
 log "1/6 Host dependencies and arm64 emulation"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    debootstrap debian-archive-keyring curl xz-utils e2fsprogs dosfstools mtools fdisk >/dev/null
+    debootstrap debian-archive-keyring curl gpg xz-utils e2fsprogs dosfstools mtools fdisk >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static binfmt-support >/dev/null 2>&1 \
     || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user qemu-user-binfmt >/dev/null
 mountpoint -q /proc/sys/fs/binfmt_misc || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
@@ -108,12 +108,18 @@ printf 'LABEL=firmware /boot/firmware vfat defaults 0 2\nLABEL=rootfs / ext4 def
 mkdir -p "$R/etc/kernel"
 echo "console=tty1 root=LABEL=rootfs rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 quiet" > "$R/etc/kernel/cmdline"
 
+# Raspberry Pi's own apt repository, for the Raspberry Pi kernel: only it has the V4L2 hardware video decoders of
+# the Pi 4 (bcm2835-codec H.264, rpi-hevc-dec HEVC). Low priority, so Debian packages are never replaced.
+mkdir -p "$R/usr/share/keyrings"
+curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key | gpg --dearmor > "$R/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
+echo "deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] http://archive.raspberrypi.com/debian/ $SUITE main" > "$R/etc/apt/sources.list.d/raspi.list"
+printf 'Package: *\nPin: origin archive.raspberrypi.com\nPin-Priority: 100\n' > "$R/etc/apt/preferences.d/raspi"
 mount_chroot
 in_chroot "apt-get update -qq && apt-get -y -qq upgrade"
 # Kernel, Pi bootloader files and device trees (raspi-firmware fills /boot/firmware), Wi-Fi firmware
 SYSTEM_PKGS="systemd systemd-sysv systemd-timesyncd systemd-resolved dbus udev kmod sudo locales openssh-server
   iproute2 iputils-ping curl nano parted fdisk e2fsprogs openssl less wpasupplicant iw rfkill wireless-regdb
-  linux-image-arm64 raspi-firmware firmware-brcm80211 initramfs-tools"
+  linux-image-rpi-v8 raspi-firmware firmware-brcm80211 initramfs-tools"
 in_chroot "apt-get install -y -qq $SYSTEM_PKGS"
 cat >> "$R/boot/firmware/config.txt" <<'CFG'
 
