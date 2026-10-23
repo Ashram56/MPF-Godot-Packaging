@@ -78,6 +78,7 @@ def add_wifi(ssid, passphrase, country=""):
     os.makedirs(os.path.dirname(WPA), exist_ok=True)
     open(WPA, "w").write(text)
     os.chmod(WPA, 0o600)
+    wifi_up()
     run("systemctl", "restart", f"wpa_supplicant@{WLAN}.service")
 
 
@@ -153,7 +154,14 @@ def authorized(header):
     return pw == fixed if fixed else check_user_password(pw)
 
 
+def wifi_up():
+    """Make the radio usable even when the board is on Ethernet (the Pi keeps Wi-Fi blocked until a country is set)."""
+    run("rfkill", "unblock", "wifi")
+    run("ip", "link", "set", WLAN, "up")
+
+
 def scan():
+    wifi_up()
     r = run("iw", "dev", WLAN, "scan")
     names = sorted({m for m in re.findall(r"SSID: (.+)", r.stdout) if m.strip()})
     return names
