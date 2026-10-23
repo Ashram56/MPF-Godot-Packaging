@@ -1,7 +1,7 @@
 # Raspberry Pi 4: minimal image
 
-Builds `rpi4-debian13-sd.img.xz`: Debian 13 (trixie) arm64 `minbase` with the Raspberry Pi kernel (`linux-image-rpi-v8` from archive.raspberrypi.com, for the V4L2 hardware video decoders)
-and `raspi-firmware`, no desktop, no docs. Counterpart of the Xavier NX image ([platforms/jetson/image](../../jetson/image/README.md)),
+Builds `rpi4-debian13-sd.img.xz`: Debian 13 (trixie) arm64 `minbase` with the Raspberry Pi kernel (`linux-image-rpi-v8`, `raspi-firmware` and `firmware-brcm80211` from archive.raspberrypi.com, for the V4L2 hardware video decoders)
+no desktop, no docs. Counterpart of the Xavier NX image ([platforms/jetson/image](../../jetson/image/README.md)),
 but simpler: no vendor BSP, and no loop device is needed (FAT via mtools, ext4 via `mke2fs -d`).
 
 **Status: scripts written, NOT yet run or booted on a board.** Expect a first round of fixes.

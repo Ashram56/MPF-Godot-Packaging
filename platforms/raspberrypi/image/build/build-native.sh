@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Build a minimal Raspberry Pi 4 SD card image (Debian 13 "trixie" arm64, Debian's own Raspberry Pi kernel and
-# firmware packages) natively, without podman/docker and without loop devices. Same idea as the Jetson Xavier NX
-# image (platforms/jetson/image), but much simpler: no vendor BSP, the Pi boots a stock Debian arm64 kernel.
+# Build a minimal Raspberry Pi 4 SD card image (Debian 13 "trixie" arm64 userland, Raspberry Pi kernel, boot firmware
+# and Wi-Fi firmware from archive.raspberrypi.com, the same packages as Raspberry Pi OS) natively, without
+# podman/docker and without loop devices. Same idea as the Jetson Xavier NX image (platforms/jetson/image), but simpler.
 #
 # Run as root on an x86_64 Ubuntu 22.04+ host (WSL2 is fine) with ~15 GB free disk:
 #   sudo ./build-native.sh            (or sudo bash wsl-build.sh, which also installs the host packages)
@@ -25,6 +25,8 @@ KIT="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-$PWD/work}"
 SUITE=trixie
 MIRROR="http://deb.debian.org/debian"
+RPI_MIRROR="http://archive.raspberrypi.com/debian"
+RPI_KEY_FPR=CF8A1AF502A2AA2D763BAE7E82B129927FA3303E   # Raspberry Pi Archive Signing Key
 IMG_NAME="rpi4-debian13-sd.img"
 PI_PASSWORD="${PI_PASSWORD:-raspberry}"
 EXTRAS="${EXTRAS-video x11 mpf}"
@@ -43,9 +45,11 @@ mount_chroot() {
     mkdir -p "$R/boot/firmware" "$FWDIR"
     mountpoint -q "$R/proc" || mount -t proc proc "$R/proc"
     mountpoint -q "$R/sys" || mount -t sysfs sys "$R/sys"
-    mountpoint -q "$R/dev" || { mount -o bind /dev "$R/dev"; mount --make-rslave "$R/dev"; }   # rslave: no mount propagation back (WSL2)
-    mountpoint -q "$R/dev/pts" || mount -o bind /dev/pts "$R/dev/pts"
-    mountpoint -q "$R/boot/firmware" || mount -o bind "$FWDIR" "$R/boot/firmware"
+    # Slave bind mounts: / is shared under WSL/systemd, and a shared bind of /dev would propagate the
+    # dev/pts mount back onto the host's /dev/pts (and make it "busy" at unmount time).
+    mountpoint -q "$R/dev" || { mount -o bind /dev "$R/dev"; mount --make-rslave "$R/dev"; }
+    mountpoint -q "$R/dev/pts" || { mount -o bind /dev/pts "$R/dev/pts"; mount --make-rslave "$R/dev/pts"; }
+    mountpoint -q "$R/boot/firmware" || { mount -o bind "$FWDIR" "$R/boot/firmware"; mount --make-rslave "$R/boot/firmware"; }
     if [ -L "$R/etc/resolv.conf" ] || [ -e "$R/etc/resolv.conf" ]; then
         mv "$R/etc/resolv.conf" "$R/etc/resolv.conf.build-bak"
     fi
@@ -56,7 +60,7 @@ mount_chroot() {
 umount_chroot() {
     rm -f "$R/usr/sbin/policy-rc.d"
     for m in boot/firmware dev/pts dev sys proc; do
-        if mountpoint -q "$R/$m"; then umount "$R/$m" 2>/dev/null || umount -l "$R/$m"; fi
+        mountpoint -q "$R/$m" && { umount "$R/$m" || umount -l "$R/$m"; }
     done
     if [ -e "$R/etc/resolv.conf.build-bak" ] || [ -L "$R/etc/resolv.conf.build-bak" ]; then
         mv -f "$R/etc/resolv.conf.build-bak" "$R/etc/resolv.conf"
@@ -72,7 +76,7 @@ mkdir -p "$WORK" "$OUT"
 log "1/6 Host dependencies and arm64 emulation"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    debootstrap debian-archive-keyring curl gpg xz-utils e2fsprogs dosfstools mtools fdisk >/dev/null
+    debootstrap debian-archive-keyring curl gnupg xz-utils e2fsprogs dosfstools mtools fdisk >/dev/null
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static binfmt-support >/dev/null 2>&1 \
     || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user qemu-user-binfmt >/dev/null
 mountpoint -q /proc/sys/fs/binfmt_misc || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
@@ -91,6 +95,31 @@ deb $MIRROR $SUITE-updates main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security $SUITE-security main contrib non-free non-free-firmware
 APT
 rm -f "$R/etc/apt/sources.list.d/debian.sources"
+# Raspberry Pi repository, only for the kernel, the boot firmware and the Wi-Fi firmware (pinned above Debian);
+# everything else stays Debian. The key comes from the raspberrypi-archive-keyring package (fetched over HTTPS,
+# fingerprint checked): the standalone raspberrypi.gpg.key still carries SHA-1 bindings, which apt's sqv rejects.
+# Installing the package below keeps it up to date.
+mkdir -p "$R/usr/share/keyrings" "$WORK/keyring"
+KEYRING_DEB="$(curl -fsSL "${RPI_MIRROR/http:/https:}/dists/$SUITE/main/binary-arm64/Packages.gz" | gzip -dc \
+    | awk '/^Package: raspberrypi-archive-keyring$/ {p=1} p && /^Filename:/ {print $2; p=0}')"
+KEYRING_DEB="${KEYRING_DEB%%$'\n'*}"   # first entry; no early exit in the pipe (pipefail + SIGPIPE)
+[ -n "$KEYRING_DEB" ] || { echo "raspberrypi-archive-keyring not found in $RPI_MIRROR"; exit 1; }
+curl -fsSL "${RPI_MIRROR/http:/https:}/$KEYRING_DEB" -o "$WORK/keyring/keyring.deb"
+dpkg-deb -x "$WORK/keyring/keyring.deb" "$WORK/keyring/x"
+gpg --show-keys --with-colons "$WORK/keyring/x/usr/share/keyrings/raspberrypi-archive-keyring.pgp" | grep -q "^fpr:*$RPI_KEY_FPR:" \
+    || { echo "unexpected Raspberry Pi archive key"; exit 1; }
+install -m 644 "$WORK/keyring/x/usr/share/keyrings/raspberrypi-archive-keyring.pgp" "$R/usr/share/keyrings/"
+rm -rf "$WORK/keyring" "$R/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
+echo "deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.pgp] $RPI_MIRROR $SUITE main" > "$R/etc/apt/sources.list.d/raspi.list"
+cat > "$R/etc/apt/preferences.d/raspi" <<'PIN'
+Package: raspi-firmware firmware-brcm80211 raspberrypi-archive-keyring linux-image-* linux-headers-* linux-kbuild-* linux-base-rpi-*
+Pin: origin archive.raspberrypi.com
+Pin-Priority: 990
+
+Package: *
+Pin: origin archive.raspberrypi.com
+Pin-Priority: 100
+PIN
 cat > "$R/etc/dpkg/dpkg.cfg.d/excludes" <<'DPKG'
 path-exclude=/usr/share/doc/*
 path-include=/usr/share/doc/*/copyright
@@ -104,31 +133,39 @@ printf 'APT::Install-Recommends "false";\nAPT::Install-Suggests "false";\n' > "$
 echo mpf-pi4 > "$R/etc/hostname"
 printf '127.0.0.1\tlocalhost\n127.0.1.1\tmpf-pi4\n::1\tlocalhost ip6-localhost ip6-loopback\n' > "$R/etc/hosts"
 printf 'LABEL=firmware /boot/firmware vfat defaults 0 2\nLABEL=rootfs / ext4 defaults,noatime 0 1\n' > "$R/etc/fstab"
-# Kernel command line used by raspi-firmware to write cmdline.txt (eth0/wlan0 names, console on the screen)
-mkdir -p "$R/etc/kernel"
-echo "console=tty1 root=LABEL=rootfs rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 quiet" > "$R/etc/kernel/cmdline"
 
-# Raspberry Pi's own apt repository, for the Raspberry Pi kernel: only it has the V4L2 hardware video decoders of
-# the Pi 4 (bcm2835-codec H.264, rpi-hevc-dec HEVC). Low priority, so Debian packages are never replaced.
-mkdir -p "$R/usr/share/keyrings"
-curl -fsSL https://archive.raspberrypi.com/debian/raspberrypi.gpg.key | gpg --dearmor > "$R/usr/share/keyrings/raspberrypi-archive-keyring.gpg"
-echo "deb [signed-by=/usr/share/keyrings/raspberrypi-archive-keyring.gpg] http://archive.raspberrypi.com/debian/ $SUITE main" > "$R/etc/apt/sources.list.d/raspi.list"
-printf 'Package: *\nPin: origin archive.raspberrypi.com\nPin-Priority: 100\n' > "$R/etc/apt/preferences.d/raspi"
 mount_chroot
 in_chroot "apt-get update -qq && apt-get -y -qq upgrade"
 # Kernel, Pi bootloader files and device trees (raspi-firmware fills /boot/firmware), Wi-Fi firmware
 SYSTEM_PKGS="systemd systemd-sysv systemd-timesyncd systemd-resolved dbus udev kmod sudo locales openssh-server
   iproute2 iputils-ping curl nano parted fdisk e2fsprogs openssl less wpasupplicant iw rfkill wireless-regdb
-  linux-image-rpi-v8 raspi-firmware firmware-brcm80211 initramfs-tools"
-in_chroot "apt-get install -y -qq $SYSTEM_PKGS"
-cat >> "$R/boot/firmware/config.txt" <<'CFG'
-
-# MPF / Godot image
+  initramfs-tools rsync raspberrypi-archive-keyring"
+in_chroot "apt-get install -y -qq $(echo $SYSTEM_PKGS)"   # one line: in_chroot runs bash -c, a newline would split the command
+# Raspberry Pi kernel (v8 = Pi 3/4/400/CM4) and firmware: raspi-firmware copies start4.elf & co, kernel8.img,
+# initramfs8, the device trees and overlays into /boot/firmware on every update. It leaves config.txt and
+# cmdline.txt alone: they are ours, below.
+in_chroot "apt-get install -y -qq raspi-firmware linux-image-rpi-v8 firmware-brcm80211"
+in_chroot "apt-cache policy linux-image-rpi-v8 raspi-firmware firmware-brcm80211 | grep -B1 -A1 Installed"
+cat > "$FWDIR/config.txt" <<'CFG'
+# Raspberry Pi 4 boot configuration (https://www.raspberrypi.com/documentation/computers/config_txt.html)
 arm_64bit=1
+kernel=kernel8.img
+auto_initramfs=1
+arm_boost=1
+
+# KMS graphics driver (Mesa v3d/v3dv), both HDMI outputs
 dtoverlay=vc4-kms-v3d
 max_framebuffers=2
+disable_fw_kms_setup=1
 disable_overscan=1
+display_auto_detect=1
+
+dtparam=audio=on
 CFG
+echo "console=serial0,115200 console=tty1 root=LABEL=rootfs rootfstype=ext4 fsck.repair=yes rootwait net.ifnames=0 quiet" > "$FWDIR/cmdline.txt"
+for f in kernel8.img initramfs8 start4.elf fixup4.dat bcm2711-rpi-4-b.dtb overlays/vc4-kms-v3d.dtbo; do
+    [ -s "$FWDIR/$f" ] || { echo "missing /boot/firmware/$f"; ls -la "$FWDIR"; exit 1; }
+done
 
 install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
 install -m 644 "$KIT/files/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
@@ -202,9 +239,11 @@ XRC
         tar -C "$REPO_ROOT" --exclude=.git --exclude='platforms/*/image/build/work' -cf - . | tar -C "$R/home/pi/MPF-Godot" -xf -
         in_chroot "chown -R pi:pi /home/pi"
         in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
-        printf 'pi ALL=(ALL) NOPASSWD:ALL\n' > "$R/etc/sudoers.d/99-build"; chmod 440 "$R/etc/sudoers.d/99-build"
+        # sudo cannot work in the chroot (qemu-user binfmt without the C flag ignores setuid), so the installer
+        # runs twice: as root for the system packages only, then as pi, where it finds them all in place.
+        in_chroot "cd /home/pi/MPF-Godot && bash install/install_linux.sh --yes --no-setup"
+        rm -rf "$R/root/.local" "$R/root/.cache"   # root's copy of uv / Python 3.11, pi gets its own
         in_chroot "su - pi -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
-        rm -f "$R/etc/sudoers.d/99-build"
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
         printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin pi --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
         cat >> "$R/home/pi/.profile" <<'PROF'
