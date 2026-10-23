@@ -329,9 +329,10 @@ XRC
         tar -C "$REPO_ROOT" --exclude=.git --exclude='platforms/jetson/image/build/work' -cf - . | tar -C "$R/home/jetson/MPF-Godot" -xf -
         in_chroot "chown -R jetson:jetson /home/jetson/MPF-Godot"
         in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
-        printf 'jetson ALL=(ALL) NOPASSWD:ALL\n' > "$R/etc/sudoers.d/99-build"; chmod 440 "$R/etc/sudoers.d/99-build"
-        in_chroot "su - jetson -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
-        rm -f "$R/etc/sudoers.d/99-build"
+        # As root with jetson's environment: sudo cannot work in the chroot (qemu-aarch64 is registered without
+        # the C flag, so setuid is ignored: "effective uid is not 0")
+        in_chroot "cd /home/jetson/MPF-Godot && HOME=/home/jetson USER=jetson LOGNAME=jetson SUDO_USER=jetson MPF_GODOT_DIR=/home/jetson/MPF-Godot bash install/install_linux.sh --yes"
+        in_chroot "chown -R jetson:jetson /home/jetson"
         # Cabinet boot: automatic login on tty1, X started from the login shell
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
         printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin jetson --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
