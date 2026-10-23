@@ -78,6 +78,10 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static binfmt-support >/dev/null 2>&1 \
     || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user qemu-user-binfmt >/dev/null
 mountpoint -q /proc/sys/fs/binfmt_misc || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
+# NVIDIA's apply_binaries.sh looks for qemu-aarch64-static; Ubuntu 25.04+ ships the (static) binary as qemu-aarch64
+if ! command -v qemu-aarch64-static >/dev/null 2>&1 && command -v qemu-aarch64 >/dev/null 2>&1; then
+    ln -s "$(command -v qemu-aarch64)" /usr/local/bin/qemu-aarch64-static
+fi
 if [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
     update-binfmts --enable qemu-aarch64 2>/dev/null || cat /usr/lib/binfmt.d/qemu-aarch64.conf > /proc/sys/fs/binfmt_misc/register
 fi
