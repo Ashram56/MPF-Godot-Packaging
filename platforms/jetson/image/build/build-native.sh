@@ -191,6 +191,19 @@ in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 in_chroot "id jetson >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio -p \"\$(openssl passwd -6 '$JETSON_PASSWORD')\" -s /bin/bash jetson"
 printf 'if [ -d "/usr/local/cuda/bin" ] ; then\n  PATH="/usr/local/cuda/bin:$PATH"\nfi\n' >> "$R/home/jetson/.profile"
 
+# Wi-Fi / SSH setup shared with the other images (common/netconfig): text file read at every boot, setup web
+# page on port 8080, access point "MPF-Setup" when no network comes up. The file is /etc/mpf-network.txt: the
+# root partition is ext4 (Windows and macOS cannot mount it), so edit it over SSH, the web page, or WSL.
+in_chroot "apt-get install -y -qq python3 hostapd dnsmasq-base"
+in_chroot "systemctl disable hostapd >/dev/null 2>&1 || true; systemctl mask hostapd >/dev/null 2>&1 || true"
+NC="$KIT/../../../../common/netconfig"
+install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
+install -m 644 "$NC"/mpf-netconfig-*.service "$R/etc/systemd/system/"
+install -m 600 "$NC/mpf-network.txt.template" "$R/etc/mpf-network.txt"
+printf 'MPF_NETCONFIG_FILE=/etc/mpf-network.txt\nMPF_USER=jetson\nMPF_WLAN=wlan0\n' > "$R/etc/default/mpf-netconfig"
+[ -n "${WIFI_SSID:-}" ] && printf 'WIFI_SSID=%s\nWIFI_PSK=%s\nWIFI_COUNTRY=%s\n' "$WIFI_SSID" "${WIFI_PSK:-}" "${WIFI_COUNTRY:-}" > "$R/etc/mpf-network.txt"
+in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service >/dev/null 2>&1"
+
 in_chroot "apt-get clean"
 rm -rf "$R"/var/lib/apt/lists/* "$R"/root/.bash_history
 umount_chroot
