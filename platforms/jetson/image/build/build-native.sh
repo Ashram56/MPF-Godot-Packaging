@@ -71,9 +71,12 @@ mkdir -p "$WORK" "$OUT"
 log "1/7 Host dependencies and arm64 emulation"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    debootstrap qemu-user-static binfmt-support curl patch bzip2 xz-utils lz4 \
+    debootstrap curl patch bzip2 xz-utils lz4 \
     libxml2-utils python3 python3-yaml python-is-python3 gdisk parted cpio binutils \
     dosfstools mtools e2fsprogs openssh-client >/dev/null
+# arm64 emulation: qemu-user-static up to Ubuntu 24.04; from 25.04 it is qemu-user + qemu-user-binfmt
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static binfmt-support >/dev/null 2>&1 \
+    || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user qemu-user-binfmt >/dev/null
 mountpoint -q /proc/sys/fs/binfmt_misc || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
 if [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
     update-binfmts --enable qemu-aarch64 2>/dev/null || cat /usr/lib/binfmt.d/qemu-aarch64.conf > /proc/sys/fs/binfmt_misc/register
