@@ -32,8 +32,10 @@ fi
   --enable-decoder=h264,hevc,mpeg4,vp8,vp9,theora,aac,mp3,mp3float,opus,vorbis,flac,pcm_s16le \
   --enable-parser=h264,hevc,mpeg4video,aac,vp8,vp9,opus,vorbis,mpegaudio \
   --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb \
-  --enable-nvmpi --enable-decoder=h264_nvmpi,hevc_nvmpi,mpeg4_nvmpi,vp8_nvmpi,vp9_nvmpi
+  --enable-nvmpi --enable-decoder=h264_nvmpi,hevc_nvmpi,mpeg4_nvmpi,vp8_nvmpi,vp9_nvmpi \
+  --enable-v4l2-m2m --enable-decoder=h264_v4l2m2m,hevc_v4l2m2m,mpeg4_v4l2m2m,vp8_v4l2m2m,vp9_v4l2m2m
 grep -q "CONFIG_H264_NVMPI_DECODER 1" config_components.h || { echo "nvmpi decoder not enabled"; exit 1; }
+grep -q "CONFIG_H264_V4L2M2M_DECODER 1" config_components.h || { echo "v4l2m2m decoder not enabled"; exit 1; }
 make -j"$(nproc)" >/dev/null
 make install >/dev/null
 cd /src

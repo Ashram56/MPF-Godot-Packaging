@@ -67,6 +67,7 @@ Upstream tracker: https://codeberg.org/gozen/gde_gozen/issues
 | [Videos decode on the CPU on Windows: GPU decoding through Direct3D 11 Video or DXVA2](gde-gozen/d3d11va-dxva2-windows.md) | improvement | Windows 10/11 x86_64 (MinGW-w64 cross build); NVIDIA, AMD a… | the committed `addons/gde_gozen/bin/libgozen.windows.template_release.x86_64.dll`, copied… | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
 | [Several videos at once fall behind: frames decoded on the main thread, just in time](gde-gozen/decode-ahead.md) | improvement | all (GDScript); measured on Jetson Xavier NX, L4T R35.6.4 | `python -m mpf_godot addons GAME --video` | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
 | [Videos decode on the CPU on a Jetson: GoZen never asks FFmpeg for the hardware decoder](gde-gozen/hwdec-nvmpi-first.md) | improvement | Linux arm64 on a Jetson: AGX Orin, L4T R36.4.3 (JetPack 6.2… | the committed binaries in `addons/gde_gozen/bin/` (rebuilt by `build/gozen/build_gozen.sh… | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
+| [Videos decode on the CPU on a Raspberry Pi 4: GoZen only knows the Jetson's hardware decoder](gde-gozen/hwdec-v4l2m2m.md) | improvement | Linux arm64 on a Raspberry Pi 4 with the Raspberry Pi kerne… | the committed binary `addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so` once… | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
 | [The GoZen build links libvpx, libaom and TLS that a player of local mp4 files never uses](gde-gozen/lean-build-option.md) | improvement | Linux x86_64 and arm64 (glibc 2.31+), Windows x86_64 (MinGW… | `../../build/gozen/build_gozen.sh` (`scons ... lean=yes`) | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
 | [Every video switch freezes all windows for 1 to 2.5 s: VideoPlayback opens, loops and frees videos on the main thread](gde-gozen/main-thread-stalls.md) | bug | all (GDScript); worst with a slow-to-open hardware decoder:… | `python -m mpf_godot addons GAME --video` (copies the patched add-on into the game) | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
 | [The app freezes for minutes when a video seeks near its end: `seek_frame()` steps back one frame per retry at EOF](gde-gozen/seek-frame-retry-loop.md) | bug | all (C++ loop); seen on Jetson Xavier NX, L4T R35.6.4, nvpm… | `python -m mpf_godot addons GAME --video` | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
@@ -94,4 +95,4 @@ Upstream tracker: https://github.com/claytercek/godot-native-video/issues
 
 Test projects and repro programs the reports refer to: [repro/](repro/).
 
-35 documents.
+36 documents.

@@ -7,6 +7,7 @@
 #
 # - GDE GoZen (github.com/VoylinsGamedevJourney/gde_gozen) at GOZEN_REV, with build/gozen/gozen.patch: asks
 #   FFmpeg for <codec>_nvmpi first and falls back to the software decoder (GOZEN_HWDEC=0 forces software);
+#   gozen_v4l2m2m.patch then also tries FFmpeg's <codec>_v4l2m2m (Raspberry Pi 4: bcm2835-codec H.264 on /dev/video10);
 #   SConstruct lean=yes (no libvpx/libaom/LibreSSL);
 # - jetson-ffmpeg (github.com/gjrtimmer/jetson-ffmpeg) at JETSON_FFMPEG_REV patches GoZen's FFmpeg 7.1. Its
 #   decoders load libnvmpi.so at run time, so nothing NVIDIA is needed here; on the Jetson, libnvmpi is built
@@ -33,6 +34,7 @@ git checkout -q --force "$GOZEN_REV"
 git submodule update --init --depth 1 ffmpeg godot_cpp
 git -C ffmpeg checkout -q --force . && git -C ffmpeg clean -qfd
 git apply "$ROOT/build/gozen/gozen.patch"
+git apply "$ROOT/build/gozen/gozen_v4l2m2m.patch"
 git -C "$WORK/jetson-ffmpeg" checkout -q --force "$JETSON_FFMPEG_REV"
 git -C "$WORK/jetson-ffmpeg" apply "$ROOT/build/gozen/nvmpi_flush.patch"
 "$WORK/jetson-ffmpeg/scripts/ffpatch.sh" "$WORK/gde_gozen/ffmpeg"

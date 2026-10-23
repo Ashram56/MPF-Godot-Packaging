@@ -1,0 +1,45 @@
+diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
+index 0b26b69..3d5e1b4 100644
+--- a/src/gozen_video.cpp
++++ b/src/gozen_video.cpp
+@@ -257,24 +257,30 @@ int GoZenVideo::open(const String& video_path) {
+ 			}
+ 		}
+ 	}
+-	// Hardware decoder first (NVIDIA Jetson: FFmpeg patched by jetson-ffmpeg registers <codec>_nvmpi, which
+-	// loads libnvmpi.so at run time). GOZEN_HWDEC=0 turns it off. Falls back to the software decoder when the
+-	// hardware one is missing or fails to open (no libnvmpi.so, not a Jetson).
++	// Hardware decoder first. Jetson: FFmpeg patched by jetson-ffmpeg registers <codec>_nvmpi, which loads libnvmpi.so
++	// at run time. Raspberry Pi 4 (and other V4L2 memory-to-memory decoders): FFmpeg's own <codec>_v4l2m2m on
++	// /dev/video10 (bcm2835-codec, H.264). GOZEN_HWDEC=0 turns it off. Falls back to the software decoder when no
++	// hardware one is there or it fails to open.
+ 	bool hw_tried = false;
+ 	if (!av_codec && OS::get_singleton()->get_environment("GOZEN_HWDEC") != "0") {
+ 		const AVCodecDescriptor* desc = avcodec_descriptor_get(av_stream->codecpar->codec_id);
+-		const AVCodec* hw_codec = desc ? avcodec_find_decoder_by_name((String(desc->name) + "_nvmpi").utf8().get_data())
+-									   : nullptr;
+-		if (hw_codec) {
++		const char* hw_suffixes[] = {"_nvmpi", "_v4l2m2m"};
++		for (const char* suffix : hw_suffixes) {
++			const AVCodec* hw_codec =
++				desc ? avcodec_find_decoder_by_name((String(desc->name) + suffix).utf8().get_data()) : nullptr;
++			if (!hw_codec)
++				continue;
+ 			hw_tried = true;
+-			if (_open_decoder(hw_codec, true)) {
++			if (_open_decoder(hw_codec, String(suffix) == "_nvmpi")) {
+ 				av_codec = hw_codec;
+ 				UtilityFunctions::print("GoZen: hardware decoder ", hw_codec->name);
+-			} else {
+-				UtilityFunctions::print("GoZen: hardware decoder ", hw_codec->name, " unavailable, using software");
+-				av_codec_ctx.reset();
++				break;
+ 			}
++			UtilityFunctions::print("GoZen: hardware decoder ", hw_codec->name, " unavailable");
++			av_codec_ctx.reset();
+ 		}
++		if (!av_codec && hw_tried)
++			UtilityFunctions::print("GoZen: using software decoder");
+ 	}
+ #ifdef _WIN32
+ 	// Windows: FFmpeg's own decoder with the GPU doing the decoding through Direct3D 11 Video, else DXVA2 (NVIDIA,
