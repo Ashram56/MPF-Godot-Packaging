@@ -43,7 +43,7 @@ mount_chroot() {
     mkdir -p "$R/boot/firmware" "$FWDIR"
     mountpoint -q "$R/proc" || mount -t proc proc "$R/proc"
     mountpoint -q "$R/sys" || mount -t sysfs sys "$R/sys"
-    mountpoint -q "$R/dev" || mount -o bind /dev "$R/dev"
+    mountpoint -q "$R/dev" || { mount -o bind /dev "$R/dev"; mount --make-rslave "$R/dev"; }   # rslave: no mount propagation back (WSL2)
     mountpoint -q "$R/dev/pts" || mount -o bind /dev/pts "$R/dev/pts"
     mountpoint -q "$R/boot/firmware" || mount -o bind "$FWDIR" "$R/boot/firmware"
     if [ -L "$R/etc/resolv.conf" ] || [ -e "$R/etc/resolv.conf" ]; then
@@ -56,7 +56,7 @@ mount_chroot() {
 umount_chroot() {
     rm -f "$R/usr/sbin/policy-rc.d"
     for m in boot/firmware dev/pts dev sys proc; do
-        mountpoint -q "$R/$m" && umount "$R/$m"
+        if mountpoint -q "$R/$m"; then umount "$R/$m" 2>/dev/null || umount -l "$R/$m"; fi
     done
     if [ -e "$R/etc/resolv.conf.build-bak" ] || [ -L "$R/etc/resolv.conf.build-bak" ]; then
         mv -f "$R/etc/resolv.conf.build-bak" "$R/etc/resolv.conf"
