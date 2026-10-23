@@ -78,10 +78,6 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static binfmt-support >/dev/null 2>&1 \
     || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user qemu-user-binfmt >/dev/null
 mountpoint -q /proc/sys/fs/binfmt_misc || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
-# NVIDIA's apply_binaries.sh looks for qemu-aarch64-static; Ubuntu 25.04+ ships the (static) binary as qemu-aarch64
-if ! command -v qemu-aarch64-static >/dev/null 2>&1 && command -v qemu-aarch64 >/dev/null 2>&1; then
-    ln -s "$(command -v qemu-aarch64)" /usr/local/bin/qemu-aarch64-static
-fi
 if [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
     update-binfmts --enable qemu-aarch64 2>/dev/null || cat /usr/lib/binfmt.d/qemu-aarch64.conf > /proc/sys/fs/binfmt_misc/register
 fi
@@ -241,6 +237,11 @@ rm -f nv_tegra/l4t_deb_packages/nvidia-l4t-nvpmodel-gui-tools*.deb \
 
 ##############################################################################
 log "5/7 Install NVIDIA L4T packages into the rootfs (apply_binaries.sh)"
+# nv-apply-debs.sh only looks for qemu-aarch64-static in Linux_for_Tegra/.., nv_tegra/ or /usr/bin;
+# Ubuntu 25.04+ ships the (static) binary as qemu-aarch64, so stage a copy in nv_tegra/
+if [ ! -f /usr/bin/qemu-aarch64-static ] && [ ! -f nv_tegra/qemu-aarch64-static ]; then
+    install -m 755 "$(command -v qemu-aarch64)" nv_tegra/qemu-aarch64-static
+fi
 ./apply_binaries.sh
 # Point NVIDIA's apt repo at the Xavier (t194) packages
 sed -i "s/<SOC>/$SOC/" "$R/etc/apt/sources.list.d/nvidia-l4t-apt-source.list"
