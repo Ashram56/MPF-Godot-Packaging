@@ -41,8 +41,9 @@ in_chroot() { LC_ALL=C DEBIAN_FRONTEND=noninteractive chroot "$R" /usr/bin/env b
 mount_chroot() {
     mountpoint -q "$R/proc" || mount -t proc proc "$R/proc"
     mountpoint -q "$R/sys" || mount -t sysfs sys "$R/sys"
-    mountpoint -q "$R/dev" || mount -o bind /dev "$R/dev"
-    mountpoint -q "$R/dev/pts" || mount -o bind /dev/pts "$R/dev/pts"
+    # rslave: on WSL2 / and /dev are "shared", and a shared bind mount would propagate (un)mounts to the host
+    mountpoint -q "$R/dev" || { mount -o bind /dev "$R/dev"; mount --make-rslave "$R/dev"; }
+    mountpoint -q "$R/dev/pts" || { mount -o bind /dev/pts "$R/dev/pts"; mount --make-rslave "$R/dev/pts"; }
     # temporary DNS for apt inside the chroot
     if [ -L "$R/etc/resolv.conf" ] || [ -e "$R/etc/resolv.conf" ]; then
         mv "$R/etc/resolv.conf" "$R/etc/resolv.conf.build-bak"
@@ -55,7 +56,10 @@ mount_chroot() {
 umount_chroot() {
     rm -f "$R/usr/sbin/policy-rc.d"
     for m in dev/pts dev sys proc; do
-        mountpoint -q "$R/$m" && umount "$R/$m"
+        if mountpoint -q "$R/$m"; then
+            mount --make-private "$R/$m" 2>/dev/null || true
+            umount "$R/$m" 2>/dev/null || umount -l "$R/$m"
+        fi
     done
     if [ -e "$R/etc/resolv.conf.build-bak" ] || [ -L "$R/etc/resolv.conf.build-bak" ]; then
         mv -f "$R/etc/resolv.conf.build-bak" "$R/etc/resolv.conf"
