@@ -15,6 +15,8 @@ Monitor too. What it does about each platform's traps (fixes/, platforms/):
 - Linux without a display: Godot under Xvfb (xvfb-run); Godot's --headless draws nothing;
 - Linux on a real X display: X's screen saver and DPMS off for the session (a cabinet's players touch no mouse);
 - Linux with 4+ cores: Godot's main thread gets a core of its own (MPF_GODOT_PIN=0 turns it off);
+- Raspberry Pi 4: the OpenGL ES (Compatibility) renderer, as Vulkan freezes while a video plays
+  (fixes/godot/pi4-vulkan-freezes-with-video.md); MPF_GODOT_RENDERER=vulkan keeps Godot's choice;
 - a project never opened in Godot is imported first (else GMC's classes are not found);
 - --no-render-thread: Godot draws on its main thread, should a GPU driver misbehave with the separate one.
 """
@@ -139,6 +141,9 @@ def godot_command(game, godot_args=(), virtual_display=None, render_thread=True)
         # Godot's separate render thread off: asked for, or the opengl3 renderer (Xvfb captures), which wrote no
         # frames with it (platforms/linux.md)
         args = ["--render-thread", "safe"] + args
+    if (tc.is_raspberry_pi4() and os.environ.get("MPF_GODOT_RENDERER", "") != "vulkan"
+            and "--rendering-driver" not in args and "--rendering-method" not in args):
+        args = ["--rendering-driver", "opengl3"] + args      # added after the render-thread rule: it is for Xvfb captures
     cmd = [exe, "--path", game] + args
     if virtual_display is None:
         virtual_display = tc.needs_virtual_display()

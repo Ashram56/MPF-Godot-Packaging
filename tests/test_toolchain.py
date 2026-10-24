@@ -140,6 +140,32 @@ class TestLauncher(unittest.TestCase):
             if shutil.which("xvfb-run"):
                 self.assertEqual("xvfb-run", launcher.godot_command("/game", [], virtual_display=True)[0])
 
+    def test_godot_command_on_a_pi4_uses_opengl(self):
+        with mock.patch.dict(os.environ, {"GODOT": sys.executable}), \
+                mock.patch.object(tc, "is_raspberry_pi4", return_value=True):
+            cmd = launcher.godot_command("/game", [], virtual_display=False)
+            self.assertEqual(["--rendering-driver", "opengl3"], cmd[3:5])
+            cmd = launcher.godot_command("/game", ["--rendering-driver", "vulkan"], virtual_display=False)
+            self.assertEqual(1, cmd.count("--rendering-driver"))
+            self.assertEqual("vulkan", cmd[cmd.index("--rendering-driver") + 1])
+            with mock.patch.dict(os.environ, {"MPF_GODOT_RENDERER": "vulkan"}):
+                self.assertNotIn("--rendering-driver", launcher.godot_command("/game", [], virtual_display=False))
+        with mock.patch.dict(os.environ, {"GODOT": sys.executable}), \
+                mock.patch.object(tc, "is_raspberry_pi4", return_value=False):
+            self.assertNotIn("--rendering-driver", launcher.godot_command("/game", [], virtual_display=False))
+
+    def test_is_raspberry_pi4_reads_the_device_tree(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        path = os.path.join(d, "model")
+        with open(path, "wb") as f:
+            f.write(b"Raspberry Pi 4 Model B Rev 1.1\0")
+        self.assertTrue(tc.is_raspberry_pi4(path))
+        with open(path, "wb") as f:
+            f.write(b"NVIDIA Jetson Xavier NX\0")
+        self.assertFalse(tc.is_raspberry_pi4(path))
+        self.assertFalse(tc.is_raspberry_pi4(os.path.join(d, "missing")))
+
     def test_run_needs_a_project(self):
         d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, d)

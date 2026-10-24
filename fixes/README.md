@@ -51,6 +51,7 @@ Upstream tracker: https://github.com/godotengine/godot/issues
 | [Screenshots from a headless run are blank, and Movie Maker runs too fast for a live client](godot/headless-draws-nothing.md) | improvement | all for `--headless` and `--write-movie`; the Xvfb workarou… | the launcher (`python -m mpf_godot run`, `--xvfb` to force it) | Godot docs, https://github.com/godotengine/godot-docs/issues; status:… |
 | [A GMC game that was never opened in the Godot editor does not start](godot/import-before-first-run.md) | packaging | all | `python -m mpf_godot addons GAME` and `python -m mpf_godot run GAME` (only when `GAME/.go… | none needed for Godot (documented behaviour); a note for GMC's instal… |
 | [The game freezes for seconds the first time text is drawn with an MSDF font](godot/msdf-glyphs-main-thread.md) | bug | all (MSDF generation is CPU work); measured on Linux arm64… | the game's setup step (a headless Godot script run once after install) | Godot, https://github.com/godotengine/godot/issues; status: **draft,… |
+| [On a Raspberry Pi 4 the game freezes while a video plays with Vulkan: the launcher uses OpenGL ES](godot/pi4-vulkan-freezes-with-video.md) | improvement | Raspberry Pi 4 | the launcher (`python -m mpf_godot run`) | Godot, https://github.com/godotengine/godot/issues; status: none need… |
 | [Every start recompiles every pipeline: the Vulkan pipeline cache is never saved with the separate render thread](godot/pipeline-cache-not-saved-render-thread.md) | bug | Linux arm64 seen (Jetson Xavier NX, L4T R35.6.4, Vulkan, Mo… | a project setting a game sets in its `project.godot` | Godot, https://github.com/godotengine/godot/issues; status: **draft,… |
 | [Godot's separate render thread: on with videos on Godot 4.6.3, a loss on 4.5.2 without them](godot/render-thread-setting.md) | improvement | all (a project setting); measured on Jetson Xavier NX, L4T… | a project setting a game sets in its `project.godot`; the launcher (`python -m mpf_godot… | Godot, https://github.com/godotengine/godot/issues; status: none need… |
 | [With the separate render thread, the log fills with `_texture_2d_update` errors when text is drawn](godot/separate-render-thread-glyph-cache.md) | bug | Linux arm64 seen (Jetson Xavier NX, L4T R35.6.4, Vulkan, Mo… | - | Godot, https://github.com/godotengine/godot/issues; status: **draft,… |
@@ -95,4 +96,4 @@ Upstream tracker: https://github.com/claytercek/godot-native-video/issues
 
 Test projects and repro programs the reports refer to: [repro/](repro/).
 
-36 documents.
+37 documents.
