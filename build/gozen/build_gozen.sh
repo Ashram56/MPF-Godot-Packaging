@@ -41,6 +41,9 @@ git -C "$WORK/jetson-ffmpeg" checkout -q --force "$JETSON_FFMPEG_REV"
 git -C "$WORK/jetson-ffmpeg" apply "$ROOT/build/gozen/nvmpi_flush.patch"
 "$WORK/jetson-ffmpeg/scripts/ffpatch.sh" "$WORK/gde_gozen/ffmpeg"
 
+# Docker runs as root: whatever it wrote into the work tree (also when a build fails half-way) goes back to us
+trap 'docker run --rm -v "$WORK:/w" ubuntu:20.04 chown -R "$(id -u):$(id -g)" /w >/dev/null 2>&1 || true' EXIT
+
 for arch in "${ARCHS[@]}"; do
   if [ "$arch" = windows ]; then
     # MinGW-w64 cross build (build/gozen/build_windows_in_docker.sh); ubuntu:24.04 for its newer MinGW
