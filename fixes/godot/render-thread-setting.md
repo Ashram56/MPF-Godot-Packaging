@@ -46,9 +46,11 @@ Known costs with it on:
   **Beware on a board that needs opengl3 for real play**: a Raspberry Pi 4 must run `--rendering-driver opengl3` (Vulkan
   froze with video there), so a launcher that adds `--render-thread safe` for every opengl3 run (Tron's `run.py` and
   `mpf_godot/launcher.py` did) silently plays without the separate render thread while the project says it is on. On
-  the Pi 4 the main thread was then the limit (76 % of a core, Godot 36 %, Mesa's CPU part 22 %). Restrict the
-  workaround to the captures, and test `RenderingServer.is_on_render_thread()` at run time, never the setting (a
-  command-line `--render-thread` overrides it). 2026-10-24, Tron Legacy MPF.
+  the Pi 4 the main thread was then the limit (76 % of a core, Godot 36 %, Mesa's CPU part 22 %). Test `RenderingServer.is_on_render_thread()` at run time, never the setting (a command-line `--render-thread`
+  overrides it). But the separate thread **cannot be used there**: with `--render-thread separate` and opengl3 Godot 4.6.3
+  crashes at start ("Error initializing GLAD" in `RasterizerGLES3`, then SIGSEGV) because the GL ES context (EGL fallback
+  on X11) is not created on the render thread (Godot calls the mode experimental). So on the Pi 4 the forced `safe`
+  mode is right, and the main thread's cost has to be cut elsewhere. 2026-10-24, Tron Legacy MPF.
 - a frame image that the script hands to a texture can be uploaded later than the call: if a decoder may overwrite
   that image, copy it first (done in [`../../addons/gde_gozen/video_playback.gd`](../../addons/gde_gozen/video_playback.gd)
   for a frame shown straight after a seek or a restart).
