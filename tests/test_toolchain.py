@@ -130,7 +130,8 @@ class TestLauncher(unittest.TestCase):
         self.assertFalse(launcher.port_in_use(port))
 
     def test_godot_command(self):
-        with mock.patch.dict(os.environ, {"GODOT": sys.executable}):
+        with mock.patch.dict(os.environ, {"GODOT": sys.executable}), \
+                mock.patch.object(tc, "is_raspberry_pi4", return_value=False):
             cmd = launcher.godot_command("/game", ["--x"], virtual_display=False)
             self.assertEqual([sys.executable, "--path", "/game", "--x"], cmd)
             cmd = launcher.godot_command("/game", [], virtual_display=False, render_thread=False)
@@ -141,8 +142,9 @@ class TestLauncher(unittest.TestCase):
                 self.assertEqual("xvfb-run", launcher.godot_command("/game", [], virtual_display=True)[0])
 
     def test_godot_command_on_a_pi4_uses_opengl(self):
-        with mock.patch.dict(os.environ, {"GODOT": sys.executable}), \
-                mock.patch.object(tc, "is_raspberry_pi4", return_value=True):
+        env = {k: v for k, v in os.environ.items() if k != "MPF_GODOT_RENDERER"}
+        env["GODOT"] = sys.executable
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(tc, "is_raspberry_pi4", return_value=True):
             cmd = launcher.godot_command("/game", [], virtual_display=False)
             self.assertEqual(["--rendering-driver", "opengl3"], cmd[3:5])
             cmd = launcher.godot_command("/game", ["--rendering-driver", "vulkan"], virtual_display=False)
@@ -150,8 +152,7 @@ class TestLauncher(unittest.TestCase):
             self.assertEqual("vulkan", cmd[cmd.index("--rendering-driver") + 1])
             with mock.patch.dict(os.environ, {"MPF_GODOT_RENDERER": "vulkan"}):
                 self.assertNotIn("--rendering-driver", launcher.godot_command("/game", [], virtual_display=False))
-        with mock.patch.dict(os.environ, {"GODOT": sys.executable}), \
-                mock.patch.object(tc, "is_raspberry_pi4", return_value=False):
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(tc, "is_raspberry_pi4", return_value=False):
             self.assertNotIn("--rendering-driver", launcher.godot_command("/game", [], virtual_display=False))
 
     def test_main_sends_everything_after_dashes_to_godot(self):
