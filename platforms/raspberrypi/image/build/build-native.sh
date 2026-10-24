@@ -203,7 +203,7 @@ in_chroot "apt-get install -y -qq python3 hostapd dnsmasq-base"
 in_chroot "systemctl disable hostapd >/dev/null 2>&1 || true; systemctl mask hostapd >/dev/null 2>&1 || true"
 NC="$REPO_ROOT/common/netconfig"
 install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
-install -m 644 "$NC"/mpf-netconfig-*.service "$R/etc/systemd/system/"
+install -m 644 "$NC"/mpf-netconfig-*.service "$NC/mpf-game.service" "$R/etc/systemd/system/"
 install -m 644 "$NC/mpf-network.txt.template" "$FWDIR/mpf-network.txt"
 printf 'MPF_NETCONFIG_FILE=/boot/firmware/mpf-network.txt\nMPF_USER=pi\nMPF_WLAN=wlan0\nMPF_GOZEN_SO=/home/pi/MPF-Godot/addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so\n' > "$R/etc/default/mpf-netconfig"
 # Game bundle uploaded from the web page (Tron-Legacy-MPF docs/bundle.md): GODOT / TRON_VENV point at what the base system provides

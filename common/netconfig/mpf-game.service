@@ -1,0 +1,14 @@
+[Unit]
+Description=MPF game (installed from the setup page)
+After=network.target
+ConditionPathExistsGlob=/opt/games/*/bundle.json
+
+[Service]
+EnvironmentFile=-/etc/default/mpf-netconfig
+ExecStart=/usr/local/bin/mpf_netconfig.py game
+Restart=on-failure
+RestartSec=10
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

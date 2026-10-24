@@ -3,6 +3,7 @@
 
   mpf_netconfig.py apply   read the text file, configure Wi-Fi/SSH, erase the Wi-Fi password from the file
   mpf_netconfig.py web     serve the setup page on port 8080 (HTTP basic auth)
+  mpf_netconfig.py game    run the installed game (mpf-game.service: waits for X, runs start.py as MPF_USER)
   mpf_netconfig.py ap      if there is no network after a delay, start the "MPF-Setup" access point
 
 Settings (environment, defaults for the Raspberry Pi image):
@@ -341,25 +342,46 @@ def game_running():
     return run("systemctl", "is-active", "--quiet", "mpf-game.service").returncode == 0
 
 
-def game_start():
+def game_exec():
+    """Entry of mpf-game.service: wait for the X session, drop to the game user, become start.py."""
     game = installed_game()
     if not game:
-        raise ValueError("no game installed")
+        sys.exit("no game installed")
     env = game_env()
     pw = pwd.getpwnam(USER)
-    args = env.get("MPF_GAME_ARGS", "").split()
-    props = ["-p", f"User={USER}", "-p", f"WorkingDirectory={game}", "-E", f"DISPLAY={env.get('DISPLAY', ':0')}",
-             "-E", f"XAUTHORITY={env.get('XAUTHORITY', os.path.join(pw.pw_dir, '.Xauthority'))}"]
+    for _ in range(180):
+        if os.path.exists("/tmp/.X11-unix/X0"):
+            break
+        time.sleep(1)
+    time.sleep(3)           # let the window manager settle
+    os.chdir(game)
+    os.setgroups(os.getgrouplist(USER, pw.pw_gid))
+    os.setgid(pw.pw_gid)
+    os.setuid(pw.pw_uid)
+    child = dict(os.environ, HOME=pw.pw_dir, USER=USER, DISPLAY=env.get("DISPLAY", ":0"),
+                 XAUTHORITY=env.get("XAUTHORITY", os.path.join(pw.pw_dir, ".Xauthority")))
     for k in ("GODOT", "TRON_VENV"):
         if env.get(k):
-            props += ["-E", f"{k}={env[k]}"]
-    r = run("systemd-run", "--unit=mpf-game", "--collect", *props, game_python(), "scripts/package/start.py", *args)
+            child[k] = env[k]
+    py = game_python()
+    os.execve(py if os.path.isabs(py) else shutil.which(py),
+              [py, "scripts/package/start.py"] + env.get("MPF_GAME_ARGS", "").split(), child)
+
+
+def game_start():
+    if not installed_game():
+        raise ValueError("no game installed")
+    r = run("systemctl", "start", "--no-block", "mpf-game.service")
     if r.returncode:
         raise ValueError((r.stderr or r.stdout).strip() or "could not start the game")
 
 
 def game_stop():
     run("systemctl", "stop", "mpf-game.service")
+
+
+def game_autostart():
+    return run("systemctl", "is-enabled", "--quiet", "mpf-game.service").returncode == 0
 
 
 def settings_html(game):
@@ -488,8 +510,10 @@ class Handler(BaseHTTPRequestHandler):
             b = json.load(open(os.path.join(game, "bundle.json")))
             state = f"Installed: <b>{html.escape(b.get('name', ''))} {html.escape(b.get('version', ''))}</b>, game "
             state += "<b>running</b>" if game_running() else "stopped"
-            ctl = ("<form method=post action=/game style='display:inline'><button name=do value=%s>%s</button></form>"
-                   % (("stop", "Stop the game") if game_running() else ("start", "Start the game")))
+            ctl = ("<form method=post action=/game style='display:inline'><button name=do value=%s>%s</button> "
+                   "<button name=do value=%s>%s</button></form>"
+                   % (("stop", "Stop the game") if game_running() else ("start", "Start the game"),
+                      ("disable", "Do not start at power-on") if game_autostart() else ("enable", "Start at power-on")))
             ctl += "<h2>Game settings</h2>" + settings_html(game)
         else:
             state, ctl = "No game installed.", ""
@@ -581,8 +605,15 @@ class Handler(BaseHTTPRequestHandler):
                 settings_save(installed_game(), form)
                 msg = "Game settings saved (restart the game to apply)."
             elif self.path == "/game":
-                game_start() if form.get("do") == "start" else game_stop()
-                msg = "Game " + ("starting." if form.get("do") == "start" else "stopped.")
+                do = form.get("do")
+                if do == "start":
+                    game_start()
+                elif do in ("enable", "disable"):
+                    run("systemctl", do, "mpf-game.service")
+                else:
+                    game_stop()
+                msg = {"start": "Game starting.", "enable": "The game now starts at power-on.",
+                       "disable": "The game no longer starts at power-on."}.get(do, "Game stopped.")
             else:
                 return self._send(404, "not found", "text/plain")
         except (ValueError, TypeError) as e:
@@ -627,6 +658,8 @@ def main():
         ThreadingHTTPServer(("", PORT), Handler).serve_forever()
     elif cmd == "ap":
         access_point()
+    elif cmd == "game":
+        game_exec()
     else:
         sys.exit(__doc__)
 
