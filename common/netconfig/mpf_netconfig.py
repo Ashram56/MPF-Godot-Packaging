@@ -419,17 +419,29 @@ its <code>.sha256</code> file (optional) <input type=file name=s><br><button>Upl
 %(ctl)s
 <script>
 async function up(form,kind){
- const f=form.f.files[0], s=form.s&&form.s.files[0]; let sha='';
- if(s){sha=(await s.text()).trim().split(/\\s+/)[0];}
- const x=new XMLHttpRequest(); x.open('POST','/upload/'+kind);
- x.setRequestHeader('X-Filename',encodeURIComponent(f.name)); x.setRequestHeader('X-Sha256',sha);
- x.upload.onprogress=e=>{document.querySelector('#job b').textContent='Uploading '+Math.round(e.loaded/1048576)+' / '+Math.round(e.total/1048576)+' MB'};
- x.onload=()=>{if(x.status!=202)document.querySelector('#job b').textContent='Error: '+x.responseText;poll();};
- x.onerror=()=>{document.querySelector('#job b').textContent='Upload interrupted'};
- x.send(f); return false;}
+ const f=form.f.files[0], s=form.s&&form.s.files[0], B=document.querySelector('#job b'), C=16*1048576;
+ let sha=''; if(s){sha=(await s.text()).trim().split(/\\s+/)[0];}
+ const base='/upload/'+kind+'?total='+f.size+'&name='+encodeURIComponent(f.name)+'&sha='+sha;
+ let off=0, tries=0;
+ while(off<f.size){
+  const end=Math.min(off+C,f.size);
+  try{
+   const r=await fetch(base+'&offset='+off,{method:'POST',body:f.slice(off,end)});
+   const t=await r.text();
+   if(r.status==409&&/^\\d+$/.test(t)){off=+t;continue;}
+   if(r.status>=400){B.textContent='Error: '+t;return false;}
+   off=end; tries=0;
+   B.textContent='Uploading '+Math.round(off/1048576)+' / '+Math.round(f.size/1048576)+' MB';
+  }catch(e){
+   if(++tries>40){B.textContent='Upload failed: connection lost';return false;}
+   B.textContent='Connection lost, retrying ('+tries+')...'; await new Promise(r=>setTimeout(r,3000));
+   try{off=+(await (await fetch('/upload/size/'+kind)).text());}catch(e2){}
+  }
+ }
+ poll(); return false;}
 async function poll(){
  const j=await (await fetch('/job')).json(); const b=document.querySelector('#job b');
- if(j.state!='idle'&&!(b.textContent.startsWith('Uploading')&&j.state=='idle')){b.textContent=j.msg;}
+ if(j.state=='running'||j.state=='done'||j.state=='error')b.textContent=j.msg;
  document.getElementById('log').textContent=j.log;
  if(j.state=='running')setTimeout(poll,2000); else if(j.state=='done')setTimeout(()=>location.reload(),1500);}
 poll();
@@ -484,38 +496,52 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, PAGE % {"msg": f"<p><b>{html.escape(msg)}</b></p>" if msg else "", "nets": nets,
                                 "status": html.escape(status()), "game": g})
 
-    def _upload(self, kind):
-        """Stream the request body to disk (never in memory), then unpack and install in a thread."""
+    def _upload(self, kind, q):
+        """One chunk of an upload, appended at `offset` (the browser sends 16 MB at a time and resumes after a cut).
+        When the file is complete it is unpacked and installed in a thread."""
         n = int(self.headers.get("Content-Length", 0))
-        if not JOB_LOCK.acquire(blocking=False):
-            return self._send(409, "an install is already running", "text/plain")
+        off, total = int(q.get("offset", ["0"])[0]), int(q.get("total", ["0"])[0])
+        name = os.path.basename(q.get("name", [""])[0]) or kind
+        path = os.path.join(UPLOADS, "game.tar.xz" if kind == "game" else "pup.zip")
         try:
-            name = os.path.basename(requests_unquote(self.headers.get("X-Filename", ""))) or kind
-            ok = name.endswith(".tar.xz") if kind == "game" else name.lower().endswith(".zip")
-            if not ok:
-                raise ValueError("expected a .tar.xz bundle" if kind == "game" else "expected a .zip pack")
-            if not n or free_gb(UPLOADS) * 1e9 < n * (4 if kind == "game" else 2) + 5e8:
-                raise ValueError("not enough free disk space for this file")
-            if kind == "game" and not name.endswith(f"linux-{ARCH.get(platform.machine(), platform.machine())}.tar.xz") \
-                    and "linux-" in name:
-                raise ValueError(f"this machine is {ARCH.get(platform.machine(), platform.machine())}: wrong bundle")
-            if kind == "pup" and not installed_game():
-                raise ValueError("install the game first")
-            path = os.path.join(UPLOADS, "game.tar.xz" if kind == "game" else "pup.zip")
-            JOB.update(state="uploading", msg="Receiving " + name, log="")
-            with open(path, "wb") as f:
+            if JOB["state"] == "running" or JOB_LOCK.locked():
+                raise ValueError("an install is already running")
+            if off == 0:
+                ok = name.endswith(".tar.xz") if kind == "game" else name.lower().endswith(".zip")
+                me = ARCH.get(platform.machine(), platform.machine())
+                if not ok:
+                    raise ValueError("expected a .tar.xz bundle" if kind == "game" else "expected a .zip pack")
+                if "linux-" in name and kind == "game" and not name.endswith(f"linux-{me}.tar.xz"):
+                    raise ValueError(f"this machine is {me}: wrong bundle")
+                if kind == "pup" and not installed_game():
+                    raise ValueError("install the game first")
+                if free_gb(UPLOADS) * 1e9 < total * (4 if kind == "game" else 2) + 5e8:
+                    raise ValueError("not enough free disk space for this file")
+                open(path, "wb").close()
+                JOB.update(state="uploading", msg="Receiving " + name, log="")
+            have = os.path.getsize(path) if os.path.exists(path) else 0
+            if have != off:     # the client lost track: tell it where to resume
+                self.rfile.read(n)
+                return self._send(409, str(have), "text/plain")
+            with open(path, "ab") as f:
                 left = n
                 while left:
                     chunk = self.rfile.read(min(1 << 20, left))
                     if not chunk:
-                        raise ValueError("upload interrupted")
+                        raise OSError("upload interrupted")
                     f.write(chunk)
                     left -= len(chunk)
-        except (ValueError, OSError) as e:
-            JOB_LOCK.release()
+        except ValueError as e:
             job_set(state="error", msg=str(e))
             return self._send(400, str(e), "text/plain")
-        fn, args = (install_game, (path, self.headers.get("X-Sha256", ""))) if kind == "game" else (install_pup, (path,))
+        except OSError:
+            return          # the browser went away: it resumes from the file's size
+        if off + n < total:
+            return self._send(200, str(off + n), "text/plain")
+        if not JOB_LOCK.acquire(blocking=False):
+            return self._send(409, "busy", "text/plain")
+        fn, args = (install_game, (path, q.get("sha", [""])[0])) if kind == "game" else (install_pup, (path,))
+        job_set(state="running", msg="Received, installing")
         threading.Thread(target=run_job, args=(fn,) + args, daemon=True).start()
         self._send(202, "installing", "text/plain")
 
@@ -524,13 +550,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/job":
             return self._send(200, json.dumps(JOB), "application/json")
+        if self.path.startswith("/upload/size/"):
+            f = os.path.join(UPLOADS, "game.tar.xz" if self.path.endswith("game") else "pup.zip")
+            return self._send(200, str(os.path.getsize(f) if os.path.exists(f) else 0), "text/plain")
         self._page()
 
     def do_POST(self):
         if not self._auth():
             return
-        if self.path in ("/upload/game", "/upload/pup"):
-            return self._upload(self.path.rsplit("/", 1)[1])
+        if self.path.startswith(("/upload/game?", "/upload/pup?")):
+            path, _, qs = self.path.partition("?")
+            return self._upload(path.rsplit("/", 1)[1], parse_qs(qs))
         n = int(self.headers.get("Content-Length", 0))
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(min(n, 262144)).decode()).items()}
         try:
