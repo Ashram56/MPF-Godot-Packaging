@@ -10,11 +10,15 @@ Settings (environment, defaults for the Raspberry Pi image):
   MPF_USER            pi      user whose authorized_keys is edited and whose password protects the page
   MPF_WLAN            wlan0
   MPF_WEB_PORT        8080
+  MPF_GAMES_DIR       /opt/games          where an uploaded game bundle is installed (<dir>/<bundle id>)
+  MPF_UPLOAD_DIR      /var/lib/mpf-uploads  uploads are written here, then unpacked
+  MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, TRON_VENV, DISPLAY, MPF_GAME_ARGS)
+  MPF_GOZEN_SO        a GoZen library built for this board, copied over the bundle's own (optional)
 Must run as root.
 """
-import hashlib, html, os, pwd, re, subprocess, sys, time, base64, shutil
+import hashlib, html, json, os, platform, pwd, re, subprocess, sys, threading, time, base64, shutil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote as requests_unquote
 
 CONF = os.environ.get("MPF_NETCONFIG_FILE", "/boot/firmware/mpf-network.txt")
 USER = os.environ.get("MPF_USER", "pi")
@@ -22,6 +26,10 @@ WLAN = os.environ.get("MPF_WLAN", "wlan0")
 PORT = int(os.environ.get("MPF_WEB_PORT", "8080"))
 WPA = f"/etc/wpa_supplicant/wpa_supplicant-{WLAN}.conf"
 SSHD_DROPIN = "/etc/ssh/sshd_config.d/10-mpf-netconfig.conf"
+GAMES = os.environ.get("MPF_GAMES_DIR", "/opt/games")
+UPLOADS = os.environ.get("MPF_UPLOAD_DIR", "/var/lib/mpf-uploads")
+GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
+GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
 AP_SSID, AP_PSK, AP_ADDR = "MPF-Setup", os.environ.get("MPF_AP_PSK", "mpf-setup"), "192.168.4.1"
 
 
@@ -171,9 +179,260 @@ def status():
     return run("ip", "-br", "addr").stdout + "\n" + run("iw", "dev", WLAN, "link").stdout
 
 
+# ---------------------------------------------------------------- game bundle and PuP Pack (docs/bundle.md of the game)
+JOB = {"state": "idle", "msg": "", "log": ""}      # one install at a time; the page polls /job
+JOB_LOCK = threading.Lock()
+ARCH = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
+
+
+class JobError(Exception):
+    pass
+
+
+def job_set(**kw):
+    JOB.update(kw)
+
+
+def job_log(text):
+    JOB["log"] = (JOB["log"] + text.rstrip("\n") + "\n")[-6000:]
+
+
+def sh(*cmd, cwd=None, user=False):
+    """Run a command for the job, log its output, fail the job when it fails."""
+    if user:
+        cmd = ("runuser", "-u", USER, "--") + cmd
+    job_log("$ " + " ".join(cmd))
+    r = run(*cmd, cwd=cwd)
+    job_log((r.stdout + r.stderr)[-2000:])
+    if r.returncode:
+        raise JobError(f"{cmd[0]} failed ({r.returncode})")
+    return r
+
+
+def game_env():
+    out = {}
+    try:
+        for line in open(GAME_ENV, encoding="utf-8"):
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                out[k.strip()] = v.strip().strip('"')
+    except OSError:
+        pass
+    return out
+
+
+def installed_game():
+    """Folder of the installed bundle, or None (the first folder of GAMES that holds a bundle.json)."""
+    try:
+        for n in sorted(os.listdir(GAMES)):
+            if not n.startswith(".") and os.path.isfile(os.path.join(GAMES, n, "bundle.json")):
+                return os.path.join(GAMES, n)
+    except OSError:
+        pass
+    return None
+
+
+def game_python():
+    venv = game_env().get("TRON_VENV")
+    py = os.path.join(venv, "bin", "python") if venv else ""
+    return py if py and os.path.exists(py) else "python3"
+
+
+def tool(game, *args):
+    """Run the bundle's own settings tool as the game user; returns the CompletedProcess."""
+    return run("runuser", "-u", USER, "--", game_python(), os.path.join(game, "scripts/package/bundle_options.py"), *args, cwd=game)
+
+
+def free_gb(path):
+    os.makedirs(path, exist_ok=True)
+    return shutil.disk_usage(path).free / 1e9
+
+
+def install_game(archive, expect_sha):
+    job_set(state="running", msg="Checking the archive")
+    h = hashlib.sha256()
+    with open(archive, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    if expect_sha and h.hexdigest() != expect_sha.lower():
+        raise JobError("the archive's sha256 does not match the .sha256 file: upload it again")
+    os.makedirs(GAMES, exist_ok=True)
+    stage = os.path.join(GAMES, ".stage")
+    shutil.rmtree(stage, ignore_errors=True)
+    os.makedirs(stage)
+    job_set(msg="Unpacking (a few minutes)")
+    sh("tar", "-xJf", archive, "-C", stage, "--no-same-owner")
+    dirs = [d for d in os.listdir(stage) if os.path.isdir(os.path.join(stage, d))]
+    if len(dirs) != 1 or not os.path.isfile(os.path.join(stage, dirs[0], "bundle.json")):
+        raise JobError("not a game bundle: no bundle.json in the archive")
+    root = os.path.join(stage, dirs[0])
+    b = json.load(open(os.path.join(root, "bundle.json")))
+    if b.get("format", 1) > 1:
+        raise JobError(f"bundle format {b.get('format')} is newer than this page understands")
+    tgt, me = b.get("target", {}), ARCH.get(platform.machine(), platform.machine())
+    if tgt.get("os", "linux") != "linux" or tgt.get("arch") != me:
+        raise JobError(f"this bundle is for {tgt.get('os')}/{tgt.get('arch')}, this machine is linux/{me}")
+    job_log(f"bundle {b.get('name')} {b.get('version')}")
+    job_set(msg="Verifying every file (sha256sum)")
+    sh("sha256sum", "-c", "SHA256SUMS", "--quiet", cwd=root)
+    dest = os.path.join(GAMES, b["id"])
+    old = dest + ".old"
+    shutil.rmtree(old, ignore_errors=True)
+    if os.path.isdir(dest):
+        job_set(msg="Keeping settings, scores and PuP Pack")
+        for rel in b.get("keep_on_update", []):
+            src, dst = os.path.join(dest, rel), os.path.join(root, rel)
+            if os.path.exists(src):
+                shutil.rmtree(dst, ignore_errors=True) if os.path.isdir(dst) else None
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                os.rename(src, dst)
+        os.rename(dest, old)
+    os.rename(root, dest)
+    shutil.rmtree(stage, ignore_errors=True)
+    shutil.rmtree(old, ignore_errors=True)
+    if GOZEN_SO and os.path.isfile(GOZEN_SO):
+        bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
+        for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
+            if re.match(r"libgozen\.linux\..*arm64\.so$", n):
+                shutil.copy(GOZEN_SO, os.path.join(bindir, n))
+                job_log(f"{n}: replaced by this board's GoZen")
+    pw = pwd.getpwnam(USER)
+    sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", dest)
+    os.remove(archive)
+    job_set(state="done", msg=f"Game {b.get('version')} installed in {dest}")
+
+
+def install_pup(zipfile):
+    game = installed_game()
+    if not game:
+        raise JobError("install the game first")
+    job_set(state="running", msg="Installing the PuP Pack (videos are checked, a few minutes)")
+    b = json.load(open(os.path.join(game, "bundle.json")))
+    cmd = b.get("pup", {}).get("install", "python3 scripts/pup/pup_setup.py --pup-zip ZIP_PATH_OR_URL")
+    args = [zipfile if a == "ZIP_PATH_OR_URL" else a for a in cmd.split()]
+    if args[0] == "python3":
+        args[0] = game_python()
+    env = ["env"] + [f"{k}={v}" for k, v in game_env().items()]
+    sh(*env, *args, cwd=game, user=True)
+    os.remove(zipfile)
+    job_set(state="done", msg="PuP Pack installed" + (" (restart the game)" if b.get("pup", {}).get("needs_restart") else ""))
+
+
+def run_job(fn, *args):
+    try:
+        fn(*args)
+    except JobError as e:
+        job_set(state="error", msg=str(e))
+    except Exception as e:   # keep the page alive whatever happens
+        job_set(state="error", msg=f"{type(e).__name__}: {e}")
+    finally:
+        JOB_LOCK.release()
+
+
+def game_running():
+    return run("systemctl", "is-active", "--quiet", "mpf-game.service").returncode == 0
+
+
+def game_start():
+    game = installed_game()
+    if not game:
+        raise ValueError("no game installed")
+    env = game_env()
+    pw = pwd.getpwnam(USER)
+    args = env.get("MPF_GAME_ARGS", "").split()
+    props = ["-p", f"User={USER}", "-p", f"WorkingDirectory={game}", "-E", f"DISPLAY={env.get('DISPLAY', ':0')}",
+             "-E", f"XAUTHORITY={env.get('XAUTHORITY', os.path.join(pw.pw_dir, '.Xauthority'))}"]
+    for k in ("GODOT", "TRON_VENV"):
+        if env.get(k):
+            props += ["-E", f"{k}={env[k]}"]
+    r = run("systemd-run", "--unit=mpf-game", "--collect", *props, game_python(), "scripts/package/start.py", *args)
+    if r.returncode:
+        raise ValueError((r.stderr or r.stdout).strip() or "could not start the game")
+
+
+def game_stop():
+    run("systemctl", "stop", "mpf-game.service")
+
+
+def settings_html(game):
+    try:
+        schema = json.load(open(os.path.join(game, "scripts/package/options.json")))
+        cur = json.loads(tool(game, "get").stdout or "{}")
+    except (OSError, ValueError):
+        return "<p>Settings unavailable.</p>"
+    out = ["<form method=post action=/settings>"]
+    for g in schema["groups"]:
+        out.append(f"<h3>{html.escape(g['label'])}</h3>")
+        for o in (o for o in schema["options"] if o["group"] == g["id"]):
+            name, v = "o." + o["id"], cur.get(o["id"])
+            hint = f" (default {o['default']})" if "default" in o else ""
+            if o["type"] == "bool":
+                sel = {True: "true", False: "false"}.get(v, "")
+                field = f"<select name='{name}'>" + "".join(
+                    f"<option value='{x}'{' selected' if x == sel else ''}>{x or 'default'}" for x in ("", "true", "false")) + "</select>"
+            elif o["type"] == "choice":
+                field = f"<select name='{name}'><option value=''>default" + "".join(
+                    f"<option{' selected' if c == v else ''}>{html.escape(c)}" for c in o["choices"]) + "</select>"
+            elif o.get("secret"):
+                field = f"<input name='{name}' type=password placeholder='{'set' if v else 'not set'} (empty: unchanged)'>"
+            else:
+                val = "" if v is None else html.escape(str(v), quote=True)
+                field = f"<input name='{name}' value='{val}' size=14 placeholder='default'>"
+            out.append(f"<div title='{html.escape(o.get('help', ''), quote=True)}'>{html.escape(o['label'])}{hint}: {field}"
+                       f" {html.escape(o.get('unit', ''))}</div>")
+    out.append("<button>Save settings</button> (restart the game to apply)</form>")
+    return "".join(out)
+
+
+def settings_save(game, form):
+    schema = json.load(open(os.path.join(game, "scripts/package/options.json")))
+    cur = json.loads(tool(game, "get").stdout or "{}")
+    sets, unsets = [], []
+    for o in schema["options"]:
+        v = form.get("o." + o["id"], "").strip()
+        if v:
+            sets += [o["id"], v]
+        elif o["id"] in cur and not o.get("secret"):
+            unsets.append(o["id"])
+    if sets:
+        r = tool(game, "set", *sets)
+        if r.returncode:
+            raise ValueError((r.stderr or r.stdout).strip()[-300:])
+    if unsets:
+        tool(game, "unset", *unsets)
+
+
+GAME_PAGE = """<h2>Game</h2><p>%(state)s</p>
+<form onsubmit="return up(this,'game')">Bundle <code>*-linux-%(arch)s.tar.xz</code> <input type=file name=f required><br>
+its <code>.sha256</code> file (optional) <input type=file name=s><br><button>Upload and install</button></form>
+<h2>PuP Pack</h2><form onsubmit="return up(this,'pup')">Pack <code>.zip</code> <input type=file name=f accept=.zip required>
+<br><button>Upload and install</button></form>
+<p id=job><b></b></p><pre id=log></pre>
+%(ctl)s
+<script>
+async function up(form,kind){
+ const f=form.f.files[0], s=form.s&&form.s.files[0]; let sha='';
+ if(s){sha=(await s.text()).trim().split(/\\s+/)[0];}
+ const x=new XMLHttpRequest(); x.open('POST','/upload/'+kind);
+ x.setRequestHeader('X-Filename',encodeURIComponent(f.name)); x.setRequestHeader('X-Sha256',sha);
+ x.upload.onprogress=e=>{document.querySelector('#job b').textContent='Uploading '+Math.round(e.loaded/1048576)+' / '+Math.round(e.total/1048576)+' MB'};
+ x.onload=()=>{if(x.status!=202)document.querySelector('#job b').textContent='Error: '+x.responseText;poll();};
+ x.onerror=()=>{document.querySelector('#job b').textContent='Upload interrupted'};
+ x.send(f); return false;}
+async function poll(){
+ const j=await (await fetch('/job')).json(); const b=document.querySelector('#job b');
+ if(j.state!='idle'&&!(b.textContent.startsWith('Uploading')&&j.state=='idle')){b.textContent=j.msg;}
+ document.getElementById('log').textContent=j.log;
+ if(j.state=='running')setTimeout(poll,2000); else if(j.state=='done')setTimeout(()=>location.reload(),1500);}
+poll();
+</script>"""
+
+
 PAGE = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>MPF setup</title><body style="font-family:sans-serif;max-width:34em;margin:1em auto;padding:0 1em">
 <h1>MPF setup</h1>%(msg)s
+%(game)s
 <h2>Wi-Fi</h2><form method=post action=/wifi>
 SSID <input name=ssid list=nets required><datalist id=nets>%(nets)s</datalist><br>
 Password <input name=psk type=password><br>Country (FR, US...) <input name=country size=3 maxlength=2><br>
@@ -204,17 +463,69 @@ class Handler(BaseHTTPRequestHandler):
 
     def _page(self, msg=""):
         nets = "".join(f"<option value='{html.escape(n, quote=True)}'>" for n in scan())
-        self._send(200, PAGE % {"msg": f"<p><b>{html.escape(msg)}</b></p>" if msg else "", "nets": nets, "status": html.escape(status())})
+        game = installed_game()
+        if game:
+            b = json.load(open(os.path.join(game, "bundle.json")))
+            state = f"Installed: <b>{html.escape(b.get('name', ''))} {html.escape(b.get('version', ''))}</b>, game "
+            state += "<b>running</b>" if game_running() else "stopped"
+            ctl = ("<form method=post action=/game style='display:inline'><button name=do value=%s>%s</button></form>"
+                   % (("stop", "Stop the game") if game_running() else ("start", "Start the game")))
+            ctl += "<h2>Game settings</h2>" + settings_html(game)
+        else:
+            state, ctl = "No game installed.", ""
+        g = GAME_PAGE % {"state": state, "arch": ARCH.get(platform.machine(), platform.machine()), "ctl": ctl}
+        self._send(200, PAGE % {"msg": f"<p><b>{html.escape(msg)}</b></p>" if msg else "", "nets": nets,
+                                "status": html.escape(status()), "game": g})
+
+    def _upload(self, kind):
+        """Stream the request body to disk (never in memory), then unpack and install in a thread."""
+        n = int(self.headers.get("Content-Length", 0))
+        if not JOB_LOCK.acquire(blocking=False):
+            return self._send(409, "an install is already running", "text/plain")
+        try:
+            name = os.path.basename(requests_unquote(self.headers.get("X-Filename", ""))) or kind
+            ok = name.endswith(".tar.xz") if kind == "game" else name.lower().endswith(".zip")
+            if not ok:
+                raise ValueError("expected a .tar.xz bundle" if kind == "game" else "expected a .zip pack")
+            if not n or free_gb(UPLOADS) * 1e9 < n * (4 if kind == "game" else 2) + 5e8:
+                raise ValueError("not enough free disk space for this file")
+            if kind == "game" and not name.endswith(f"linux-{ARCH.get(platform.machine(), platform.machine())}.tar.xz") \
+                    and "linux-" in name:
+                raise ValueError(f"this machine is {ARCH.get(platform.machine(), platform.machine())}: wrong bundle")
+            if kind == "pup" and not installed_game():
+                raise ValueError("install the game first")
+            path = os.path.join(UPLOADS, "game.tar.xz" if kind == "game" else "pup.zip")
+            JOB.update(state="uploading", msg="Receiving " + name, log="")
+            with open(path, "wb") as f:
+                left = n
+                while left:
+                    chunk = self.rfile.read(min(1 << 20, left))
+                    if not chunk:
+                        raise ValueError("upload interrupted")
+                    f.write(chunk)
+                    left -= len(chunk)
+        except (ValueError, OSError) as e:
+            JOB_LOCK.release()
+            job_set(state="error", msg=str(e))
+            return self._send(400, str(e), "text/plain")
+        fn, args = (install_game, (path, self.headers.get("X-Sha256", ""))) if kind == "game" else (install_pup, (path,))
+        threading.Thread(target=run_job, args=(fn,) + args, daemon=True).start()
+        self._send(202, "installing", "text/plain")
 
     def do_GET(self):
-        if self._auth():
-            self._page()
+        if not self._auth():
+            return
+        if self.path == "/job":
+            return self._send(200, json.dumps(JOB), "application/json")
+        self._page()
 
     def do_POST(self):
         if not self._auth():
             return
+        if self.path in ("/upload/game", "/upload/pup"):
+            return self._upload(self.path.rsplit("/", 1)[1])
         n = int(self.headers.get("Content-Length", 0))
-        form = {k: v[0] for k, v in parse_qs(self.rfile.read(min(n, 65536)).decode()).items()}
+        form = {k: v[0] for k, v in parse_qs(self.rfile.read(min(n, 262144)).decode()).items()}
         try:
             if self.path == "/wifi":
                 add_wifi(form.get("ssid", ""), form.get("psk", ""), form.get("country", "").upper())
@@ -225,9 +536,15 @@ class Handler(BaseHTTPRequestHandler):
                 if form.get("pwlogin") in ("yes", "no"):
                     set_ssh_password_login(form["pwlogin"] == "yes")
                 msg = "SSH settings saved."
+            elif self.path == "/settings":
+                settings_save(installed_game(), form)
+                msg = "Game settings saved (restart the game to apply)."
+            elif self.path == "/game":
+                game_start() if form.get("do") == "start" else game_stop()
+                msg = "Game " + ("starting." if form.get("do") == "start" else "stopped.")
             else:
                 return self._send(404, "not found", "text/plain")
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             msg = f"Error: {e}"
         self._page(msg)
 

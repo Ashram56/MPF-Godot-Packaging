@@ -205,7 +205,10 @@ NC="$REPO_ROOT/common/netconfig"
 install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
 install -m 644 "$NC"/mpf-netconfig-*.service "$R/etc/systemd/system/"
 install -m 644 "$NC/mpf-network.txt.template" "$FWDIR/mpf-network.txt"
-printf 'MPF_NETCONFIG_FILE=/boot/firmware/mpf-network.txt\nMPF_USER=pi\nMPF_WLAN=wlan0\n' > "$R/etc/default/mpf-netconfig"
+printf 'MPF_NETCONFIG_FILE=/boot/firmware/mpf-network.txt\nMPF_USER=pi\nMPF_WLAN=wlan0\nMPF_GOZEN_SO=/home/pi/MPF-Godot/addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so\n' > "$R/etc/default/mpf-netconfig"
+# Game bundle uploaded from the web page (Tron-Legacy-MPF docs/bundle.md): GODOT / TRON_VENV point at what the base system provides
+mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"
+printf 'MPF_GAME_ARGS=-- --rendering-driver opengl3\n' > "$R/etc/default/mpf-game"
 in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service >/dev/null 2>&1"
 
 in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
