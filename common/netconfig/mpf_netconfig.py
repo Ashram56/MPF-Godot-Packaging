@@ -411,9 +411,9 @@ def settings_save(game, form):
 
 
 GAME_PAGE = """<h2>Game</h2><p>%(state)s</p>
-<form onsubmit="return up(this,'game')">Bundle <code>*-linux-%(arch)s.tar.xz</code> <input type=file name=f required><br>
+<form onsubmit="up(this,'game');return false">Bundle <code>*-linux-%(arch)s.tar.xz</code> <input type=file name=f required><br>
 its <code>.sha256</code> file (optional) <input type=file name=s><br><button>Upload and install</button></form>
-<h2>PuP Pack</h2><form onsubmit="return up(this,'pup')">Pack <code>.zip</code> <input type=file name=f accept=.zip required>
+<h2>PuP Pack</h2><form onsubmit="up(this,'pup');return false">Pack <code>.zip</code> <input type=file name=f accept=.zip required>
 <br><button>Upload and install</button></form>
 <p id=job><b></b></p><pre id=log></pre>
 %(ctl)s
