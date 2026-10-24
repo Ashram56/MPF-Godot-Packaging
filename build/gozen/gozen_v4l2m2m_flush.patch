@@ -1,5 +1,5 @@
 diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
-index 3d5e1b4..43df9af 100644
+index 3d5e1b4..e24f1c5 100644
 --- a/src/gozen_video.cpp
 +++ b/src/gozen_video.cpp
 @@ -338,7 +338,8 @@ int GoZenVideo::open(const String& video_path) {
@@ -36,7 +36,7 @@ index 3d5e1b4..43df9af 100644
  					return _log_err("Couldn't seek");
  
  				continue;
-@@ -793,8 +800,20 @@ void GoZenVideo::_copy_frame_data() {
+@@ -793,8 +800,21 @@ void GoZenVideo::_copy_frame_data() {
  	}
  }
  
@@ -44,10 +44,11 @@ index 3d5e1b4..43df9af 100644
 +// avcodec_flush_buffers() on a V4L2 M2M decoder (Raspberry Pi 4) leaves it answering EOF to every later request, so a
 +// flush there recreates the decoder instead (same approach as nvmpi_flush.patch for the Jetson).
 +void GoZenVideo::_flush_decoder() {
-+	if (av_codec && String(av_codec->name).ends_with("_v4l2m2m")) {
++	const AVCodec* codec = av_codec_ctx ? av_codec_ctx->codec : nullptr;
++	if (codec && String(codec->name).ends_with("_v4l2m2m")) {
 +		av_codec_ctx.reset();
-+		if (!_open_decoder(av_codec))
-+			UtilityFunctions::printerr("GoZen: could not reopen ", av_codec->name, " after a seek");
++		if (!_open_decoder(codec))
++			UtilityFunctions::printerr("GoZen: could not reopen ", codec->name, " after a seek");
 +		return;
 +	}
  	avcodec_flush_buffers(av_codec_ctx.get());
