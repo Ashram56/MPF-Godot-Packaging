@@ -10,9 +10,11 @@
 #   WIFI_SSID=... WIFI_PSK=... pre-seed one Wi-Fi network (stored hashed via wpa_passphrase)
 #   WIFI_COUNTRY=FR            regulatory country code for Wi-Fi (default: unset = world domain)
 #   JETSON_PASSWORD=...        password for user "jetson" (default: jetson)
-#   EXTRAS="video docker x11"  optional feature groups to add (default: all three; EXTRAS="" for the bare image)
+#   EXTRAS="video docker x11 mpf"  optional feature groups to add (default: all four; EXTRAS="" for the bare image)
 #       video  : GStreamer + NVIDIA hardware decode/encode plugins, NVIDIA FFmpeg build (nvv4l2 codecs)
 #       docker : docker.io + NVIDIA container runtime (default runtime), jetson user in docker group
+#       mpf    : MPF + Godot + GMC + hardware video decoder (libnvmpi), installed by install/install_linux.sh from
+#                this repository into /home/jetson/MPF-Godot; needs video and x11 (they are added when missing)
 #       x11    : Xorg with NVIDIA driver, xinit/startx, openbox window manager, xrandr, xterm, Vulkan loader
 # Output: $WORK/out/jetson-xavier-nx-l4t35.6.4-sd.img.xz and .sha256
 
@@ -26,7 +28,8 @@ BOARD="jetson-xavier-nx-devkit"   # flash config name for the Xavier NX devkit (
 SOC="t194"
 IMG_NAME="jetson-xavier-nx-l4t35.6.4-sd.img"
 JETSON_PASSWORD="${JETSON_PASSWORD:-jetson}"
-EXTRAS="${EXTRAS-video docker x11}"
+EXTRAS="${EXTRAS-video docker x11 mpf}"
+REPO_ROOT="$(cd "$KIT/../../../.." && pwd)"   # this clone, copied into the image by the mpf group
 
 L4T="$WORK/Linux_for_Tegra"
 R="$L4T/rootfs"
@@ -38,8 +41,9 @@ in_chroot() { LC_ALL=C DEBIAN_FRONTEND=noninteractive chroot "$R" /usr/bin/env b
 mount_chroot() {
     mountpoint -q "$R/proc" || mount -t proc proc "$R/proc"
     mountpoint -q "$R/sys" || mount -t sysfs sys "$R/sys"
-    mountpoint -q "$R/dev" || mount -o bind /dev "$R/dev"
-    mountpoint -q "$R/dev/pts" || mount -o bind /dev/pts "$R/dev/pts"
+    # rslave: on WSL2 / and /dev are "shared", and a shared bind mount would propagate (un)mounts to the host
+    mountpoint -q "$R/dev" || { mount -o bind /dev "$R/dev"; mount --make-rslave "$R/dev"; }
+    mountpoint -q "$R/dev/pts" || { mount -o bind /dev/pts "$R/dev/pts"; mount --make-rslave "$R/dev/pts"; }
     # temporary DNS for apt inside the chroot
     if [ -L "$R/etc/resolv.conf" ] || [ -e "$R/etc/resolv.conf" ]; then
         mv "$R/etc/resolv.conf" "$R/etc/resolv.conf.build-bak"
@@ -52,7 +56,10 @@ mount_chroot() {
 umount_chroot() {
     rm -f "$R/usr/sbin/policy-rc.d"
     for m in dev/pts dev sys proc; do
-        mountpoint -q "$R/$m" && umount "$R/$m"
+        if mountpoint -q "$R/$m"; then
+            mount --make-private "$R/$m" 2>/dev/null || true
+            umount "$R/$m" 2>/dev/null || umount -l "$R/$m"
+        fi
     done
     if [ -e "$R/etc/resolv.conf.build-bak" ] || [ -L "$R/etc/resolv.conf.build-bak" ]; then
         mv -f "$R/etc/resolv.conf.build-bak" "$R/etc/resolv.conf"
@@ -68,9 +75,12 @@ mkdir -p "$WORK" "$OUT"
 log "1/7 Host dependencies and arm64 emulation"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    debootstrap qemu-user-static binfmt-support curl patch bzip2 xz-utils lz4 \
+    debootstrap curl patch bzip2 xz-utils lz4 \
     libxml2-utils python3 python3-yaml python-is-python3 gdisk parted cpio binutils \
     dosfstools mtools e2fsprogs openssh-client >/dev/null
+# arm64 emulation: qemu-user-static up to Ubuntu 24.04; from 25.04 it is qemu-user + qemu-user-binfmt
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static binfmt-support >/dev/null 2>&1 \
+    || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user qemu-user-binfmt >/dev/null
 mountpoint -q /proc/sys/fs/binfmt_misc || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
 if [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
     update-binfmts --enable qemu-aarch64 2>/dev/null || cat /usr/lib/binfmt.d/qemu-aarch64.conf > /proc/sys/fs/binfmt_misc/register
@@ -185,6 +195,19 @@ in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 in_chroot "id jetson >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio -p \"\$(openssl passwd -6 '$JETSON_PASSWORD')\" -s /bin/bash jetson"
 printf 'if [ -d "/usr/local/cuda/bin" ] ; then\n  PATH="/usr/local/cuda/bin:$PATH"\nfi\n' >> "$R/home/jetson/.profile"
 
+# Wi-Fi / SSH setup shared with the other images (common/netconfig): text file read at every boot, setup web
+# page on port 8080, access point "MPF-Setup" when no network comes up. The file is /etc/mpf-network.txt: the
+# root partition is ext4 (Windows and macOS cannot mount it), so edit it over SSH, the web page, or WSL.
+in_chroot "apt-get install -y -qq python3 hostapd dnsmasq-base"
+in_chroot "systemctl disable hostapd >/dev/null 2>&1 || true; systemctl mask hostapd >/dev/null 2>&1 || true"
+NC="$KIT/../../../../common/netconfig"
+install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
+install -m 644 "$NC"/mpf-netconfig-*.service "$R/etc/systemd/system/"
+install -m 600 "$NC/mpf-network.txt.template" "$R/etc/mpf-network.txt"
+printf 'MPF_NETCONFIG_FILE=/etc/mpf-network.txt\nMPF_USER=jetson\nMPF_WLAN=wlan0\n' > "$R/etc/default/mpf-netconfig"
+[ -n "${WIFI_SSID:-}" ] && printf 'WIFI_SSID=%s\nWIFI_PSK=%s\nWIFI_COUNTRY=%s\n' "$WIFI_SSID" "${WIFI_PSK:-}" "${WIFI_COUNTRY:-}" > "$R/etc/mpf-network.txt"
+in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service >/dev/null 2>&1"
+
 in_chroot "apt-get clean"
 rm -rf "$R"/var/lib/apt/lists/* "$R"/root/.bash_history
 umount_chroot
@@ -231,6 +254,11 @@ rm -f nv_tegra/l4t_deb_packages/nvidia-l4t-nvpmodel-gui-tools*.deb \
 
 ##############################################################################
 log "5/7 Install NVIDIA L4T packages into the rootfs (apply_binaries.sh)"
+# nv-apply-debs.sh only looks for qemu-aarch64-static in Linux_for_Tegra/.., nv_tegra/ or /usr/bin;
+# Ubuntu 25.04+ ships the (static) binary as qemu-aarch64, so stage a copy in nv_tegra/
+if [ ! -f /usr/bin/qemu-aarch64-static ] && [ ! -f nv_tegra/qemu-aarch64-static ]; then
+    install -m 755 "$(command -v qemu-aarch64)" nv_tegra/qemu-aarch64-static
+fi
 ./apply_binaries.sh
 # Point NVIDIA's apt repo at the Xavier (t194) packages
 sed -i "s/<SOC>/$SOC/" "$R/etc/apt/sources.list.d/nvidia-l4t-apt-source.list"
@@ -246,6 +274,8 @@ in_chroot "systemctl disable nvweston.service >/dev/null 2>&1 || true"
 log "5b/7 Optional feature groups: ${EXTRAS:-none}"
 has() { case " $EXTRAS " in *" $1 "*) return 0;; *) return 1;; esac; }
 if [ -n "$EXTRAS" ]; then
+    has mpf && ! has video && EXTRAS="$EXTRAS video"
+    has mpf && ! has x11 && EXTRAS="$EXTRAS x11"
     mount_chroot
     in_chroot "apt-get update -qq"   # Ubuntu + NVIDIA jetson repos (common, t194, ffmpeg)
     if has video; then
@@ -291,8 +321,29 @@ XRC
         chmod 755 "$R/home/jetson/.xinitrc"; in_chroot "chown jetson:jetson /home/jetson/.xinitrc"
         in_chroot "usermod -aG video,render,input,tty jetson 2>/dev/null || usermod -aG video,input,tty jetson"
     fi
+    if has mpf; then
+        # The repository's own Linux installer, run as the cabinet user in the chroot: Python 3.11 (uv), MPF,
+        # MPF Monitor, Godot linux.arm64, GMC with our fixes, then install_jetson_hwdec.sh (libnvmpi).
+        # The chroot has no decoder device: the hwdec script only warns about that.
+        mkdir -p "$R/home/jetson/MPF-Godot"
+        tar -C "$REPO_ROOT" --exclude=.git --exclude='platforms/jetson/image/build/work' -cf - . | tar -C "$R/home/jetson/MPF-Godot" -xf -
+        in_chroot "chown -R jetson:jetson /home/jetson/MPF-Godot"
+        in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
+        # As root with jetson's environment: sudo cannot work in the chroot (qemu-aarch64 is registered without
+        # the C flag, so setuid is ignored: "effective uid is not 0")
+        in_chroot "cd /home/jetson/MPF-Godot && HOME=/home/jetson USER=jetson LOGNAME=jetson SUDO_USER=jetson MPF_GODOT_DIR=/home/jetson/MPF-Godot bash install/install_linux.sh --yes"
+        in_chroot "chown -R jetson:jetson /home/jetson"
+        # Cabinet boot: automatic login on tty1, X started from the login shell
+        mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
+        printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin jetson --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+        cat >> "$R/home/jetson/.profile" <<'PROF'
+# Start X on the first console (automatic login); remove this to get a plain shell
+if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then exec startx; fi
+PROF
+        in_chroot "chown -R jetson:jetson /home/jetson"
+    fi
     in_chroot "apt-get clean"
-    rm -rf "$R"/var/lib/apt/lists/*
+    rm -rf "$R"/var/lib/apt/lists/* "$R"/home/jetson/.cache/uv 2>/dev/null || true
     umount_chroot
 fi
 

@@ -36,7 +36,8 @@ NVIDIA's README and has not been run here.
 | Login | `jetson` / `jetson` (set another with `JETSON_PASSWORD=` at build time), in `sudo`; SSH on port 22 |
 | Network | Ethernet by DHCP; Wi-Fi by wpa_supplicant on `wlan0`; systemd-networkd + resolved, wired preferred |
 | First boot | the root partition grows to fill the card or SSD; unique SSH host keys are generated |
-| Extras (default on) | `video`: NVIDIA GStreamer plugins + NVIDIA FFmpeg 4.2.7 (`h264_nvv4l2dec`); `docker`: docker.io + NVIDIA runtime as default; `x11`: Xorg with NVIDIA's driver, `startx`, openbox, spanning all outputs |
+| Wi-Fi and SSH setup | `common/netconfig`: `/etc/mpf-network.txt` read at every boot (SSID, password, country, SSH key; the password is erased from it afterwards), setup page on port 8080 (password of `jetson`), access point `MPF-Setup` when no network comes up. The root partition is ext4: edit the file over SSH, the web page, or from WSL |
+| Extras (default on) | `mpf`: MPF, MPF Monitor, Godot, GMC and the hardware decoder (libnvmpi) preinstalled in `/home/jetson/MPF-Godot` by `install/install_linux.sh`, automatic login and `startx` on tty1; `video`: NVIDIA GStreamer plugins + NVIDIA FFmpeg 4.2.7 (`h264_nvv4l2dec`); `docker`: docker.io + NVIDIA runtime as default; `x11`: Xorg with NVIDIA's driver, `startx`, openbox, spanning all outputs |
 
 CUDA, cuDNN and TensorRT are not on the host; on JetPack 5 the containers bring them (for example
 `nvcr.io/nvidia/l4t-jetpack:r35.4.1`). `sudo apt install cuda-toolkit-11-4` adds the toolkit on the board.
@@ -50,14 +51,15 @@ minutes, outbound HTTPS to `developer.download.nvidia.com`, `repo.download.nvidi
 ```bash
 cd platforms/jetson/image/build
 sudo bash build-native.sh                       # everything; output in ./work/out/
-sudo EXTRAS="" bash build-native.sh             # bare image, without video/docker/x11
+sudo EXTRAS="video docker x11" bash build-native.sh   # previous content, MPF/Godot not preinstalled
+sudo EXTRAS="" bash build-native.sh             # bare image, without video/docker/x11/mpf
 sudo WIFI_SSID="MyNet" WIFI_PSK="secret" WIFI_COUNTRY=FR bash build-native.sh   # pre-seeds one Wi-Fi network
 ```
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `WORK` | `./work` | Work folder (BSP, rootfs, output); ignored by git |
-| `EXTRAS` | `video docker x11` | Feature groups; empty for none |
+| `EXTRAS` | `video docker x11 mpf` | Feature groups; empty for none |
 | `WIFI_SSID` / `WIFI_PSK` / `WIFI_COUNTRY` | unset | One WPA-PSK network (stored hashed) and the regulatory country |
 | `JETSON_PASSWORD` | `jetson` | Password of the `jetson` user |
 
