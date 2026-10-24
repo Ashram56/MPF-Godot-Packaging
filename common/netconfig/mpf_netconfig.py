@@ -419,14 +419,15 @@ its <code>.sha256</code> file (optional) <input type=file name=s><br><button>Upl
 %(ctl)s
 <script>
 async function up(form,kind){
- const f=form.f.files[0], s=form.s&&form.s.files[0], B=document.querySelector('#job b'), C=16*1048576;
+ const f=form.f.files[0], s=form.s&&form.s.files[0], B=document.querySelector('#job b'), C=4*1048576;
  let sha=''; if(s){sha=(await s.text()).trim().split(/\\s+/)[0];}
  const base='/upload/'+kind+'?total='+f.size+'&name='+encodeURIComponent(f.name)+'&sha='+sha;
  let off=0, tries=0;
  while(off<f.size){
   const end=Math.min(off+C,f.size);
   try{
-   const r=await fetch(base+'&offset='+off,{method:'POST',body:f.slice(off,end)});
+   const ac=new AbortController(), to=setTimeout(()=>ac.abort(),20000);
+   const r=await fetch(base+'&offset='+off,{method:'POST',body:f.slice(off,end),signal:ac.signal}); clearTimeout(to);
    const t=await r.text();
    if(r.status==409&&/^\\d+$/.test(t)){off=+t;continue;}
    if(r.status>=400){B.textContent='Error: '+t;return false;}
@@ -497,7 +498,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "status": html.escape(status()), "game": g})
 
     def _upload(self, kind, q):
-        """One chunk of an upload, appended at `offset` (the browser sends 16 MB at a time and resumes after a cut).
+        """One chunk of an upload, appended at `offset` (the browser sends 4 MB at a time and resumes after a cut).
         When the file is complete it is unpacked and installed in a thread."""
         n = int(self.headers.get("Content-Length", 0))
         off, total = int(q.get("offset", ["0"])[0]), int(q.get("total", ["0"])[0])
