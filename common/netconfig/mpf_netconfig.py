@@ -533,6 +533,9 @@ class Handler(BaseHTTPRequestHandler):
                     left -= len(chunk)
         except ValueError as e:
             job_set(state="error", msg=str(e))
+            left = n
+            while left > 0:     # read the chunk so the browser can see the error instead of a broken pipe
+                left -= len(self.rfile.read(min(1 << 20, left)) or b"x" * left)
             return self._send(400, str(e), "text/plain")
         except OSError:
             return          # the browser went away: it resumes from the file's size
