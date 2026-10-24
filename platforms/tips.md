@@ -131,7 +131,7 @@ Found with Tron Legacy MPF on 2026-10-24 (all observed). Performance findings: [
   jack stalls, `hw_ptr` stays 0).
 - **X keeps an unplugged HDMI output as the primary at 0,0**, so the game opens its windows on a screen that does not
   exist: `xrandr --output HDMI-1 --off --output HDMI-2 --mode 1920x1080 --pos 0x0 --primary` in `~/.xinitrc`.
-- **Vulkan freezes with video**: run Godot with `--rendering-driver opengl3`.
+- **Vulkan freezes with video**: run Godot with `--rendering-driver opengl3`. Measured 2026-10-24 on Mesa 25.0.7: not a freeze but ~2 s a frame (V3DV uploads copied video planes with render passes that allocate and zero tile-state buffers); a video-less 1080p scene is faster in Vulkan (74.8 vs 39 fps). Separate render thread in Vulkan crashed when a script touched the scene tree from it.
 - **Remote Control on the board**: `claude remote-control` started by a service from the home directory asks for
   folder trust at every start; start it from a dedicated folder and answer once. Do not build on the board: FFmpeg and
   godot-cpp took about 45 minutes with the game stopped; cross-build elsewhere and give the library to the board through
