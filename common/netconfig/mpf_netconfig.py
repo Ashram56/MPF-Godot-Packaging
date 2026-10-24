@@ -327,6 +327,13 @@ def run_job(fn, *args):
     except Exception as e:   # keep the page alive whatever happens
         job_set(state="error", msg=f"{type(e).__name__}: {e}")
     finally:
+        if JOB["state"] != "done":      # a failed install leaves nothing behind (up to 1 GB)
+            for f in ("game.tar.xz", "pup.zip"):
+                try:
+                    os.remove(os.path.join(UPLOADS, f))
+                except OSError:
+                    pass
+            shutil.rmtree(os.path.join(GAMES, ".stage"), ignore_errors=True)
         JOB_LOCK.release()
 
 
