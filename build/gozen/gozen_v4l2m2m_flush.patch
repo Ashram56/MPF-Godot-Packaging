@@ -1,8 +1,21 @@
 diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
-index 3d5e1b4..af545ea 100644
+index 3d5e1b4..251dca0 100644
 --- a/src/gozen_video.cpp
 +++ b/src/gozen_video.cpp
-@@ -338,7 +338,8 @@ int GoZenVideo::open(const String& video_path) {
+@@ -96,6 +96,12 @@ bool GoZenVideo::_open_decoder(const AVCodec* codec, bool hw) {
+ 		return false;
+ 	if (avcodec_parameters_to_context(av_codec_ctx.get(), av_stream->codecpar))
+ 		return false;
++	// FFmpeg's own tool sets these; the V4L2 M2M decoders convert pts to and from V4L2 timestamps with them, and
++	// without them every decoded frame comes back with AV_NOPTS_VALUE
++	if (String(codec->name).ends_with("_v4l2m2m")) {
++		av_codec_ctx->pkt_timebase = av_stream->time_base;
++		av_codec_ctx->time_base = av_stream->time_base;
++	}
+ 	FFmpeg::enable_multithreading(av_codec_ctx.get(), codec);
+ 	AVDictionary* codec_options = nullptr;
+ 	if (hw) {
+@@ -338,7 +344,8 @@ int GoZenVideo::open(const String& video_path) {
  		return _log_err("Couldn't alloc packed/frames");
  	}
  
@@ -12,7 +25,7 @@ index 3d5e1b4..af545ea 100644
  	bool duration_from_bitrate = av_format_ctx->duration_estimation_method == AVFMT_DURATION_FROM_BITRATE;
  	int response = 0;
  	int attempts = 0;
-@@ -559,6 +560,9 @@ int GoZenVideo::seek_frame(int frame_nr) {
+@@ -559,6 +566,9 @@ int GoZenVideo::seek_frame(int frame_nr) {
  
  	int response = 0;
  	int attempts = 0;
@@ -22,7 +35,7 @@ index 3d5e1b4..af545ea 100644
  
  	// Video seeking.
  	if ((response = _seek_frame(frame_nr)) < 0)
-@@ -576,9 +580,17 @@ int GoZenVideo::seek_frame(int frame_nr) {
+@@ -576,9 +586,17 @@ int GoZenVideo::seek_frame(int frame_nr) {
  				attempts++;
  				continue;
  			} else if (response == AVERROR_EOF) {
@@ -41,20 +54,29 @@ index 3d5e1b4..af545ea 100644
  					return _log_err("Couldn't seek");
  
  				continue;
-@@ -595,6 +607,12 @@ int GoZenVideo::seek_frame(int frame_nr) {
+@@ -595,8 +613,20 @@ int GoZenVideo::seek_frame(int frame_nr) {
  		else
  			current_pts = av_frame->best_effort_timestamp;
  
+-		if (current_pts == AV_NOPTS_VALUE)
 +		frames_seen++;
 +		if (trace && traced++ < 12)
 +			UtilityFunctions::print("GoZen trace: seek_frame(", frame_nr, ") frame ", frames_seen, " pts ", (int64_t)av_frame->pts,
 +									" best_effort ", (int64_t)av_frame->best_effort_timestamp, " -> ",
 +									(int64_t)(current_pts * stream_time_base_video), " target ", frame_timestamp);
 +
- 		if (current_pts == AV_NOPTS_VALUE)
++		if (current_pts == AV_NOPTS_VALUE) {
++			// a V4L2 M2M decoder that gives no pts: the first frame after the seek (a key frame) is the best there is
++			if (av_codec_ctx->codec && String(av_codec_ctx->codec->name).ends_with("_v4l2m2m")) {
++				_copy_frame_data();
++				break;
++			}
  			continue;
++		}
  
-@@ -793,8 +811,21 @@ void GoZenVideo::_copy_frame_data() {
+ 		// Skip to actual requested frame.
+ 		if ((int64_t)(current_pts * stream_time_base_video) / 10000 >= frame_timestamp / 10000) {
+@@ -793,8 +823,21 @@ void GoZenVideo::_copy_frame_data() {
  	}
  }
  
