@@ -438,12 +438,12 @@ async function up(form,kind){
    try{off=+(await (await fetch('/upload/size/'+kind)).text());}catch(e2){}
   }
  }
- poll(); return false;}
-async function poll(){
+ poll(true); return false;}
+async function poll(r){
  const j=await (await fetch('/job')).json(); const b=document.querySelector('#job b');
  if(j.state=='running'||j.state=='done'||j.state=='error')b.textContent=j.msg;
  document.getElementById('log').textContent=j.log;
- if(j.state=='running')setTimeout(poll,2000); else if(j.state=='done')setTimeout(()=>location.reload(),1500);}
+ if(j.state=='running')setTimeout(()=>poll(r),2000); else if(j.state=='done'&&r)setTimeout(()=>location.reload(),1500);}
 poll();
 </script>"""
 
