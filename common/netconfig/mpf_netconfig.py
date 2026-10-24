@@ -250,6 +250,18 @@ def free_gb(path):
     return shutil.disk_usage(path).free / 1e9
 
 
+def first_run_defaults(game):
+    """The ROM's own DMD look, no PuP until a pack is installed, and start at power-on: only for what nobody set yet."""
+    try:
+        have = json.loads(tool(game, "get").stdout or "{}")
+    except ValueError:
+        have = {}
+    want = [x for x in (("dmd.mode", "classic"), ("pup.enabled", "false" if not os.path.isdir(os.path.join(game, "pup_pack/trn_174h")) else "true")) if x[0] not in have]
+    if want:
+        job_log(tool(game, "set", *[v for kv in want for v in kv]).stderr)
+    run("systemctl", "enable", "mpf-game.service")
+
+
 def install_game(archive, expect_sha):
     job_set(state="running", msg="Checking the archive")
     h = hashlib.sha256()
@@ -301,6 +313,7 @@ def install_game(archive, expect_sha):
     pw = pwd.getpwnam(USER)
     sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", dest)
     os.remove(archive)
+    first_run_defaults(dest)
     job_set(state="done", msg=f"Game {b.get('version')} installed in {dest}")
 
 
@@ -317,7 +330,8 @@ def install_pup(zipfile):
     env = ["env"] + [f"{k}={v}" for k, v in game_env().items()]
     sh(*env, *args, cwd=game, user=True)
     os.remove(zipfile)
-    job_set(state="done", msg="PuP Pack installed" + (" (restart the game)" if b.get("pup", {}).get("needs_restart") else ""))
+    tool(game, "set", "pup.enabled", "true")
+    job_set(state="done", msg="PuP Pack installed and enabled" + (" (restart the game)" if b.get("pup", {}).get("needs_restart") else ""))
 
 
 def run_job(fn, *args):
