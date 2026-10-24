@@ -8,8 +8,8 @@
 | Affected versions | GDE GoZen at `f9448619324ad7d0d4e79d3bd501bde477ea4b7f` with [hwdec-nvmpi-first](hwdec-nvmpi-first.md) applied |
 | Platforms | Linux arm64 on a Raspberry Pi 4 with the Raspberry Pi kernel (`bcm2835-codec`, `/dev/video10`: H.264); elsewhere it falls back to software |
 | Found on | Raspberry Pi 4 image, 2026-10-23 |
-| Fact | **not yet checked on a board** (the build is written; no Pi 4 has run it) |
-| Our fix | [`../../build/gozen/gozen_v4l2m2m.patch`](../../build/gozen/gozen_v4l2m2m.patch) (`GoZenVideo::open()`); FFmpeg built with `--enable-v4l2-m2m` by [`../../build/gozen/build_in_docker.sh`](../../build/gozen/build_in_docker.sh) |
+| Fact | observed on a Raspberry Pi 4 (2026-10-24): 1080p30 H.264 loops at 27.5 fps with `h264_v4l2m2m` (OpenGL ES, about 119 % CPU for the game), 29.5 fps in software (about 155 %); opening a video takes 0.4 s, a loop 0.22 s |
+| Our fix | [`../../build/gozen/gozen_v4l2m2m.patch`](../../build/gozen/gozen_v4l2m2m.patch) (`GoZenVideo::open()`), [`gozen_v4l2m2m_flush.patch`](../../build/gozen/gozen_v4l2m2m_flush.patch) (decoder recreated on flush, time base set, bounded seek retry, `GOZEN_TRACE=1`); FFmpeg built with `--enable-v4l2-m2m` by [`../../build/gozen/build_in_docker.sh`](../../build/gozen/build_in_docker.sh) |
 | Applied by | the committed binary `addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so` once rebuilt by `build/gozen/build_gozen.sh arm64` |
 | Upstream | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are off on GitHub); status: **draft, not filed** (same request as hwdec-nvmpi-first) |
 
@@ -29,6 +29,15 @@ After `<codec>_nvmpi`, `GoZenVideo::open()` tries FFmpeg's own `<codec>_v4l2m2m`
 `GOZEN_HWDEC=0` turns both off. The log names the one used: `GoZen: hardware decoder h264_v4l2m2m`. HEVC on the Pi 4
 uses a different kernel interface (`rpi-hevc-dec`, stateless) that FFmpeg's `hevc_v4l2m2m` does not drive, so HEVC
 stays in software until FFmpeg gets the Raspberry Pi V4L2-request patch.
+
+## Two traps on the way
+
+- `avcodec_flush_buffers()` on a V4L2 M2M decoder leaves it answering EOF: GoZen's `seek_frame()` then looped for ever
+  (`frame_nr--` retried the same frame). The decoder is recreated instead, and the retry is bounded.
+- Without `pkt_timebase`/`time_base` on the decoder context, every frame came back with `AV_NOPTS_VALUE`; `seek_frame()`
+  skipped them all and read the whole file (9 s for 20 s of video, at every loop). FFmpeg's own tool sets both.
+
+The hardware decoder saves little CPU in the game (about 35 points), because the frames are copied: not looked into yet.
 
 ## How to check
 
