@@ -191,6 +191,9 @@ mkdir -p "$R/etc/wpa_supplicant"
     fi
 } > "$WPA"
 chmod 600 "$WPA"
+# Wi-Fi power saving (brcmfmac enables it) made the latency 170 ms and more to the gateway: off for good
+mkdir -p "$R/etc/systemd/system/wpa_supplicant@wlan0.service.d"
+printf '[Service]\nExecStartPost=-/usr/sbin/iw dev wlan0 set power_save off\n' > "$R/etc/systemd/system/wpa_supplicant@wlan0.service.d/power-save-off.conf"
 in_chroot "systemctl enable resizerootfs.service systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
 in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 
