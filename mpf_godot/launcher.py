@@ -278,14 +278,20 @@ def parser():
                    help="Godot draws on its main thread instead of a separate render thread")
     p.add_argument("--xvfb", dest="virtual_display", action="store_true", default=None,
                    help="Linux: run Godot under Xvfb even with a display")
-    p.add_argument("godot_args", nargs="*", help="after --: arguments for Godot")
     return p
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # everything after -- goes to Godot, wherever the options of this command are (argparse refuses a trailing
+    # positional list once options have been given after GAME)
+    godot_args = []
+    if "--" in argv:
+        i = argv.index("--")
+        argv, godot_args = argv[:i], argv[i + 1:]
     args = parser().parse_args(argv)
     return run(args.game, configs=args.configs, monitor=args.monitor, seconds=args.seconds, text_ui=args.text_ui,
-               godot_args=args.godot_args, virtual_display=args.virtual_display, render_thread=args.render_thread)
+               godot_args=godot_args, virtual_display=args.virtual_display, render_thread=args.render_thread)
 
 
 if __name__ == "__main__":

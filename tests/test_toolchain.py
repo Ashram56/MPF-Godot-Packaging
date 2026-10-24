@@ -154,6 +154,14 @@ class TestLauncher(unittest.TestCase):
                 mock.patch.object(tc, "is_raspberry_pi4", return_value=False):
             self.assertNotIn("--rendering-driver", launcher.godot_command("/game", [], virtual_display=False))
 
+    def test_main_sends_everything_after_dashes_to_godot(self):
+        with mock.patch.object(launcher, "run", return_value=0) as run:
+            launcher.main(["g", "--seconds", "25", "--", "--rendering-driver", "opengl3"])
+            self.assertEqual(["--rendering-driver", "opengl3"], run.call_args.kwargs["godot_args"])
+            self.assertEqual(25.0, run.call_args.kwargs["seconds"])
+            launcher.main(["g"])
+            self.assertEqual([], run.call_args.kwargs["godot_args"])
+
     def test_is_raspberry_pi4_reads_the_device_tree(self):
         d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, d)
