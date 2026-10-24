@@ -4,6 +4,7 @@
 # Not part of setup: the binaries are committed. Needs docker and git.
 #
 #     bash build/gozen/build_gozen.sh [arm64] [x86_64] [windows]     # default all three
+#     GOZEN_NATIVE=1 bash build/gozen/build_gozen.sh arm64            # on an arm64 machine, no Docker
 #
 # - GDE GoZen (github.com/VoylinsGamedevJourney/gde_gozen) at GOZEN_REV, with build/gozen/gozen.patch: asks
 #   FFmpeg for <codec>_nvmpi first and falls back to the software decoder (GOZEN_HWDEC=0 forces software);
@@ -35,6 +36,7 @@ git submodule update --init --depth 1 ffmpeg godot_cpp
 git -C ffmpeg checkout -q --force . && git -C ffmpeg clean -qfd
 git apply "$ROOT/build/gozen/gozen.patch"
 git apply "$ROOT/build/gozen/gozen_v4l2m2m.patch"
+git apply "$ROOT/build/gozen/gozen_v4l2m2m_flush.patch"
 git -C "$WORK/jetson-ffmpeg" checkout -q --force "$JETSON_FFMPEG_REV"
 git -C "$WORK/jetson-ffmpeg" apply "$ROOT/build/gozen/nvmpi_flush.patch"
 "$WORK/jetson-ffmpeg/scripts/ffpatch.sh" "$WORK/gde_gozen/ffmpeg"
@@ -47,8 +49,13 @@ for arch in "${ARCHS[@]}"; do
     cp "test_room/addons/gde_gozen/bin/libgozen.windows.template_release.x86_64.dll" "$ROOT/addons/gde_gozen/bin/"
     continue
   fi
-  docker run --rm -e PIP_CERT -v "$WORK/gde_gozen:/src" -v "$ROOT/build/gozen:/b:ro" ubuntu:20.04 \
-    bash /b/build_in_docker.sh "$arch"
+  if [ "${GOZEN_NATIVE:-0}" = 1 ] && [ "$arch" = "$(uname -m | sed s/aarch64/arm64/)" ]; then
+    # no Docker: build on this machine (a Raspberry Pi 4 to test quickly; the glibc is the machine's, not 2.31)
+    sudo env SRC="$WORK/gde_gozen" bash "$ROOT/build/gozen/build_in_docker.sh" "$arch"
+  else
+    docker run --rm -e PIP_CERT -v "$WORK/gde_gozen:/src" -v "$ROOT/build/gozen:/b:ro" ubuntu:20.04 \
+      bash /b/build_in_docker.sh "$arch"
+  fi
   cp "test_room/addons/gde_gozen/bin/libgozen.linux.template_release.$arch.so" "$ROOT/addons/gde_gozen/bin/"
 done
 ls -l "$ROOT/addons/gde_gozen/bin/"

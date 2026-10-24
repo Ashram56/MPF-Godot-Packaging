@@ -4,6 +4,7 @@
 # On an arm64 host (a Jetson) the arm64 build is native: no cross toolchain.
 set -euo pipefail
 ARCH="$1"
+SRC="${SRC:-/src}"
 NATIVE=0
 [ "$ARCH" = arm64 ] && [ "$(uname -m)" = aarch64 ] && NATIVE=1
 CROSS_PKGS=(gcc-aarch64-linux-gnu g++-aarch64-linux-gnu)
@@ -13,9 +14,9 @@ if ! command -v scons >/dev/null; then
   apt-get update -qq
   apt-get install -y -qq --no-install-recommends gcc g++ "${CROSS_PKGS[@]}" make \
     pkg-config python3 python3-pip git nasm ca-certificates >/dev/null
-  pip3 install -q scons==4.8.1
+  pip3 install -q scons==4.8.1 || pip3 install -q --break-system-packages scons==4.8.1
 fi
-cd /src/ffmpeg
+cd "$SRC/ffmpeg"
 [ -f ffbuild/config.mak ] && make distclean >/dev/null 2>&1 || true
 rm -rf bin
 CROSS=()
@@ -38,7 +39,7 @@ grep -q "CONFIG_H264_NVMPI_DECODER 1" config_components.h || { echo "nvmpi decod
 grep -q "CONFIG_H264_V4L2M2M_DECODER 1" config_components.h || { echo "v4l2m2m decoder not enabled"; exit 1; }
 make -j"$(nproc)" >/dev/null
 make install >/dev/null
-cd /src
+cd "$SRC"
 if [ "$ARCH" = arm64 ] && [ "$NATIVE" = 0 ]; then
   # godot-cpp builds with the default gcc/g++/ar: point them at the cross toolchain
   mkdir -p /tmp/cross

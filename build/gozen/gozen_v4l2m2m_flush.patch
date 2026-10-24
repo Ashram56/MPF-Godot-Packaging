@@ -1,0 +1,72 @@
+diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
+index 3d5e1b4..43df9af 100644
+--- a/src/gozen_video.cpp
++++ b/src/gozen_video.cpp
+@@ -338,7 +338,8 @@ int GoZenVideo::open(const String& video_path) {
+ 		return _log_err("Couldn't alloc packed/frames");
+ 	}
+ 
+-	avcodec_flush_buffers(av_codec_ctx.get());
++	if (!av_codec || !String(av_codec->name).ends_with("_v4l2m2m"))
++		avcodec_flush_buffers(av_codec_ctx.get());
+ 	bool duration_from_bitrate = av_format_ctx->duration_estimation_method == AVFMT_DURATION_FROM_BITRATE;
+ 	int response = 0;
+ 	int attempts = 0;
+@@ -559,6 +560,7 @@ int GoZenVideo::seek_frame(int frame_nr) {
+ 
+ 	int response = 0;
+ 	int attempts = 0;
++	int eof_retries = 0;
+ 
+ 	// Video seeking.
+ 	if ((response = _seek_frame(frame_nr)) < 0)
+@@ -576,9 +578,14 @@ int GoZenVideo::seek_frame(int frame_nr) {
+ 				attempts++;
+ 				continue;
+ 			} else if (response == AVERROR_EOF) {
++				if (++eof_retries > 5 || frame_nr <= 0) {
++					_log_err("End of file reached while seeking, giving up");
++					response = 1;
++					break;
++				}
+ 				_log_err("End of file reached! Going back 1 frame!");
+ 
+-				if ((response = _seek_frame(frame_nr--)) < 0)
++				if ((response = _seek_frame(--frame_nr)) < 0)
+ 					return _log_err("Couldn't seek");
+ 
+ 				continue;
+@@ -793,8 +800,20 @@ void GoZenVideo::_copy_frame_data() {
+ 	}
+ }
+ 
+-int GoZenVideo::_seek_frame(int frame_nr) {
++// avcodec_flush_buffers() on a V4L2 M2M decoder (Raspberry Pi 4) leaves it answering EOF to every later request, so a
++// flush there recreates the decoder instead (same approach as nvmpi_flush.patch for the Jetson).
++void GoZenVideo::_flush_decoder() {
++	if (av_codec && String(av_codec->name).ends_with("_v4l2m2m")) {
++		av_codec_ctx.reset();
++		if (!_open_decoder(av_codec))
++			UtilityFunctions::printerr("GoZen: could not reopen ", av_codec->name, " after a seek");
++		return;
++	}
+ 	avcodec_flush_buffers(av_codec_ctx.get());
++}
++
++int GoZenVideo::_seek_frame(int frame_nr) {
++	_flush_decoder();
+ 
+ 	frame_timestamp = (int64_t)(frame_nr * average_frame_duration);
+ 	return av_seek_frame(av_format_ctx.get(), -1, (start_time_video + frame_timestamp) / 10,
+diff --git a/src/gozen_video.hpp b/src/gozen_video.hpp
+index d4a36a5..72335c8 100644
+--- a/src/gozen_video.hpp
++++ b/src/gozen_video.hpp
+@@ -98,6 +98,7 @@ class GoZenVideo : public Resource {
+ 	void _clean_frame_data();
+ 
+ 	int _seek_frame(int frame_nr);
++	void _flush_decoder();
+ 
+ 	inline void _log(String message) {
+ 		if (debug)
