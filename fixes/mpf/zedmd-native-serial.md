@@ -29,6 +29,8 @@ With `hardware: rgb_dmd: zedmd`, MPF stops with `Failed to load ZeDMD libraries.
 A platform in this repository that does not need the compiled library. It follows libzedmd's `ZeDMDComm` (PPUC/libzedmd):
 handshake (`FRAME` `ZeDMD` 0x0c), reply of 64 bytes (width, height, write size), zone packets (8x4 pixels, RGB888,
 index, black zones as index + 128), render (0x06), clear (0x0a), every write acknowledged `ZeDMD` `A`. USB serial only.
+
+For less CPU and latency, [`native/zedmd_feed/zedmd_feed.c`](../../native/zedmd_feed/zedmd_feed.c) does the same in C (libc only, Linux/macOS): it reads raw RGB888 frames on stdin, so a Godot or other front end can pipe the DMD to it without MPF. Tested on a pty only (`tests/test_zedmd_feed.py`).
 Not tried on a real ZeDMD yet; the protocol was read from libzedmd's source, not captured.
 
 ## How to check
