@@ -52,7 +52,11 @@ static int open_port(const char *dev, int baud_cdc) {
     struct termios t;
     tcgetattr(f, &t);
     cfmakeraw(&t);
+#ifdef B921600
     speed_t s = baud_cdc ? B115200 : B921600;
+#else                                           /* macOS: any rate is its number */
+    speed_t s = baud_cdc ? 115200 : 921600;
+#endif
     cfsetispeed(&t, s);
     cfsetospeed(&t, s);
     t.c_cflag |= CLOCAL | CREAD;
