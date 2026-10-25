@@ -14,7 +14,9 @@ Settings (environment, defaults for the Raspberry Pi image):
   MPF_GAMES_DIR       /opt/games          where an uploaded game bundle is installed (<dir>/<bundle id>)
   MPF_UPLOAD_DIR      /var/lib/mpf-uploads  uploads are written here, then unpacked
   MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, TRON_VENV, DISPLAY, MPF_GAME_ARGS)
-  MPF_GOZEN_SO        a GoZen library built for this board, copied over the bundle's own (optional)
+  MPF_GOZEN_SO        a GoZen library built for this board, copied over the bundle's own (optional; not when
+                      the bundle's build already has MPF_GOZEN_NEEDS, bundle.json "gozen")
+  MPF_GOZEN_NEEDS     v4l2m2m zero_copy   what the bundle's GoZen must carry to be kept
 Must run as root.
 """
 import hashlib, html, json, os, platform, pwd, re, subprocess, sys, threading, time, base64, shutil
@@ -31,6 +33,7 @@ GAMES = os.environ.get("MPF_GAMES_DIR", "/opt/games")
 UPLOADS = os.environ.get("MPF_UPLOAD_DIR", "/var/lib/mpf-uploads")
 GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
 GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
+GOZEN_NEEDS = os.environ.get("MPF_GOZEN_NEEDS", "v4l2m2m zero_copy").split()
 AP_SSID, AP_PSK, AP_ADDR = "MPF-Setup", os.environ.get("MPF_AP_PSK", "mpf-setup"), "192.168.4.1"
 
 
@@ -262,6 +265,19 @@ def first_run_defaults(game):
     run("systemctl", "enable", "mpf-game.service")
 
 
+def board_profile(game, b):
+    """The bundle's settings for this board (bundle.json "profiles", picked from the device tree by the bundle's own
+    tool): applied once, only to what nobody set; the tool's lines go to the job log."""
+    cmd = b.get("profiles", {}).get("apply")
+    if not cmd:
+        return
+    args = cmd.split()
+    if args[0] == "python3":
+        args[0] = game_python()
+    r = run("runuser", "-u", USER, "--", *args, cwd=game)
+    job_log((r.stdout + r.stderr).strip() or "board profile: nothing to apply")
+
+
 def install_game(archive, expect_sha):
     job_set(state="running", msg="Checking the archive")
     h = hashlib.sha256()
@@ -307,13 +323,16 @@ def install_game(archive, expect_sha):
     if GOZEN_SO and os.path.isfile(GOZEN_SO):
         bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
         for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
-            if re.match(r"libgozen\.linux\..*arm64\.so$", n):
+            if n in b.get("gozen", {}) and all(f in b["gozen"][n] for f in GOZEN_NEEDS):
+                job_log(f"{n}: the bundle's own build has {' '.join(GOZEN_NEEDS)}, kept")
+            elif re.match(r"libgozen\.linux\..*arm64\.so$", n):
                 shutil.copy(GOZEN_SO, os.path.join(bindir, n))
                 job_log(f"{n}: replaced by this board's GoZen")
     pw = pwd.getpwnam(USER)
     sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", dest)
     os.remove(archive)
     first_run_defaults(dest)
+    board_profile(dest, b)
     job_set(state="done", msg=f"Game {b.get('version')} installed in {dest}")
 
 
