@@ -32,7 +32,7 @@ sudo bash wsl-build.sh        # installs host packages, work folder ~/pi4-build,
 
 Flash the `.img.xz` with Raspberry Pi Imager ("Use custom") or `xzcat img.xz | sudo dd of=/dev/sdX bs=4M status=progress`.
 
-## Pi 4 settings (measured, [platforms/raspberrypi.md](../../../raspberrypi.md))
+## Pi 4 settings (measured, [platforms/raspberrypi.md](../../raspberrypi.md))
 
 The cabinet files in [../cabinet](../cabinet/) hold the measured settings; the image applies what does not depend on the screen or on a kernel build.
 
