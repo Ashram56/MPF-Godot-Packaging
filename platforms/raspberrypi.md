@@ -4,7 +4,7 @@ What a Raspberry Pi 4 needs to run an MPF + Godot game with PinUP videos, every 
 measurement behind it. Measured on the Tron Legacy cabinet, 24-26 Oct 2026: Raspberry Pi 4 Model B 4 GB (V3D 4.2),
 Raspberry Pi OS (Debian 13), kernel 6.18.50+rpt-rpi-v8, X11 + openbox, one 1920x1080 screen on HDMI-2, sound on
 the 3.5 mm jack. The files named below are in [raspberrypi/cabinet/](raspberrypi/cabinet/); the minimal image
-([raspberrypi/image/](raspberrypi/image/README.md)) does not apply them yet.
+([raspberrypi/image/](raspberrypi/image/README.md)) applies the ones that need neither a kernel build nor a patched Godot (table there); the codec module and the EGL-patched Godot are still to be added to it.
 
 ## Platform limits (decided by the owner, 2026-10-26)
 
@@ -49,7 +49,7 @@ gain), a 30 Hz mode (the EDID offers none).
 | The owner's timezone | `timedatectl set-timezone` | the image's UTC shows in the game's clock |
 | Fixed `bcm2835-codec` module | `/lib/modules/$(uname -r)/updates/bcm2835-codec.ko`, then `depmod` ([patch](raspberrypi/cabinet/bcm2835-codec-flush-completion.patch): three inverted completion tests) | the stock module oopses when a decoder closes with zero-copy. Built per kernel version, never on the Pi (cross-build); a kernel update brings the stock one back |
 | Godot 4.6.3 with the EGL patch | the toolchain's Godot, `GODOT=` | official 4.6.3 crashes with `--render-thread separate` on GLES ([fix](../fixes/godot/gles-separate-render-thread-crash.md)) |
-| Mouse cursor hidden | X with `-nocursor`, or `unclutter` | **to do**: the cursor sits in the middle of the screen |
+| Mouse cursor hidden | X with `-nocursor`, or `unclutter` | the cursor sat in the middle of the screen; the image starts X with `-nocursor` |
 
 ## The game service's environment
 

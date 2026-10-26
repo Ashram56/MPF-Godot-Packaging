@@ -162,7 +162,7 @@ display_auto_detect=1
 
 dtparam=audio=on
 CFG
-echo "console=serial0,115200 console=tty1 root=LABEL=rootfs rootfstype=ext4 fsck.repair=yes rootwait net.ifnames=0 quiet" > "$FWDIR/cmdline.txt"
+echo "console=serial0,115200 console=tty1 root=LABEL=rootfs rootfstype=ext4 fsck.repair=yes rootwait net.ifnames=0 snd_bcm2835.enable_headphones=1 quiet" > "$FWDIR/cmdline.txt"
 for f in kernel8.img initramfs8 start4.elf fixup4.dat bcm2711-rpi-4-b.dtb overlays/vc4-kms-v3d.dtbo; do
     [ -s "$FWDIR/$f" ] || { echo "missing /boot/firmware/$f"; ls -la "$FWDIR"; exit 1; }
 done
@@ -205,10 +205,18 @@ NC="$REPO_ROOT/common/netconfig"
 install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
 install -m 644 "$NC"/mpf-netconfig-*.service "$NC/mpf-game.service" "$R/etc/systemd/system/"
 install -m 644 "$NC/mpf-network.txt.template" "$FWDIR/mpf-network.txt"
+CAB="$KIT/../../cabinet"   # platforms/raspberrypi/cabinet: the measured Pi 4 settings (platforms/raspberrypi.md)
 printf 'MPF_NETCONFIG_FILE=/boot/firmware/mpf-network.txt\nMPF_USER=pi\nMPF_WLAN=wlan0\nMPF_GOZEN_SO=/home/pi/MPF-Godot/addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so\n' > "$R/etc/default/mpf-netconfig"
-# Game bundle uploaded from the web page (Tron-Legacy-MPF docs/bundle.md): GODOT / TRON_VENV point at what the base system provides
+# ALSA reports 0 output latency while it holds 58-93 ms: the video clock subtracts it. GOZEN_HWDEC=1 (hardware decoder
+# with zero-copy) is NOT set: it needs the fixed bcm2835-codec module, which the image does not carry yet.
+printf 'GOZEN_AUDIO_LATENCY=0.087\n' >> "$R/etc/default/mpf-netconfig"
+# Game bundle uploaded from the web page (Tron-Legacy-MPF docs/bundle.md). GODOT / TRON_VENV point at what the base
+# system provides. The official Godot 4.6.3 crashes with --render-thread separate on GLES (fixes/godot/gles-separate-render-thread-crash.md,
+# patch in build/godot/): without a patched build the launcher keeps --render-thread safe.
 mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"
-printf 'MPF_GAME_ARGS=-- --rendering-driver opengl3\n' > "$R/etc/default/mpf-game"
+printf 'MPF_GAME_ARGS=-- --rendering-driver opengl3 --max-fps 30 --audio-output-latency 60\nDISPLAY=:0\n' > "$R/etc/default/mpf-game"
+# game sound on the 3.5 mm jack, plain hw through plug (dmix stalls on snd_bcm2835)
+install -m 644 "$CAB/asound.conf" "$R/etc/asound.conf"
 in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service >/dev/null 2>&1"
 
 in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
@@ -226,17 +234,8 @@ if [ -n "$EXTRAS" ]; then
         in_chroot "apt-get install -y -qq xserver-xorg-core xserver-xorg-input-libinput xinit x11-xserver-utils xauth openbox xterm libpam-systemd \
             mesa-vulkan-drivers libgl1-mesa-dri libegl1 libvulkan1 libxcursor1 libxinerama1 libxrandr2 libxi6 libxext6 libxrender1 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3"
         printf 'allowed_users=console\nneeds_root_rights=auto\n' > "$R/etc/X11/Xwrapper.config"
-        cat > "$R/home/pi/.xinitrc" <<'XRC'
-#!/bin/sh
-# Edit to taste. Extend the desktop across all connected outputs (HDMI-1 + HDMI-2), left to right:
-prev=""
-for out in $(xrandr | awk '/ connected/ {print $1}'); do
-    if [ -z "$prev" ]; then xrandr --output "$out" --auto --primary; else xrandr --output "$out" --auto --right-of "$prev"; fi
-    prev="$out"
-done
-exec openbox-session
-XRC
-        chmod 755 "$R/home/pi/.xinitrc"
+        # one screen, the game's (HDMI-2 at 1920x1080, else HDMI-1): a second X output costs a copy per frame
+        install -m 755 "$CAB/xinitrc" "$R/home/pi/.xinitrc"
     fi
     if has mpf; then
         # The repository's own Linux installer, run as the cabinet user in the chroot (Python 3.11 via uv, MPF,
@@ -257,11 +256,18 @@ XRC
         in_chroot "cd /home/pi/MPF-Godot && bash install/install_linux.sh --yes --no-setup --xvfb"
         rm -rf "$R/root/.local" "$R/root/.cache"   # root's copy of uv / Python 3.11, pi gets its own
         in_chroot "su - pi -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
+        # Base system a game bundle needs (Tron-Legacy-MPF docs/bundle.md "Install on a base system"): a venv with MPF,
+        # ffmpeg with libtheora (installed above), and Godot from the toolchain. /etc/default/mpf-game names them.
+        in_chroot "apt-get install -y -qq python3-venv python3-dev"
+        in_chroot "python3 -m venv /opt/tron-venv && /opt/tron-venv/bin/pip install -q mpf==0.80.1 pillow fonttools psutil && chown -R pi:pi /opt/tron-venv"
+        GODOT_BIN="$(in_chroot "ls /home/pi/MPF-Godot/toolchain/godot/Godot_v*arm64 2>/dev/null | head -1" | tail -1)"
+        printf 'TRON_VENV=/opt/tron-venv\n' >> "$R/etc/default/mpf-game"
+        [ -n "$GODOT_BIN" ] && printf 'GODOT=%s\n' "$GODOT_BIN" >> "$R/etc/default/mpf-game"
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
         printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin pi --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
         cat >> "$R/home/pi/.profile" <<'PROF'
 # Start X on the first console (automatic login); remove this to get a plain shell
-if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then exec startx; fi
+if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then exec startx -- -nocursor; fi
 PROF
     fi
     in_chroot "chown -R pi:pi /home/pi"
