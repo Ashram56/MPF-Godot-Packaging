@@ -7,8 +7,10 @@ drivers (`intel-media-va-driver`, `mesa-va-drivers`) are in, and the game's GoZe
 ([platforms/raspberrypi/image](../../raspberrypi/image/README.md)), simpler to build: the host has the same architecture, so no emulation, and no
 loop device is needed (FAT via mtools, ext4 via `mke2fs -d`).
 
-**Status: scripts written, NOT yet run or booted.** The build needs `deb.debian.org`, which the agent session could not reach: it has
-to run on the WSL "buildbox". Expect a first round of fixes.
+**Status 2026-10-26: built and booted** (build in a cloud sandbox, QEMU + OVMF: GRUB, kernel 6.12, root grown to the disk, GPT backup header
+moved, Ethernet DHCP, SSH, setup page on 8080, no failed unit, X session started on tty1). Image 1.1 GB compressed, 3.8 GB raw. Not yet run on the
+AK2PLUS itself (VAAPI untested: QEMU has no Intel GPU). Behind a TLS-inspecting proxy the build gives the chroot the proxy and its CA while the
+installers run (removed again).
 
 | Item | Value |
 |---|---|

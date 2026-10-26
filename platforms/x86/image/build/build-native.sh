@@ -38,7 +38,8 @@ ESP="$WORK/esp"             # bind-mounted on $R/boot/efi while packages install
 OUT="$WORK/out"
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
-in_chroot() { LC_ALL=C DEBIAN_FRONTEND=noninteractive chroot "$R" /usr/bin/env bash -c "$*"; }
+CHROOT_ENV=()   # set by proxy_in
+in_chroot() { LC_ALL=C DEBIAN_FRONTEND=noninteractive chroot "$R" /usr/bin/env "${CHROOT_ENV[@]}" bash -c "$*"; }
 
 mount_chroot() {
     mkdir -p "$R/boot/efi" "$ESP"
@@ -66,6 +67,23 @@ umount_chroot() {
     fi
     return 0
 }
+# Behind a TLS-inspecting proxy (CI sandboxes): give the chroot the proxy and its CA while the installers run. /etc/environment
+# is read by `su -`. Both are removed again afterwards, the image never carries them.
+proxy_in() {
+    [ -n "${HTTPS_PROXY:-}" ] && [ -f "${CURL_CA_BUNDLE:-}" ] || return 0
+    cp "$CURL_CA_BUNDLE" "$R/usr/local/share/ca-certificates/build-proxy.crt"
+    CHROOT_ENV=(SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+                PIP_CERT=/etc/ssl/certs/ca-certificates.crt UV_NATIVE_TLS=1)
+    in_chroot "update-ca-certificates >/dev/null 2>&1"
+    printf 'HTTPS_PROXY=%s\nhttps_proxy=%s\nNO_PROXY=%s\nno_proxy=%s\nSSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt\nCURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt\nREQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt\nPIP_CERT=/etc/ssl/certs/ca-certificates.crt\nUV_NATIVE_TLS=1\n' \
+        "$HTTPS_PROXY" "$HTTPS_PROXY" "${NO_PROXY:-}" "${NO_PROXY:-}" > "$R/etc/environment"
+}
+proxy_out() {
+    rm -f "$R/usr/local/share/ca-certificates/build-proxy.crt" "$R/etc/environment"
+    CHROOT_ENV=()
+    in_chroot "update-ca-certificates --fresh >/dev/null 2>&1"
+}
+
 trap 'umount_chroot || true' EXIT
 
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
@@ -207,12 +225,14 @@ if [ -n "$EXTRAS" ]; then
                 --exclude='platforms/*/image/build/work' -cf - . | tar -C "$R/home/mpf/MPF-Godot" -xf -
         fi
         in_chroot "chown -R mpf:mpf /home/mpf"
+        proxy_in
         in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
         # The installer runs twice: as root for the system packages only, then as mpf, where it finds them all in
         # place (--xvfb: the mpf pass has no DISPLAY and wants Xvfb, the root pass may inherit one from WSLg).
         in_chroot "cd /home/mpf/MPF-Godot && bash install/install_linux.sh --yes --no-setup --xvfb"
         rm -rf "$R/root/.local" "$R/root/.cache"   # root's copy of uv / Python 3.11, mpf gets its own
         in_chroot "su - mpf -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
+        proxy_out
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
         printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin mpf --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
         cat >> "$R/home/mpf/.profile" <<'PROF'
