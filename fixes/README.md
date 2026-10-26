@@ -47,7 +47,11 @@ Upstream tracker: https://github.com/godotengine/godot/issues
 
 | Fix | Kind | Platforms | Applied by | Upstream |
 |---|---|---|---|---|
+| [Sound cracks, and videos run ahead of their sound, on a Raspberry Pi 4 (ALSA)](godot/alsa-output-latency.md) | bug (latency 0) / improvement (buffer) | Linux with ALSA (seen on a Raspberry Pi 4, analogue jack, n… | a project setting a game sets in its `project.godot`; the GoZen add-on; on the Pi image `… | Godot, https://github.com/godotengine/godot/issues; status: **draft,… |
+| [A rounded DMD frame costs 20 points of GPU on a Raspberry Pi 4 (`clip_children`)](godot/clip-children-slow-v3d.md) | improvement | Raspberry Pi 4 (V3D); not measured elsewhere | the game's code | none needed |
 | [Late frames on a 4-core board: Godot's main thread shares its core](godot/core-pinning-main-thread.md) | improvement | Linux with 4+ cores and a real display; measured on Jetson… | the launcher (`python -m mpf_godot run`), on Linux with 4+ cores, not under Xvfb | Godot, https://github.com/godotengine/godot/issues; status: none need… |
+| [Uneven frame rate with 30 fps videos on a 60 Hz screen: cap Godot at 30 FPS](godot/frame-cap-30.md) | improvement | all; it matters on boards that cannot hold 60 FPS (measured… | a project setting a game sets in its `project.godot` (Tron-Legacy-MPF does it on every pl… | none needed |
+| [Godot crashes at start with `--render-thread separate` and OpenGL ES (Raspberry Pi 4)](godot/gles-separate-render-thread-crash.md) | bug | Linux with EGL (seen on a Raspberry Pi 4, Mesa V3D, Debian… | a Godot build with the patch (no LTO needed: same speed); the launcher keeps `--render-th… | Godot, https://github.com/godotengine/godot/issues; status: **draft,… |
 | [Screenshots from a headless run are blank, and Movie Maker runs too fast for a live client](godot/headless-draws-nothing.md) | improvement | all for `--headless` and `--write-movie`; the Xvfb workarou… | the launcher (`python -m mpf_godot run`, `--xvfb` to force it) | Godot docs, https://github.com/godotengine/godot-docs/issues; status:… |
 | [A GMC game that was never opened in the Godot editor does not start](godot/import-before-first-run.md) | packaging | all | `python -m mpf_godot addons GAME` and `python -m mpf_godot run GAME` (only when `GAME/.go… | none needed for Godot (documented behaviour); a note for GMC's instal… |
 | [The game freezes for seconds the first time text is drawn with an MSDF font](godot/msdf-glyphs-main-thread.md) | bug | all (MSDF generation is CPU work); measured on Linux arm64… | the game's setup step (a headless Godot script run once after install) | Godot, https://github.com/godotengine/godot/issues; status: **draft,… |
@@ -73,6 +77,7 @@ Upstream tracker: https://codeberg.org/gozen/gde_gozen/issues
 | [Every video switch freezes all windows for 1 to 2.5 s: VideoPlayback opens, loops and frees videos on the main thread](gde-gozen/main-thread-stalls.md) | bug | all (GDScript); worst with a slow-to-open hardware decoder:… | `python -m mpf_godot addons GAME --video` (copies the patched add-on into the game) | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
 | [The app freezes for minutes when a video seeks near its end: `seek_frame()` steps back one frame per retry at EOF](gde-gozen/seek-frame-retry-loop.md) | bug | all (C++ loop); seen on Jetson Xavier NX, L4T R35.6.4, nvpm… | `python -m mpf_godot addons GAME --video` | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
 | [Small video windows still copy full-size frames: decode at the shown size, as NV12](gde-gozen/set-target-size-nv12.md) | improvement | scaling: Jetson with jetson-ffmpeg's nvmpi decoders (measur… | the committed binaries plus the add-on scripts, copied by `python -m mpf_godot addons GAM… | GDE GoZen, https://codeberg.org/gozen/gde_gozen/issues (issues are of… |
+| [Videos from the Raspberry Pi 4 hardware decoder are copied twice before they are drawn](gde-gozen/zero-copy-v4l2.md) | improvement | Raspberry Pi 4 (Compatibility renderer, `h264_v4l2m2m`) | `build/gozen/build_gozen.sh` (the arm64 library in `addons/gde_gozen/bin/`); `GOZEN_HWDEC… | GDE GoZen, https://github.com/VoylinsGamedevJourney/gde_gozen/issues;… |
 
 ## jetson-ffmpeg
 
@@ -96,4 +101,4 @@ Upstream tracker: https://github.com/claytercek/godot-native-video/issues
 
 Test projects and repro programs the reports refer to: [repro/](repro/).
 
-37 documents.
+42 documents.

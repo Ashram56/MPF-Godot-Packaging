@@ -1,0 +1,797 @@
+diff --git a/SConstruct b/SConstruct
+--- a/SConstruct
++++ b/SConstruct
+@@ -132,5 +132,10 @@ else:
+
+ # Godot compiling stuff
+ src = Glob("src/*.cpp")
++if "linux" in platform:
++    # gozen_v4l2.c reads FFmpeg's internal V4L2 M2M structs (zero-copy): FFmpeg's source tree and its config.h
++    env_c = env.Clone()
++    env_c.Append(CPPPATH=["ffmpeg"])
++    src += [env_c.SharedObject(f) for f in Glob("src/*.c")]
+ sharedlib = env.SharedLibrary(libpath, src)
+ Default(sharedlib)
+diff --git a/src/gozen_v4l2.c b/src/gozen_v4l2.c
+new file mode 100644
+--- /dev/null
++++ b/src/gozen_v4l2.c
+@@ -0,0 +1,104 @@
++// The V4L2 M2M decoder's internals that zero-copy needs (Raspberry Pi 4, bcm2835-codec): FFmpeg 7.1 has no
++// drm_prime output for it, so a decoded frame's V4L2 buffer is found from the frame (its buffer's opaque is the
++// internal V4L2Buffer) and exported as a dmabuf. Also a restart of the decoder in place (a seek or a loop) instead
++// of closing and reopening /dev/video10. C, not C++: FFmpeg's internal headers use C11 atomics. FFmpeg is built
++// statically with GoZen at a pinned revision, so its internal structs are the ones included here.
++#ifdef __linux__
++
++#include <errno.h>
++#include <fcntl.h>
++#include <string.h>
++#include <sys/ioctl.h>
++
++#include "libavcodec/avcodec.h"
++#include "libavcodec/v4l2_buffers.h"
++#include "libavcodec/v4l2_context.h"
++#include "libavcodec/v4l2_m2m.h"
++
++#include "gozen_v4l2.h"
++
++
++static int _is_v4l2m2m(const AVCodecContext* avctx) {
++	return avctx && avctx->codec && avctx->codec->wrapper_name && !strcmp(avctx->codec->wrapper_name, "v4l2m2m") &&
++		   avctx->priv_data;
++}
++
++
++int gozen_v4l2_frame_buffer(const AVCodecContext* avctx, const AVFrame* frame, GozenV4L2Buffer* out) {
++	if (!_is_v4l2m2m(avctx) || !frame || !frame->buf[0] || frame->buf[1])
++		return -1; // not a V4L2 frame, or one with a buffer per plane (bcm2835-codec gives one buffer for all)
++	const V4L2Buffer* vb = av_buffer_get_opaque(frame->buf[0]);
++	if (!vb || !vb->context || !vb->context_ref || V4L2_TYPE_IS_OUTPUT(vb->context->type) || vb->num_planes != 1)
++		return -1;
++	out->context = vb->context_ref;
++	out->fd = vb->context_ref->fd;
++	out->type = vb->buf.type;
++	out->index = vb->buf.index;
++	out->base = vb->plane_info[0].mm_addr;
++	out->length = vb->plane_info[0].length;
++	return 0;
++}
++
++
++int gozen_v4l2_export(const GozenV4L2Buffer* buffer) {
++	struct v4l2_exportbuffer e;
++	memset(&e, 0, sizeof(e));
++	e.type = buffer->type;
++	e.index = buffer->index;
++	e.plane = 0;
++	e.flags = O_RDONLY | O_CLOEXEC;
++	if (ioctl(buffer->fd, VIDIOC_EXPBUF, &e) < 0)
++		return -errno;
++	return e.fd;
++}
++
++
++// The stateful decoder's seek (Documentation/userspace-api/media/v4l/dev-decoder.rst): STREAMOFF on both queues
++// drops every queued packet and frame and ends a drain (after the end of the file), STREAMON again, then the next
++// packets from a key frame. Capture buffers the caller still holds (frames being shown) stay out; they go back to
++// the driver when released, as before. avcodec_flush_buffers() first resets FFmpeg's own draining state.
++int gozen_v4l2_restart(AVCodecContext* avctx) {
++	if (!_is_v4l2m2m(avctx))
++		return -1;
++	V4L2m2mContext* s = ((V4L2m2mPriv*)avctx->priv_data)->context;
++	if (!s || s->reinit)
++		return -1;
++	V4L2Context* output = &s->output;
++	V4L2Context* capture = &s->capture;
++	int type;
++
++	type = output->type;
++	if (ioctl(s->fd, VIDIOC_STREAMOFF, &type) < 0)
++		return -errno;
++	output->streamon = 0;
++	for (int i = 0; i < output->num_buffers; i++)
++		output->buffers[i].status = V4L2BUF_AVAILABLE;
++
++	if (capture->buffers) {
++		type = capture->type;
++		if (ioctl(s->fd, VIDIOC_STREAMOFF, &type) < 0)
++			return -errno;
++		capture->streamon = 0;
++		for (int i = 0; i < capture->num_buffers; i++)
++			if (capture->buffers[i].status == V4L2BUF_IN_DRIVER)
++				capture->buffers[i].status = V4L2BUF_AVAILABLE;
++	}
++
++	av_packet_unref(&s->buf_pkt);
++	s->draining = 0;
++	output->done = 0;
++	capture->done = 0;
++
++	if (capture->buffers) {
++		if (ioctl(s->fd, VIDIOC_STREAMON, &type) < 0)
++			return -errno;
++		capture->streamon = 1;
++		for (int i = 0; i < capture->num_buffers; i++)
++			if (capture->buffers[i].status == V4L2BUF_AVAILABLE)
++				ff_v4l2_buffer_enqueue(&capture->buffers[i]);
++	}
++	// the output queue starts again with the next packet (v4l2_try_start() in v4l2_m2m_dec.c)
++	return 0;
++}
++
++#endif
+diff --git a/src/gozen_v4l2.h b/src/gozen_v4l2.h
+new file mode 100644
+--- /dev/null
++++ b/src/gozen_v4l2.h
+@@ -0,0 +1,37 @@
++#pragma once
++
++// gozen_v4l2.c: the V4L2 M2M decoder's buffers for zero-copy, and its restart in place (Linux only).
++#ifdef __linux__
++
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct AVCodecContext;
++struct AVFrame;
++
++typedef struct GozenV4L2Buffer {
++	const void* context; // the decoder instance the buffer belongs to (alive while one of its frames is held)
++	int fd;				 // the decoder's /dev/video* file
++	uint32_t type;		 // V4L2 buffer type (CAPTURE_MPLANE)
++	uint32_t index;		 // the capture buffer's index
++	const uint8_t* base; // where FFmpeg mapped it (the frame's planes are at offsets from here)
++	size_t length;
++} GozenV4L2Buffer;
++
++// 0 and *out filled when frame is a V4L2 M2M decoder's frame in a single buffer, else -1.
++int gozen_v4l2_frame_buffer(const struct AVCodecContext* avctx, const struct AVFrame* frame, GozenV4L2Buffer* out);
++// A new dmabuf fd for the buffer (VIDIOC_EXPBUF), or -errno.
++int gozen_v4l2_export(const GozenV4L2Buffer* buffer);
++// Drops the decoder's queued packets and frames and ends a drain without closing it; 0, or < 0 when it could not
++// (the caller then reopens the decoder). Call avcodec_flush_buffers() first.
++int gozen_v4l2_restart(struct AVCodecContext* avctx);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
+--- a/src/gozen_video.cpp
++++ b/src/gozen_video.cpp
+@@ -1,4 +1,5 @@
+ #include "gozen_video.hpp"
++#include "gozen_v4l2.h"
+
+ #include <algorithm>
+ #include <mutex>
+@@ -459,6 +460,14 @@ int GoZenVideo::open(const String& video_path) {
+ 	}
+
+ 	pixel_format = av_get_pix_fmt_name((AVPixelFormat)av_frame->format);
++#ifdef __linux__
++	if (String(av_codec->name).ends_with("_v4l2m2m") && OS::get_singleton()->get_environment("GOZEN_ZEROCOPY") != "0" &&
++		(av_frame->format == AV_PIX_FMT_YUV420P || av_frame->format == AV_PIX_FMT_NV12)) {
++		GozenV4L2Buffer buffer;
++		if (gozen_v4l2_frame_buffer(av_codec_ctx.get(), av_frame.get(), &buffer) == 0)
++			zero_copy = new GoZenZeroCopy();
++	}
++#endif
+ 	_log(String("Selected pixel format is: ") + pixel_format);
+
+ 	// Preparing the data images.
+@@ -542,6 +551,10 @@ void GoZenVideo::close() {
+ 	loaded = false;
+ 	current_frame = -1;
+
++#ifdef __linux__
++	GoZenZeroCopy::release(zero_copy); // its held frames keep the decoder's buffers (and the decoder) until freed
++	zero_copy = nullptr;
++#endif
+ 	av_packet.reset();
+ 	av_frame.reset();
+ 	av_sws_frame.reset();
+@@ -660,6 +673,46 @@ bool GoZenVideo::next_frame(bool skip) {
+ 	return true;
+ }
+
++bool GoZenVideo::is_zero_copy() const {
++#ifdef __linux__
++	return zero_copy && !zero_copy->failed();
++#else
++	return false;
++#endif
++}
++
++int64_t GoZenVideo::next_frame_held() {
++	if (!loaded)
++		return -1;
++	int64_t id = -1;
++	FFmpeg::get_frame(av_format_ctx.get(), av_codec_ctx.get(), av_stream->index, av_frame.get(), av_packet.get());
++#ifdef __linux__
++	if (is_zero_copy())
++		id = zero_copy->hold(av_codec_ctx.get(), av_frame.get(), decoder_generation);
++#endif
++	if (id < 0)
++		_copy_frame_data();
++	current_frame++;
++	av_frame_unref(av_frame.get());
++	av_packet_unref(av_packet.get());
++	return id;
++}
++
++Array GoZenVideo::show_held(int64_t id) {
++#ifdef __linux__
++	if (zero_copy)
++		return zero_copy->show(id);
++#endif
++	return Array();
++}
++
++void GoZenVideo::drop_held() {
++#ifdef __linux__
++	if (zero_copy)
++		zero_copy->drop_pending();
++#endif
++}
++
+ PackedInt32Array GoZenVideo::get_streams(int stream_type) {
+ 	if (!loaded) {
+ 		_log_err("file is not open");
+@@ -825,9 +878,18 @@ void GoZenVideo::_copy_frame_data() {
+
+ // avcodec_flush_buffers() on a V4L2 M2M decoder (Raspberry Pi 4) leaves it answering EOF to every later request, so a
+ // flush there recreates the decoder instead (same approach as nvmpi_flush.patch for the Jetson).
++// A restart in place (gozen_v4l2_restart(): STREAMOFF/STREAMON, as the V4L2 decoder interface defines a seek) comes
++// first: reopening /dev/video10 takes tens of ms at every loop of a video.
+ void GoZenVideo::_flush_decoder() {
+ 	const AVCodec* codec = av_codec_ctx ? av_codec_ctx->codec : nullptr;
+ 	if (codec && String(codec->name).ends_with("_v4l2m2m")) {
++#ifdef __linux__
++		drop_held();
++		avcodec_flush_buffers(av_codec_ctx.get());
++		if (OS::get_singleton()->get_environment("GOZEN_V4L2_RESTART") != "0" && gozen_v4l2_restart(av_codec_ctx.get()) == 0)
++			return;
++		decoder_generation++;
++#endif
+ 		av_codec_ctx.reset();
+ 		if (!_open_decoder(codec))
+ 			UtilityFunctions::printerr("GoZen: could not reopen ", codec->name, " after a seek");
+@@ -858,6 +920,10 @@ void GoZenVideo::_bind_methods() {
+
+ 	BIND_METHOD_ARGS(seek_frame, "frame_nr");
+ 	BIND_METHOD_ARGS(next_frame, "skip");
++	BIND_METHOD(is_zero_copy);
++	BIND_METHOD(next_frame_held);
++	BIND_METHOD_ARGS(show_held, "id");
++	BIND_METHOD(drop_held);
+
+ 	BIND_METHOD_ARGS(get_streams, "stream_type");
+ 	BIND_METHOD_ARGS(get_stream_metadata, "stream_index");
+diff --git a/src/gozen_video.hpp b/src/gozen_video.hpp
+--- a/src/gozen_video.hpp
++++ b/src/gozen_video.hpp
+@@ -2,6 +2,7 @@
+
+ #include "ffmpeg.hpp"
+ #include "ffmpeg_helpers.hpp"
++#include "gozen_zerocopy.hpp"
+
+ #include <cmath>
+ #include <cstdint>
+@@ -93,6 +94,11 @@ class GoZenVideo : public Resource {
+ 	PackedInt32Array audio_streams;
+ 	PackedInt32Array subtitle_streams;
+
++#ifdef __linux__
++	GoZenZeroCopy* zero_copy = nullptr; // V4L2 M2M frames shown straight from the decoder's buffers (see gozen_zerocopy.hpp)
++	int decoder_generation = 0; // +1 whenever the decoder is reopened (its buffers are new ones)
++#endif
++
+ 	// Private functions.
+ 	void _copy_frame_data();
+ 	void _clean_frame_data();
+@@ -125,6 +131,16 @@ class GoZenVideo : public Resource {
+ 	int seek_frame(int frame_nr);
+ 	bool next_frame(bool skip = false);
+
++	// Zero-copy (Raspberry Pi 4's V4L2 M2M decoder with Godot's OpenGL ES renderer; GOZEN_ZEROCOPY=0 turns it off):
++	// next_frame_held() decodes the next frame and keeps it in the decoder's buffer, returning its id for
++	// show_held(), or -1 when that frame could not be held (it was copied into the y/u/v images as by next_frame()).
++	// show_held() (render thread) gives the textures of a held frame (y, u, v; y, uv when NV12) as RIDs for the
++	// shader, letting go of the frames held before it; empty when it cannot (is_zero_copy() then turns false).
++	bool is_zero_copy() const;
++	int64_t next_frame_held();
++	Array show_held(int64_t id);
++	void drop_held();
++
+ 	PackedInt32Array get_streams(int stream_type);
+ 	Dictionary get_stream_metadata(int stream_index);
+
+diff --git a/src/gozen_zerocopy.cpp b/src/gozen_zerocopy.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/gozen_zerocopy.cpp
+@@ -0,0 +1,374 @@
++#include "gozen_zerocopy.hpp"
++
++#ifdef __linux__
++
++#include <dlfcn.h>
++#include <unistd.h>
++
++#include <godot_cpp/classes/image.hpp>
++#include <godot_cpp/classes/rendering_server.hpp>
++#include <godot_cpp/variant/callable_method_pointer.hpp>
++#include <godot_cpp/variant/utility_functions.hpp>
++
++extern "C" {
++#include <libavcodec/avcodec.h>
++#include <libavutil/frame.h>
++#include <libavutil/pixfmt.h>
++}
++
++#include "gozen_v4l2.h"
++
++using namespace godot;
++
++
++// EGL and GL ES entry points, looked up at run time: Godot loads libEGL itself (its OpenGL ES renderer on X11 and
++// Wayland), and this library also runs where there is none (the Jetson, Windows).
++namespace {
++typedef void* EGLDisplay;
++typedef void* EGLImage;
++typedef int EGLint;
++typedef unsigned int GLenum;
++typedef unsigned int GLuint;
++typedef int GLint;
++
++constexpr EGLint EGL_NONE = 0x3038;
++constexpr EGLint EGL_WIDTH = 0x3057;
++constexpr EGLint EGL_HEIGHT = 0x3056;
++constexpr EGLint EGL_LINUX_DMA_BUF_EXT = 0x3270;
++constexpr EGLint EGL_LINUX_DRM_FOURCC_EXT = 0x3271;
++constexpr EGLint EGL_DMA_BUF_PLANE0_FD_EXT = 0x3272;
++constexpr EGLint EGL_DMA_BUF_PLANE0_OFFSET_EXT = 0x3273;
++constexpr EGLint EGL_DMA_BUF_PLANE0_PITCH_EXT = 0x3274;
++constexpr GLenum GL_TEXTURE_2D = 0x0DE1;
++constexpr GLenum GL_TEXTURE_BINDING_2D = 0x8069;
++constexpr GLenum GL_TEXTURE_MAG_FILTER = 0x2800;
++constexpr GLenum GL_TEXTURE_MIN_FILTER = 0x2801;
++constexpr GLenum GL_TEXTURE_WRAP_S = 0x2802;
++constexpr GLenum GL_TEXTURE_WRAP_T = 0x2803;
++constexpr GLint GL_LINEAR = 0x2601;
++constexpr GLint GL_CLAMP_TO_EDGE = 0x812F;
++constexpr uint32_t fourcc(char a, char b, char c, char d) {
++	return (uint32_t)a | ((uint32_t)b << 8) | ((uint32_t)c << 16) | ((uint32_t)d << 24);
++}
++constexpr uint32_t DRM_FORMAT_R8 = fourcc('R', '8', ' ', ' ');
++constexpr uint32_t DRM_FORMAT_GR88 = fourcc('G', 'R', '8', '8');
++
++struct GL {
++	EGLDisplay (*eglGetCurrentDisplay)();
++	EGLImage (*eglCreateImageKHR)(EGLDisplay, void*, unsigned int, void*, const EGLint*);
++	unsigned int (*eglDestroyImageKHR)(EGLDisplay, EGLImage);
++	EGLint (*eglGetError)();
++	void (*glEGLImageTargetTexture2DOES)(GLenum, void*);
++	void (*glGenTextures)(int, GLuint*);
++	void (*glDeleteTextures)(int, const GLuint*);
++	void (*glBindTexture)(GLenum, GLuint);
++	void (*glTexParameteri)(GLenum, GLenum, GLint);
++	void (*glGetIntegerv)(GLenum, GLint*);
++	GLenum (*glGetError)();
++	bool ok = false;
++};
++
++// Render thread only.
++const GL* _gl() {
++	static GL gl;
++	static bool tried = false;
++	if (tried)
++		return gl.ok ? &gl : nullptr;
++	tried = true;
++	void* lib = dlopen("libEGL.so.1", RTLD_NOW | RTLD_NOLOAD);
++	if (!lib)
++		return nullptr; // Godot draws with GLX or Vulkan: no EGL display to import into
++	auto get_proc = (void* (*)(const char*))dlsym(lib, "eglGetProcAddress");
++	if (!get_proc)
++		return nullptr;
++#define GZ_LOAD(name)                                                                                              \
++	if (!(*(void**)&gl.name = get_proc(#name)))                                                                    \
++		return nullptr;
++	GZ_LOAD(eglGetCurrentDisplay)
++	GZ_LOAD(eglCreateImageKHR)
++	GZ_LOAD(eglDestroyImageKHR)
++	GZ_LOAD(eglGetError)
++	GZ_LOAD(glEGLImageTargetTexture2DOES)
++	GZ_LOAD(glGenTextures)
++	GZ_LOAD(glDeleteTextures)
++	GZ_LOAD(glBindTexture)
++	GZ_LOAD(glTexParameteri)
++	GZ_LOAD(glGetIntegerv)
++	GZ_LOAD(glGetError)
++#undef GZ_LOAD
++	gl.ok = true;
++	return &gl;
++}
++} // namespace
++
++
++bool GoZenZeroCopy::Layout::operator==(const Layout& o) const {
++	if (format != o.format || width != o.width || height != o.height)
++		return false;
++	for (int i = 0; i < 3; i++)
++		if (offset[i] != o.offset[i] || pitch[i] != o.pitch[i])
++			return false;
++	return true;
++}
++
++
++GoZenZeroCopy::~GoZenZeroCopy() {
++	for (Import& import : imports)
++		_free_import(import);
++	for (Held& held : pending)
++		_unref(held);
++	for (Held& held : shown)
++		_unref(held);
++}
++
++
++int64_t GoZenZeroCopy::hold(const AVCodecContext* avctx, const AVFrame* frame, int generation) {
++	if (import_failed || !frame || frame->width <= 0 || frame->height <= 0)
++		return -1;
++	bool nv12 = frame->format == AV_PIX_FMT_NV12;
++	if (!nv12 && frame->format != AV_PIX_FMT_YUV420P)
++		return -1;
++	GozenV4L2Buffer buffer;
++	if (gozen_v4l2_frame_buffer(avctx, frame, &buffer))
++		return -1;
++
++	Held held;
++	held.generation = generation;
++	held.index = buffer.index;
++	held.base = buffer.base;
++	held.length = buffer.length;
++	held.fd = buffer.fd;
++	held.type = buffer.type;
++	held.layout.format = frame->format;
++	held.layout.width = frame->width;
++	held.layout.height = frame->height;
++	for (int i = 0; i < (nv12 ? 2 : 3); i++) {
++		ptrdiff_t offset = frame->data[i] - buffer.base;
++		if (!frame->data[i] || offset < 0 || (size_t)offset >= buffer.length || frame->linesize[i] <= 0)
++			return -1; // a plane outside the decoder's buffer
++		held.layout.offset[i] = (int)offset;
++		held.layout.pitch[i] = frame->linesize[i];
++	}
++	if (!(held.frame = av_frame_clone(frame)))
++		return -1;
++
++	std::lock_guard<std::mutex> lock(mutex);
++	held.id = next_id++;
++	pending.push_back(held);
++	return held.id;
++}
++
++
++void GoZenZeroCopy::drop_pending() {
++	std::deque<Held> dropped;
++	{
++		std::lock_guard<std::mutex> lock(mutex);
++		dropped.swap(pending);
++	}
++	for (Held& held : dropped)
++		_unref(held);
++}
++
++
++godot::Array GoZenZeroCopy::show(int64_t id) {
++	Array rids;
++	std::deque<Held> skipped;
++	Held held;
++	{
++		std::lock_guard<std::mutex> lock(mutex);
++		while (!pending.empty() && pending.front().id < id) {
++			skipped.push_back(pending.front());
++			pending.pop_front();
++		}
++		if (!pending.empty() && pending.front().id == id) {
++			held = pending.front();
++			pending.pop_front();
++		}
++	}
++	for (Held& h : skipped)
++		_unref(h);
++	if (!held.frame)
++		return rids;
++
++	int found = -1;
++	for (int i = 0; i < (int)imports.size(); i++) {
++		Import& import = imports[i];
++		if (!import.stale && import.generation == held.generation && import.index == held.index &&
++			import.base == held.base) {
++			if (import.layout == held.layout) {
++				found = i;
++				break;
++			}
++			import.stale = true; // the decoder reallocated its buffers (a new size): the old import is not it
++		}
++	}
++	if (found == -1)
++		found = _import(held);
++	if (found == -1) {
++		_unref(held);
++		return rids;
++	}
++
++	Import& import = imports[found];
++	held.import = found;
++	import.refs++;
++	for (int i = 0; i < import.planes; i++)
++		rids.append(import.rid[i]);
++	shown.push_back(held);
++	while ((int)shown.size() > KEEP_SHOWN + 1) {
++		Held& old = shown.front();
++		if (old.import >= 0 && old.import < (int)imports.size())
++			imports[old.import].refs--;
++		_unref(old);
++		shown.pop_front();
++	}
++
++	// Buffers of an earlier decoder (reopened after a failed restart) go once no shown frame uses them; their slots
++	// are reused so the indices in shown stay valid
++	for (Import& other : imports)
++		if (other.used && other.refs <= 0 && (other.stale || other.generation != held.generation))
++			_free_import(other);
++	return rids;
++}
++
++
++int GoZenZeroCopy::_import(const Held& held) {
++	const GL* gl = _gl();
++	EGLDisplay display = gl ? gl->eglGetCurrentDisplay() : nullptr;
++	if (!display) {
++		UtilityFunctions::print("GoZen: zero-copy unavailable (Godot is not drawing with EGL), copying frames");
++		import_failed = true;
++		return -1;
++	}
++	GozenV4L2Buffer buffer = {nullptr, held.fd, held.type, held.index, (const uint8_t*)held.base, held.length};
++	int dmabuf = gozen_v4l2_export(&buffer);
++	if (dmabuf < 0) {
++		UtilityFunctions::print("GoZen: zero-copy unavailable (VIDIOC_EXPBUF failed: ", dmabuf, "), copying frames");
++		import_failed = true;
++		return -1;
++	}
++
++	Import import;
++	import.generation = held.generation;
++	import.index = held.index;
++	import.base = held.base;
++	import.layout = held.layout;
++	import.used = true;
++	bool nv12 = held.layout.format == AV_PIX_FMT_NV12;
++	int w = held.layout.width, h = held.layout.height, cw = (w + 1) / 2, ch = (h + 1) / 2;
++	struct {
++		uint32_t fourcc;
++		Image::Format format;
++		int width, height;
++	} planes[3] = {{DRM_FORMAT_R8, Image::FORMAT_R8, w, h},
++				   {nv12 ? DRM_FORMAT_GR88 : DRM_FORMAT_R8, nv12 ? Image::FORMAT_RG8 : Image::FORMAT_R8, cw, ch},
++				   {DRM_FORMAT_R8, Image::FORMAT_R8, cw, ch}};
++	import.planes = nv12 ? 2 : 3;
++
++	GLint bound = 0;
++	gl->glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
++	bool ok = true;
++	for (int i = 0; i < import.planes && ok; i++) {
++		const EGLint attributes[] = {EGL_WIDTH,
++									 planes[i].width,
++									 EGL_HEIGHT,
++									 planes[i].height,
++									 EGL_LINUX_DRM_FOURCC_EXT,
++									 (EGLint)planes[i].fourcc,
++									 EGL_DMA_BUF_PLANE0_FD_EXT,
++									 dmabuf,
++									 EGL_DMA_BUF_PLANE0_OFFSET_EXT,
++									 held.layout.offset[i],
++									 EGL_DMA_BUF_PLANE0_PITCH_EXT,
++									 held.layout.pitch[i],
++									 EGL_NONE};
++		import.image[i] = gl->eglCreateImageKHR(display, nullptr, EGL_LINUX_DMA_BUF_EXT, nullptr, attributes);
++		if (!import.image[i]) {
++			UtilityFunctions::print("GoZen: zero-copy unavailable (eglCreateImageKHR plane ", i, ": EGL error ",
++									gl->eglGetError(), "), copying frames");
++			ok = false;
++			break;
++		}
++		while (gl->glGetError()) {
++		} // errors left by others
++		gl->glGenTextures(1, &import.texture[i]);
++		gl->glBindTexture(GL_TEXTURE_2D, import.texture[i]);
++		gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++		gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++		gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++		gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++		gl->glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, import.image[i]);
++		GLenum error = gl->glGetError();
++		if (error) {
++			UtilityFunctions::print("GoZen: zero-copy unavailable (glEGLImageTargetTexture2DOES plane ", i,
++									": GL error ", (int)error, "), copying frames");
++			ok = false;
++			break;
++		}
++		import.rid[i] = RenderingServer::get_singleton()->texture_create_from_native_handle(
++			RenderingServer::TEXTURE_TYPE_2D, planes[i].format, import.texture[i], planes[i].width, planes[i].height,
++			1);
++		if (!import.rid[i].is_valid()) {
++			UtilityFunctions::print("GoZen: zero-copy unavailable (texture_create_from_native_handle), copying frames");
++			ok = false;
++		}
++	}
++	gl->glBindTexture(GL_TEXTURE_2D, (GLuint)bound);
++	close(dmabuf); // the EGLImages keep the buffer
++	if (!ok) {
++		_free_import(import);
++		import_failed = true;
++		return -1;
++	}
++
++	for (int i = 0; i < (int)imports.size(); i++)
++		if (!imports[i].used) {
++			imports[i] = import;
++			return i;
++		}
++	imports.push_back(import);
++	return (int)imports.size() - 1;
++}
++
++
++void GoZenZeroCopy::_free_import(Import& import) {
++	const GL* gl = _gl();
++	RenderingServer* rs = RenderingServer::get_singleton();
++	for (int i = 0; i < 3; i++) {
++		if (import.rid[i].is_valid() && rs)
++			rs->free_rid(import.rid[i]); // Godot does not delete a texture it did not make
++		if (import.texture[i] && gl)
++			gl->glDeleteTextures(1, &import.texture[i]);
++		if (import.image[i] && gl)
++			gl->eglDestroyImageKHR(gl->eglGetCurrentDisplay(), import.image[i]);
++	}
++	import = Import();
++}
++
++
++void GoZenZeroCopy::_unref(Held& held) {
++	if (held.frame)
++		av_frame_free(&held.frame); // the buffer goes back to the decoder
++	held.frame = nullptr;
++}
++
++
++void GoZenZeroCopy::_delete_on_render_thread(int64_t pointer) {
++	delete (GoZenZeroCopy*)pointer;
++}
++
++
++void GoZenZeroCopy::release(GoZenZeroCopy* zero_copy) {
++	if (!zero_copy)
++		return;
++	zero_copy->drop_pending(); // the decoder gets its buffers back now, not once the render thread runs
++	RenderingServer* rs = RenderingServer::get_singleton();
++	if (!rs)
++		return; // quitting: the GL context is gone, leave it
++	if (rs->is_on_render_thread())
++		delete zero_copy;
++	else
++		rs->call_on_render_thread(callable_mp_static(&GoZenZeroCopy::_delete_on_render_thread).bind((int64_t)zero_copy));
++}
++
++#endif
+diff --git a/src/gozen_zerocopy.hpp b/src/gozen_zerocopy.hpp
+new file mode 100644
+--- /dev/null
++++ b/src/gozen_zerocopy.hpp
+@@ -0,0 +1,96 @@
++#pragma once
++
++// Zero-copy display of the V4L2 M2M decoder's frames (Raspberry Pi 4, bcm2835-codec, with Godot's OpenGL ES
++// renderer on EGL): a decoded frame stays in the decoder's buffer, which is exported once as a dmabuf
++// (VIDIOC_EXPBUF), imported on the GPU as one EGLImage per plane (EGL_EXT_image_dma_buf_import), bound to GL
++// textures (glEGLImageTargetTexture2DOES) and handed to Godot with RenderingServer.texture_create_from_native_handle().
++// The CPU never reads a pixel: copying a 1080p frame out of the decoder's uncached buffers took 10-15 ms.
++//
++// Frames are held (their AVFrame referenced, so the decoder does not reuse the buffer) from the decode until a few
++// frames after they were shown, so the GPU is done with them. A buffer is imported the first time it carries a frame,
++// then reused for every later frame it carries.
++#ifdef __linux__
++
++#include <atomic>
++#include <cstdint>
++#include <deque>
++#include <mutex>
++#include <vector>
++
++#include <godot_cpp/variant/array.hpp>
++#include <godot_cpp/variant/rid.hpp>
++
++struct AVCodecContext;
++struct AVFrame;
++
++class GoZenZeroCopy {
++  public:
++	// Shown frames kept (with their buffers) after the one on screen: the GPU may still draw them for a frame or two.
++	static constexpr int KEEP_SHOWN = 3;
++
++	GoZenZeroCopy() = default;
++	~GoZenZeroCopy(); // render thread (release())
++
++	// Decode thread: takes a reference to frame (a V4L2 M2M frame, YUV420P or NV12 in one buffer) and returns its
++	// id, or -1 when it is not such a frame. generation changes whenever the decoder is reopened.
++	int64_t hold(const AVCodecContext* avctx, const AVFrame* frame, int generation);
++	// Any thread: lets go of the frames held and not shown yet (a seek, a restart).
++	void drop_pending();
++
++	// Render thread: the textures of a held frame (y, u, v; y, uv for NV12), as RIDs for a shader; frames held before
++	// it are let go (they were skipped). Empty when it cannot be shown (failed() then tells whether zero-copy is
++	// impossible here, the caller copying frames from then on).
++	godot::Array show(int64_t id);
++	bool failed() const { return import_failed; }
++
++	// Any thread: frees it on the render thread (GL objects), now when called there.
++	static void release(GoZenZeroCopy* zero_copy);
++
++  private:
++	struct Layout {
++		int format = 0; // AVPixelFormat
++		int width = 0, height = 0;
++		int offset[3] = {}, pitch[3] = {};
++		bool operator==(const Layout& o) const;
++	};
++	struct Held {
++		int64_t id = -1;
++		AVFrame* frame = nullptr;
++		int generation = 0;
++		uint32_t index = 0;
++		const void* base = nullptr;
++		size_t length = 0;
++		int fd = -1;
++		uint32_t type = 0;
++		Layout layout;
++		int import = -1; // in imports, once shown
++	};
++	struct Import {
++		int generation = 0;
++		uint32_t index = 0;
++		const void* base = nullptr;
++		Layout layout;
++		int dmabuf = -1;
++		void* image[3] = {};
++		uint32_t texture[3] = {};
++		godot::RID rid[3];
++		int planes = 0;
++		int refs = 0; // shown frames using it
++		bool stale = false; // its buffer is gone (the decoder was reopened or reallocated its buffers)
++		bool used = false;
++	};
++
++	std::mutex mutex;
++	std::deque<Held> pending; // decoded, not shown yet (oldest first)
++	std::deque<Held> shown; // shown (oldest first), kept KEEP_SHOWN frames
++	std::vector<Import> imports;
++	int64_t next_id = 0;
++	std::atomic<bool> import_failed{false};
++
++	int _import(const Held& held);
++	void _free_import(Import& import);
++	void _unref(Held& held);
++	static void _delete_on_render_thread(int64_t pointer);
++};
++
++#endif
