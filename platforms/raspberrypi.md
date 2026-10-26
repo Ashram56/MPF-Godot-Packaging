@@ -19,6 +19,11 @@ Vulkan and a second window are out of reach.
 | + HD DMD (vector text, no glow), 512x128 | 28.7 | 7.2 % | 214 % (and a 50 s preload) |
 | DMD at native 1080p (3x, 1920x1080 render) | 18.2 | 82 % | 145 % |
 
+**Decision (the owner, 2026-10-26): no HD DMD on the Pi 4.** The platform's DMD is a real panel (PIN2DMD, ZeDMD,
+HD or not, driven by the panel) or the overlay in the backglass window: 128x32 dots, or 256x64 dots with a colour
+pack. The bundle's profile declares it as a limit ([limits.md](limits.md)), so the settings page does not offer HD
+and an HD value is put back at install and at each start.
+
 Not worth it: Vulkan (0.4-0.7 FPS, [fix](../fixes/godot/pi4-vulkan-freezes-with-video.md)), `v3d_freq=600` (no
 gain), a 30 Hz mode (the EDID offers none).
 
