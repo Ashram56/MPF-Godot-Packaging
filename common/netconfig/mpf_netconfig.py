@@ -325,7 +325,7 @@ def install_game(archive, expect_sha):
         for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
             if n in b.get("gozen", {}) and all(f in b["gozen"][n] for f in GOZEN_NEEDS):
                 job_log(f"{n}: the bundle's own build has {' '.join(GOZEN_NEEDS)}, kept")
-            elif re.match(r"libgozen\.linux\..*arm64\.so$", n):
+            elif re.match(r"libgozen\.linux\..*%s\.so$" % me, n):
                 shutil.copy(GOZEN_SO, os.path.join(bindir, n))
                 job_log(f"{n}: replaced by this board's GoZen")
     pw = pwd.getpwnam(USER)

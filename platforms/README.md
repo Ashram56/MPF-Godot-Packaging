@@ -10,6 +10,8 @@ installer step by step, its options and every lesson learned (numbered "Findings
 | [linux.md](linux.md) | `install/install_linux.sh` | Debian/Ubuntu (apt), Fedora/RHEL (dnf), Arch (pacman); x86_64 and arm64 |
 | [jetson.md](jetson.md) | `install/install_linux.sh`, then `platforms/jetson/install_jetson_hwdec.sh` | Jetson Xavier NX (L4T R35, JetPack 5), AGX Orin (L4T R36, JetPack 6) |
 | [raspberrypi.md](raspberrypi.md) | `install/install_linux.sh`, then the cabinet settings | Raspberry Pi 4 (Raspberry Pi OS, Debian 13): measured settings for 30 FPS with videos |
+| [x86.md](x86.md) | `install/install_linux.sh`, or the image | x86_64 mini PC with an Intel / AMD GPU (Nipogi AK2PLUS, Intel N100): VAAPI hardware decoding |
+| [x86/image/README.md](x86/image/README.md) | `platforms/x86/image/build/` | a minimal Debian 13 UEFI image for such a mini PC, USB stick or internal disk |
 | [jetson/image/README.md](jetson/image/README.md) | `platforms/jetson/image/build/`, `flash/` | a minimal Xavier NX image (L4T 35.6.4), SD card or NVMe |
 | [tips.md](tips.md) | none | short tips for WSL, Linux hosts without usbipd, and the Xavier NX |
 
