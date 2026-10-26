@@ -32,7 +32,6 @@ EXTRAS="${EXTRAS-video x11 mpf}"
 ROOT_PAD_MB="${ROOT_PAD_MB:-1024}"
 ESP_MB=256
 REPO_ROOT="$(cd "$KIT/../../../.." && pwd)"
-PI_FILES="$REPO_ROOT/platforms/raspberrypi/image/build/files"   # the first-boot root resize is the same
 
 R="$WORK/rootfs"
 ESP="$WORK/esp"             # bind-mounted on $R/boot/efi while packages install, then copied into the FAT partition
@@ -138,8 +137,8 @@ grub-mkstandalone -O x86_64-efi -o "$ESP/EFI/BOOT/BOOTX64.EFI" \
     "boot/grub/grub.cfg=$GRUBCFG"
 [ -s "$ESP/EFI/BOOT/BOOTX64.EFI" ] || { echo "grub-mkstandalone failed"; exit 1; }
 
-install -m 755 "$PI_FILES/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
-install -m 644 "$PI_FILES/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
+install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
+install -m 644 "$KIT/../../../raspberrypi/image/build/files/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
 install -m 755 "$KIT/files/mpf-install-to-disk.sh" "$R/usr/local/sbin/mpf-install-to-disk"
 
 in_chroot "sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen >/dev/null && update-locale LANG=en_US.UTF-8"
