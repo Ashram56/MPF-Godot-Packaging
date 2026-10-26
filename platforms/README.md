@@ -10,6 +10,7 @@ installer step by step, its options and every lesson learned (numbered "Findings
 | [linux.md](linux.md) | `install/install_linux.sh` | Debian/Ubuntu (apt), Fedora/RHEL (dnf), Arch (pacman); x86_64 and arm64 |
 | [jetson.md](jetson.md) | `install/install_linux.sh`, then `platforms/jetson/install_jetson_hwdec.sh` | Jetson Xavier NX (L4T R35, JetPack 5), AGX Orin (L4T R36, JetPack 6) |
 | [jetson/image/README.md](jetson/image/README.md) | `platforms/jetson/image/build/`, `flash/` | a minimal Xavier NX image (L4T 35.6.4), SD card or NVMe |
+| [tips.md](tips.md) | none | short tips for WSL, Linux hosts without usbipd, and the Xavier NX |
 
 Every installer ends by running `python -m mpf_godot setup` (`mpf_godot/setup_toolchain.py`), which is the same
 on every OS: the `.venv` with MPF 0.80.1 (and MPF Monitor 1.0.0), Godot 4.6.3 in `toolchain/godot/`, the GMC 1.0.0
