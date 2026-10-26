@@ -1,0 +1,27 @@
+#config_version=6
+
+# A ZeDMD (RGB LED DMD on USB serial, https://github.com/PPUC/ZeDMD) as an extra DMD output. Given after the game's
+# hardware config:   mpf game . -c config,zedmd          (Godot started with "-- --zedmd", addons/dmd_out/dmd_out.gd)
+# mpf_godot/zedmd_native.py (pyserial, the ZeDMD serial protocol; MPF's libzedmd platform does not load on every
+# Python and picks the x64 library on a Pi: fixes/mpf/zedmd-native-serial.md) takes the 128x32 RGB frames Godot
+# sends as "rgb_dmd_frame". mpf_godot must be importable by MPF (the repository root on PYTHONPATH).
+
+mpf:
+  platforms:
+    zedmd_native: mpf_godot.zedmd_native.ZedmdNativePlatform
+
+hardware:
+  rgb_dmd: zedmd_native
+
+zedmd:
+  width: 128
+  height: 32               # ZEDMD_PORT in the environment names the serial port; else the first ZeDMD found
+
+rgb_dmds:
+  default:
+    source_display: dmd
+
+# On a P-ROC machine the ZeDMD replaces the original DMD: the P-ROC's dmds: dmd goes to the virtual platform.
+dmds:
+  dmd:
+    platform: virtual

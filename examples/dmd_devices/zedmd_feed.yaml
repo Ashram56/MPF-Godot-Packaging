@@ -1,0 +1,8 @@
+#config_version=6
+
+# A ZeDMD driven by the native feeder (native/zedmd_feed, started by Godot with "-- --zedmd --zedmd-feed=PATH"): the
+# frames never pass through MPF, so MPF only has to leave the original DMD connector alone (P-ROC machines).
+
+dmds:
+  dmd:
+    platform: virtual
