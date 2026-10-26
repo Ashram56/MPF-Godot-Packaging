@@ -41,7 +41,7 @@ gain), a 30 Hz mode (the EDID offers none).
 | Setting | Where | Why |
 |---|---|---|
 | `--rendering-driver opengl3 --render-thread separate --max-fps 30 --audio-output-latency 60` | `/etc/default/mpf-game` `MPF_GAME_ARGS` ([mpf-game.env](raspberrypi/cabinet/mpf-game.env)) | Compatibility renderer; the render thread halves the main thread (49 % instead of ~90 %); [30 FPS](../fixes/godot/frame-cap-30.md) steady on a 60 Hz screen; [60 ms](../fixes/godot/alsa-output-latency.md): no underruns instead of ~6 a minute (cracks) |
-| `GOZEN_HWDEC=1` | `/etc/default/mpf-netconfig` ([mpf-netconfig.env](raspberrypi/cabinet/mpf-netconfig.env)) | V4L2 hardware decoder + [zero-copy](../fixes/gde-gozen/zero-copy-v4l2.md): 330 % to ~175 % CPU, video lag 0.7 s to none. Only with the fixed codec module |
+| `GOZEN_HWDEC=1` | `/etc/default/mpf-netconfig` ([mpf-netconfig.env](raspberrypi/cabinet/mpf-netconfig.env)) | V4L2 hardware decoder + [zero-copy](../fixes/gde-gozen/v4l2m2m-zero-copy.md): 330 % to ~175 % CPU, video lag 0.7 s to none. Only with the fixed codec module |
 | `GOZEN_AUDIO_LATENCY=0.087` | same | ALSA reports 0 latency while it holds 58-93 ms: videos ran 0.09 s ahead of their sound ([fix](../fixes/godot/alsa-output-latency.md)) |
 | Game variables in `mpf-netconfig`, not `mpf-game` | `common/netconfig/mpf_netconfig.py` `game_exec` | it forwards only `GODOT` and the game's venv variable from `/etc/default/mpf-game` |
 
