@@ -9,7 +9,7 @@ installer step by step, its options and every lesson learned (numbered "Findings
 | [macos.md](macos.md) | `install/install_macos.sh` | macOS 12+, Intel and Apple silicon |
 | [linux.md](linux.md) | `install/install_linux.sh` | Debian/Ubuntu (apt), Fedora/RHEL (dnf), Arch (pacman); x86_64 and arm64 |
 | [jetson.md](jetson.md) | `install/install_linux.sh`, then `platforms/jetson/install_jetson_hwdec.sh` | Jetson Xavier NX (L4T R35, JetPack 5), AGX Orin (L4T R36, JetPack 6) |
-| [raspberrypi.md](raspberrypi.md) | `install/install_linux.sh`, then the cabinet settings | Raspberry Pi 4 (Raspberry Pi OS, Debian 13): measured settings for 30 FPS with videos |
+| [raspberrypi.md](raspberrypi.md) | `install/install_linux.sh`, then the cabinet settings | Raspberry Pi 4 (Raspberry Pi OS, Debian 13): measured settings for 30 FPS with videos, and its limits (DMD external, or overlay in 256x64 dots only) |
 | [jetson/image/README.md](jetson/image/README.md) | `platforms/jetson/image/build/`, `flash/` | a minimal Xavier NX image (L4T 35.6.4), SD card or NVMe |
 | [tips.md](tips.md) | none | short tips for WSL, Linux hosts without usbipd, and the Xavier NX |
 
