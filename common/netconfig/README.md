@@ -21,4 +21,12 @@ Files are streamed to `MPF_UPLOAD_DIR`, never held in memory. The bundle is chec
 `sha256sum -c SHA256SUMS`), unpacked to `MPF_GAMES_DIR/<id>`; on an update the `keep_on_update` paths of the old install are carried over.
 The pack is installed with the bundle's own `pup.install` command. The page then shows the bundle's settings (built from `options.json`,
 written with `bundle_options.py`) and a Start/Stop button (transient unit `mpf-game`, `start.py`). `/etc/default/mpf-game` holds `GODOT`,
-`TRON_VENV`, `DISPLAY`, `XAUTHORITY` and `MPF_GAME_ARGS` (Pi 4: `-- --rendering-driver opengl3`). `MPF_GOZEN_SO` replaces the bundle's arm64 GoZen with the board's own.
+`TRON_VENV`, `DISPLAY`, `XAUTHORITY` and `MPF_GAME_ARGS` (Pi 4: `-- --rendering-driver opengl3`). `MPF_GOZEN_SO` replaces the bundle's arm64 GoZen with the board's own, unless the bundle's build already carries `MPF_GOZEN_NEEDS` (default `v4l2m2m zero_copy`, from `bundle.json` `gozen`). After the first-run defaults, the bundle's board profile is applied (`bundle.json` `profiles.apply`: the bundle picks its profile from the device tree and sets only what nobody set, once; Tron-Legacy-MPF `docs/bundle.md`, Board profiles).
+
+## Platform limits
+
+A board has limits a game must respect, and they live in the bundle's board profile (applied once at install by the step
+above), not in the setup page: the profile sets the board's only allowed choices, so the page cannot offer more. On a
+Raspberry Pi 4 the DMD is an external panel or the 256x64 colour dots over the backglass, never the HD vector mode
+([platforms/raspberrypi.md](../../platforms/raspberrypi.md), "Platform limits"). Record each new limit there with its
+measurement, and in the game's profile.

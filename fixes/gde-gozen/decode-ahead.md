@@ -69,7 +69,12 @@ still. An app playing three videos at once on a Jetson Xavier NX ran at about 5 
 ## What we did (in video_playback.gd)
 
 - Up to 3 frames per video decoded ahead on WorkerThreadPool tasks, one task at a time per video (frames in order).
-  Each task calls `next_frame()` and queues copies of the planes (GoZen reuses its images for the next frame).
+  A task decodes frames **until the queue is full** (`_decode_frames()`), calling `next_frame()` and queuing copies of the
+  planes (GoZen reuses its images for the next frame). Decoding one frame per `_fill_queue()` call, as first done, made
+  the decoder as fast as the game's frame rate: with a slow decoder (a Raspberry Pi 4's V4L2 one) and a 30 FPS cap
+  (27.4 FPS drawn in attract) a 30 fps video with sound fell 85 ms behind its sound every second and never caught up,
+  5 s late after a minute. A test with a 14 ms decoder at a 27 FPS cap: lag 97 ms/s before, flat under 50 ms after
+  (2026-10-27, Tron Legacy MPF).
 - High-priority tasks, so they never queue behind low-priority work (opens, closes, resource loads).
 - No seek inside decode tasks: forward decoding only.
 - `_process()` shows the frame the clock has reached; a frame not ready yet is shown late, never waited for.

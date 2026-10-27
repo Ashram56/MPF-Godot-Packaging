@@ -1,0 +1,23 @@
+#config_version=6
+
+# A PIN2DMD (RGB LED DMD on USB) as an extra DMD output. Given after the game's hardware config:
+#   mpf game . -c config,pin2dmd          (Godot started with "-- --pin2dmd", addons/dmd_out/dmd_out.gd)
+# MPF's own pin2dmd platform (pyusb, USB 0314:e457) takes the 128x32 RGB frames Godot sends as "rgb_dmd_frame".
+# platforms/dmd_devices.md.
+
+hardware:
+  rgb_dmd: pin2dmd
+
+pin2dmd:
+  resolution: 128x32
+  panel: rgb              # rbg for panels whose green and blue wires are swapped
+
+rgb_dmds:
+  default:                # the PIN2DMD platform only accepts this name
+    source_display: dmd
+
+# On a P-ROC machine the PIN2DMD replaces the original DMD: the P-ROC's dmds: dmd goes to the virtual platform, so
+# nothing is sent to the DMD connector.
+dmds:
+  dmd:
+    platform: virtual

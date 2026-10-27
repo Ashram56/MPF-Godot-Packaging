@@ -173,6 +173,16 @@ def is_jetson(release="/etc/nv_tegra_release"):
     return os.path.exists(release)
 
 
+def is_raspberry_pi4(model="/proc/device-tree/model"):
+    """A Raspberry Pi 4 (or 400 / Compute Module 4): the device tree names the board."""
+    try:
+        with open(model, "rb") as f:
+            text = f.read().decode("ascii", "replace")
+    except OSError:
+        return False
+    return "Raspberry Pi 4" in text or "Raspberry Pi 400" in text or "Raspberry Pi Compute Module 4" in text
+
+
 def summary():
     lines = [("host", "{} {}".format(host_os(), host_arch())),
              ("python", "{} ({})".format(venv_python(), "present" if os.path.exists(venv_python()) else "missing")),
