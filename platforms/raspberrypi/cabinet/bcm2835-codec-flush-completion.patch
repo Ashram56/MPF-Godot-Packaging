@@ -1,0 +1,29 @@
+--- a/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c	2026-10-25 12:42:47.169882301 +0100
++++ b/drivers/staging/vc04_services/bcm2835-codec/bcm2835-v4l2-codec.c	2026-10-25 12:42:47.171086679 +0100
+@@ -1008,7 +1008,7 @@
+ 	v4l2_dbg(2, debug, &ctx->dev->v4l2_dev, "%s: done %d input buffers\n",
+ 		 __func__, ctx->num_ip_buffers);
+ 
+-	if (!port->enabled && atomic_read(&port->buffers_with_vpu))
++	if (!port->enabled && !atomic_read(&port->buffers_with_vpu))
+ 		complete(&ctx->frame_cmplt);
+ }
+ 
+@@ -1211,7 +1211,7 @@
+ 		if (!(mmal_buf->mmal_flags & MMAL_BUFFER_HEADER_FLAG_EOS)) {
+ 			if (!port->enabled) {
+ 				vb2_buffer_done(&vb2->vb2_buf, VB2_BUF_STATE_QUEUED);
+-				if (atomic_read(&port->buffers_with_vpu))
++				if (!atomic_read(&port->buffers_with_vpu))
+ 					complete(&ctx->frame_cmplt);
+ 			} else {
+ 				vchiq_mmal_submit_buffer(ctx->dev->instance,
+@@ -1259,7 +1259,7 @@
+ 	v4l2_dbg(2, debug, &ctx->dev->v4l2_dev, "%s: done %d output buffers\n",
+ 		 __func__, ctx->num_op_buffers);
+ 
+-	if (!port->enabled && atomic_read(&port->buffers_with_vpu))
++	if (!port->enabled && !atomic_read(&port->buffers_with_vpu))
+ 		complete(&ctx->frame_cmplt);
+ }
+ 

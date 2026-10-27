@@ -1,0 +1,10 @@
+[Unit]
+Description=MPF-Setup access point when there is no network
+After=network.target mpf-netconfig-apply.service
+
+[Service]
+EnvironmentFile=-/etc/default/mpf-netconfig
+ExecStart=/usr/local/bin/mpf_netconfig.py ap
+
+[Install]
+WantedBy=multi-user.target

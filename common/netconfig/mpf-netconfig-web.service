@@ -1,0 +1,11 @@
+[Unit]
+Description=MPF setup web page (Wi-Fi, SSH) on port 8080
+After=network.target mpf-netconfig-apply.service
+
+[Service]
+EnvironmentFile=-/etc/default/mpf-netconfig
+ExecStart=/usr/local/bin/mpf_netconfig.py web
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

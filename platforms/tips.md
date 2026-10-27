@@ -115,5 +115,29 @@ server is installed.
 | Image creation fails in a container or VM | `losetup -P`, `kpartx`, vfat not available | the image builder writes partitions with `dd`; use a real VM or host |
 | `mmcblk` I/O errors after an SD card flash | bad or fake card; Etcher verifies only what it wrote | [jetson/image/README.md](jetson/image/README.md#notes) |
 
-Last updated 2026-10-23. Add a numbered finding to [jetson.md](jetson.md) or [linux.md](linux.md) when a tip here
+## 8. Raspberry Pi 4 (Debian 13 trixie, Raspberry Pi kernel 6.18, Godot 4.6.3 OpenGL ES)
+
+Found with Tron Legacy MPF on 2026-10-24 (all observed). Every measured setting, with the cabinet's files: [raspberrypi.md](raspberrypi.md). Performance findings: [GoZen zero-copy](../fixes/gde-gozen/v4l2m2m-zero-copy.md),
+[the canvas shader's fill rate](../fixes/godot/pi4-canvas-shader-fill-rate.md).
+
+- **No 3.5 mm jack sound card**: the device tree's bootargs carry `snd_bcm2835.enable_headphones=0` even with
+  `dtparam=audio=on`. Append `snd_bcm2835.enable_headphones=1` to `/boot/firmware/cmdline.txt` (one line).
+- **A screen that sends no EDID** (forced with `video=HDMI-A-n:1920x1080@60D`) gets **no HDMI audio**: vc4 treats it as
+  DVI and the ALSA open fails with -524. Give it an EDID with a CEA block (basic audio, an LPCM short audio descriptor,
+  the HDMI vendor block) and the same timing in `/lib/firmware/edid/`, then `drm.edid_firmware=HDMI-A-n:edid/<file>.bin`.
+  Force the mode on both HDMI ports if either may be used.
+- **ALSA default** with no PulseAudio/PipeWire is card 0, often an HDMI port with nothing on it: Godot then logs "All
+  audio drivers failed" and uses its Dummy driver. Write `/etc/asound.conf` (`plug` to `hw:Headphones`; dmix on the
+  jack stalls, `hw_ptr` stays 0).
+- **X keeps an unplugged HDMI output as the primary at 0,0**, so the game opens its windows on a screen that does not
+  exist: `xrandr --output HDMI-1 --off --output HDMI-2 --mode 1920x1080 --pos 0x0 --primary` in `~/.xinitrc`.
+- **Vulkan freezes with video**: run Godot with `--rendering-driver opengl3`. Measured 2026-10-24 on Mesa 25.0.7: not a freeze but ~2 s a frame (V3DV uploads copied video planes with render passes that allocate and zero tile-state buffers); a video-less 1080p scene is faster in Vulkan (74.8 vs 39 fps). Separate render thread in Vulkan crashed when a script touched the scene tree from it.
+- **Remote Control on the board**: `claude remote-control` started by a service from the home directory asks for
+  folder trust at every start; start it from a dedicated folder and answer once. Do not build on the board: FFmpeg and
+  godot-cpp took about 45 minutes with the game stopped; cross-build elsewhere and give the library to the board through
+  a throwaway git branch it clones.
+- **Windowed is slow**: Godot in a non-fullscreen X window is copied by X every frame (+7 ms on the TFU and +10 ms of
+  rendering at 1080p); fullscreen page flips.
+
+Last updated 2026-10-24. Add a numbered finding to [jetson.md](jetson.md) or [linux.md](linux.md) when a tip here
 needs its full story.
