@@ -10,9 +10,11 @@
 #   WIFI_SSID=... WIFI_PSK=... pre-seed one Wi-Fi network (stored hashed via wpa_passphrase)
 #   WIFI_COUNTRY=FR            regulatory country code for Wi-Fi (default: unset = world domain)
 #   JETSON_PASSWORD=...        password for user "jetson" (default: jetson)
-#   EXTRAS="video docker x11"  optional feature groups to add (default: all three; EXTRAS="" for the bare image)
+#   EXTRAS="video docker x11 mpf"  optional feature groups to add (default: all four; EXTRAS="" for the bare image)
 #       video  : GStreamer + NVIDIA hardware decode/encode plugins, NVIDIA FFmpeg build (nvv4l2 codecs)
 #       docker : docker.io + NVIDIA container runtime (default runtime), jetson user in docker group
+#       mpf    : MPF + Godot + GMC + hardware video decoder (libnvmpi), installed by install/install_linux.sh from
+#                this repository into /home/jetson/MPF-Godot; needs video and x11 (they are added when missing)
 #       x11    : Xorg with NVIDIA driver, xinit/startx, openbox window manager, xrandr, xterm, Vulkan loader
 # Output: $WORK/out/jetson-xavier-nx-l4t35.6.4-sd.img.xz and .sha256
 
@@ -26,7 +28,8 @@ BOARD="jetson-xavier-nx-devkit"   # flash config name for the Xavier NX devkit (
 SOC="t194"
 IMG_NAME="jetson-xavier-nx-l4t35.6.4-sd.img"
 JETSON_PASSWORD="${JETSON_PASSWORD:-jetson}"
-EXTRAS="${EXTRAS-video docker x11}"
+EXTRAS="${EXTRAS-video docker x11 mpf}"
+REPO_ROOT="$(cd "$KIT/../../../.." && pwd)"   # this clone, copied into the image by the mpf group
 
 L4T="$WORK/Linux_for_Tegra"
 R="$L4T/rootfs"
@@ -68,9 +71,12 @@ mkdir -p "$WORK" "$OUT"
 log "1/7 Host dependencies and arm64 emulation"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    debootstrap qemu-user-static binfmt-support curl patch bzip2 xz-utils lz4 \
+    debootstrap curl patch bzip2 xz-utils lz4 \
     libxml2-utils python3 python3-yaml python-is-python3 gdisk parted cpio binutils \
     dosfstools mtools e2fsprogs openssh-client >/dev/null
+# arm64 emulation: qemu-user-static up to Ubuntu 24.04; from 25.04 it is qemu-user + qemu-user-binfmt
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user-static binfmt-support >/dev/null 2>&1 \
+    || DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qemu-user qemu-user-binfmt >/dev/null
 mountpoint -q /proc/sys/fs/binfmt_misc || mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc
 if [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
     update-binfmts --enable qemu-aarch64 2>/dev/null || cat /usr/lib/binfmt.d/qemu-aarch64.conf > /proc/sys/fs/binfmt_misc/register
@@ -246,6 +252,8 @@ in_chroot "systemctl disable nvweston.service >/dev/null 2>&1 || true"
 log "5b/7 Optional feature groups: ${EXTRAS:-none}"
 has() { case " $EXTRAS " in *" $1 "*) return 0;; *) return 1;; esac; }
 if [ -n "$EXTRAS" ]; then
+    has mpf && ! has video && EXTRAS="$EXTRAS video"
+    has mpf && ! has x11 && EXTRAS="$EXTRAS x11"
     mount_chroot
     in_chroot "apt-get update -qq"   # Ubuntu + NVIDIA jetson repos (common, t194, ffmpeg)
     if has video; then
@@ -291,8 +299,28 @@ XRC
         chmod 755 "$R/home/jetson/.xinitrc"; in_chroot "chown jetson:jetson /home/jetson/.xinitrc"
         in_chroot "usermod -aG video,render,input,tty jetson 2>/dev/null || usermod -aG video,input,tty jetson"
     fi
+    if has mpf; then
+        # The repository's own Linux installer, run as the cabinet user in the chroot: Python 3.11 (uv), MPF,
+        # MPF Monitor, Godot linux.arm64, GMC with our fixes, then install_jetson_hwdec.sh (libnvmpi).
+        # The chroot has no decoder device: the hwdec script only warns about that.
+        mkdir -p "$R/home/jetson/MPF-Godot"
+        tar -C "$REPO_ROOT" --exclude=.git --exclude='platforms/jetson/image/build/work' -cf - . | tar -C "$R/home/jetson/MPF-Godot" -xf -
+        in_chroot "chown -R jetson:jetson /home/jetson/MPF-Godot"
+        in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
+        printf 'jetson ALL=(ALL) NOPASSWD:ALL\n' > "$R/etc/sudoers.d/99-build"; chmod 440 "$R/etc/sudoers.d/99-build"
+        in_chroot "su - jetson -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
+        rm -f "$R/etc/sudoers.d/99-build"
+        # Cabinet boot: automatic login on tty1, X started from the login shell
+        mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
+        printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin jetson --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+        cat >> "$R/home/jetson/.profile" <<'PROF'
+# Start X on the first console (automatic login); remove this to get a plain shell
+if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then exec startx; fi
+PROF
+        in_chroot "chown -R jetson:jetson /home/jetson"
+    fi
     in_chroot "apt-get clean"
-    rm -rf "$R"/var/lib/apt/lists/*
+    rm -rf "$R"/var/lib/apt/lists/* "$R"/home/jetson/.cache/uv 2>/dev/null || true
     umount_chroot
 fi
 
