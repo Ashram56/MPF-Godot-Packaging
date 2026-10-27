@@ -16,6 +16,8 @@ Settings (environment, defaults for the Raspberry Pi image):
   MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, TRON_VENV, DISPLAY, MPF_GAME_ARGS)
   MPF_GOZEN_SO        a GoZen library built for this board, copied over the bundle's own (optional; not when
                       the bundle's build already has MPF_GOZEN_NEEDS, bundle.json "gozen")
+  MPF_PLATFORM_DIR    this platform's checkout (its addons/gde_gozen is installed into a bundle that lists
+                      "platform_addons" in bundle.json; default: found from this file or from MPF_GOZEN_SO)
   MPF_GOZEN_NEEDS     v4l2m2m zero_copy   what the bundle's GoZen must carry to be kept
 Must run as root.
 """
@@ -33,6 +35,7 @@ GAMES = os.environ.get("MPF_GAMES_DIR", "/opt/games")
 UPLOADS = os.environ.get("MPF_UPLOAD_DIR", "/var/lib/mpf-uploads")
 GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
 GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
+PLATFORM_DIR = os.environ.get("MPF_PLATFORM_DIR", "")
 GOZEN_NEEDS = os.environ.get("MPF_GOZEN_NEEDS", "v4l2m2m zero_copy").split()
 AP_SSID, AP_PSK, AP_ADDR = "MPF-Setup", os.environ.get("MPF_AP_PSK", "mpf-setup"), "192.168.4.1"
 
@@ -278,6 +281,39 @@ def board_profile(game, b):
     job_log((r.stdout + r.stderr).strip() or "board profile: nothing to apply")
 
 
+def platform_addon(name):
+    """The platform's own copy of a binary add-on (addons/<name>), or None."""
+    cands = [PLATFORM_DIR, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
+    if GOZEN_SO:
+        cands.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(GOZEN_SO)))))
+    for c in cands:
+        if c and os.path.isfile(os.path.join(c, "addons", name, "gozen.gdextension" if name == "gde_gozen" else "plugin.cfg")):
+            return os.path.join(c, "addons", name)
+    return None
+
+
+def install_platform_addons(dest, b, me):
+    """Binary add-ons come from the platform, never from the game bundle: the same build for every game. Only
+    this machine's binaries are copied."""
+    for name in b.get("platform_addons", []):
+        src = platform_addon(name)
+        if not src:
+            raise JobError(f"the bundle needs the platform's {name} and this system has none (set MPF_PLATFORM_DIR)")
+        dst = os.path.join(dest, "game", "addons", name)
+        shutil.rmtree(dst, ignore_errors=True)
+        for base, _dirs, files in os.walk(src):
+            for f in files:
+                if os.path.relpath(base, src).startswith("bin") and f.startswith("libgozen") and \
+                        not re.match(r"libgozen\.linux\..*\.%s\.so$" % ("arm64" if me == "arm64" else "x86_64"), f):
+                    continue
+                if os.path.relpath(base, src).startswith("bin") and f.endswith(".dll"):
+                    continue
+                t = os.path.join(dst, os.path.relpath(os.path.join(base, f), src))
+                os.makedirs(os.path.dirname(t), exist_ok=True)
+                shutil.copy2(os.path.join(base, f), t)
+        job_log(f"{name}: the platform's build ({src}) installed for {me}")
+
+
 def install_game(archive, expect_sha):
     job_set(state="running", msg="Checking the archive")
     h = hashlib.sha256()
@@ -321,6 +357,7 @@ def install_game(archive, expect_sha):
     os.rename(root, dest)
     shutil.rmtree(stage, ignore_errors=True)
     shutil.rmtree(old, ignore_errors=True)
+    install_platform_addons(dest, b, me)
     if GOZEN_SO and os.path.isfile(GOZEN_SO):
         bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
         for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
