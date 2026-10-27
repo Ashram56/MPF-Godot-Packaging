@@ -82,7 +82,7 @@ var _release_tasks: Array[int] = [] ## Worker tasks freeing closed videos (see c
 var _abandoned: Array = [] ## [task, [video]]: videos closed while a worker still opened or restarted them (see close()).
 var _restart_thread: int = -1 ## Worker task seeking back to the first frame (see restart()).
 const QUEUE_FRAMES: int = 3 ## Frames decoded ahead per video (see _process()).
-var _decode_task: int = -1 ## Worker task decoding the next frame into _queue (see _fill_queue()).
+var _decode_task: int = -1 ## Worker task decoding the next frames into _queue (see _fill_queue()).
 var _decoded: int = 0 ## The last frame number decoded (or being decoded) into _queue.
 var _queue: Array[Dictionary] = [] ## Decoded frames not shown yet, oldest first: {"frame": int, "planes": Array}.
 var _queue_mutex: Mutex = Mutex.new()
@@ -488,10 +488,12 @@ func _seek_start(of: GoZenVideo) -> void:
 		printerr("Couldn't seek frame!")
 
 
-## Keeps up to QUEUE_FRAMES frames decoded ahead: one worker task at a time decodes the next frame (frames decode in
-## order). Never a seek: GoZenVideo.seek_frame() near the end of a file can retry for minutes, and close() waits for
-## this task. A high-priority task: Godot runs low-priority ones (the opens, closes and restarts) on a share of its
-## threads only, so a frame would wait behind them.
+## Keeps up to QUEUE_FRAMES frames decoded ahead: one worker task at a time decodes frames in order until the queue is
+## full, not one frame per call. One frame per call made the decoder as fast as the game's frame rate: with a slow
+## decoder (the Raspberry Pi 4's) at a 30 FPS cap (29.5 FPS drawn, 27.4 in the game's attract) a 30 fps video fell
+## behind by 2 to 9 % and never caught up, the picture 5 s late after a minute. Never a seek: GoZenVideo.seek_frame()
+## near the end of a file can retry for minutes, and close() waits for this task. A high-priority task: Godot runs
+## low-priority ones (the opens, closes and restarts) on a share of its threads only, so a frame would wait behind them.
 func _fill_queue() -> void:
 	if _decode_task != -1:
 		if not WorkerThreadPool.is_task_completed(_decode_task):
@@ -499,11 +501,25 @@ func _fill_queue() -> void:
 		WorkerThreadPool.wait_for_task_completion(_decode_task)
 		_decode_task = -1
 	_queue_mutex.lock()
-	var room: bool = _queue.size() < QUEUE_FRAMES
+	var room: bool = _queue.size() < QUEUE_FRAMES and (_frame_count <= 0 or _decoded + 1 < _frame_count)
 	_queue_mutex.unlock()
-	if room and (_frame_count <= 0 or _decoded + 1 < _frame_count):
-		_decoded += 1
-		_decode_task = WorkerThreadPool.add_task(_decode_one.bind(_decoded), true)
+	if room:
+		_decode_task = WorkerThreadPool.add_task(_decode_frames, true)
+
+
+## On a worker thread: decodes the next frames (_decoded + 1 on) while the queue has room, each queued as soon as it is
+## decoded. _decoded is the last frame decoded or being decoded; the main thread reads it only when no task runs.
+func _decode_frames() -> void:
+	while true:
+		_queue_mutex.lock()
+		var go: bool = _queue.size() < QUEUE_FRAMES and (_frame_count <= 0 or _decoded + 1 < _frame_count)
+		var frame_nr: int = _decoded + 1
+		if go:
+			_decoded = frame_nr
+		_queue_mutex.unlock()
+		if not go:
+			return
+		_decode_one(frame_nr)
 
 
 ## On a worker thread: decodes the next frame and queues copies of its planes (GoZen reuses its images for the next),
