@@ -1,0 +1,12 @@
+diff --git a/drivers/egl/egl_manager.cpp b/drivers/egl/egl_manager.cpp
+index f240c7c..1043192 100644
+--- a/drivers/egl/egl_manager.cpp
++++ b/drivers/egl/egl_manager.cpp
+@@ -345,6 +345,7 @@ void EGLManager::release_current() {
+ 	GLDisplay &current_display = displays[current_window->gldisplay_id];
+ 
+ 	eglMakeCurrent(current_display.egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
++	current_window = nullptr;
+ }
+ 
+ void EGLManager::swap_buffers() {
