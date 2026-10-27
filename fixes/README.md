@@ -48,6 +48,7 @@ Upstream tracker: https://github.com/godotengine/godot/issues
 | Fix | Kind | Platforms | Applied by | Upstream |
 |---|---|---|---|---|
 | [Sound cracks, and videos run ahead of their sound, on a Raspberry Pi 4 (ALSA)](godot/alsa-output-latency.md) | bug (latency 0) / improvement (buffer) | Linux with ALSA (seen on a Raspberry Pi 4, analogue jack, n… | a project setting a game sets in its `project.godot`; the GoZen add-on; on the Pi image `… | Godot, https://github.com/godotengine/godot/issues; status: **draft,… |
+| [A music player driven by triggers keeps playing after the game was cancelled](godot/audio-only-screen-keeps-playing.md) | bug | all (seen on a Raspberry Pi 4) | the game's code | none needed |
 | [A rounded DMD frame costs 20 points of GPU on a Raspberry Pi 4 (`clip_children`)](godot/clip-children-slow-v3d.md) | improvement | Raspberry Pi 4 (V3D); not measured elsewhere | the game's code | none needed |
 | [Late frames on a 4-core board: Godot's main thread shares its core](godot/core-pinning-main-thread.md) | improvement | Linux with 4+ cores and a real display; measured on Jetson… | the launcher (`python -m mpf_godot run`), on Linux with 4+ cores, not under Xvfb | Godot, https://github.com/godotengine/godot/issues; status: none need… |
 | [Uneven frame rate with 30 fps videos on a 60 Hz screen: cap Godot at 30 FPS](godot/frame-cap-30.md) | improvement | all; it matters on boards that cannot hold 60 FPS (measured… | a project setting a game sets in its `project.godot` (Tron-Legacy-MPF does it on every pl… | none needed |
@@ -102,4 +103,4 @@ Upstream tracker: https://github.com/claytercek/godot-native-video/issues
 
 Test projects and repro programs the reports refer to: [repro/](repro/).
 
-43 documents.
+44 documents.
