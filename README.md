@@ -6,7 +6,7 @@ improvement our pinball projects needed. Game agnostic: any MPF game with a Godo
 
 Every fix is documented on its own in [fixes/](fixes/README.md) (problem, cause, our fix, affected versions,
 platforms) with a draft issue for the upstream project. Every platform's set-up and what we learned there is in
-[platforms/](platforms/README.md).
+[platforms/](platforms/README.md); quick tips for WSL, hosts without usbipd and the Xavier NX: [platforms/tips.md](platforms/tips.md).
 
 | Pinned | Version | Why this one |
 |---|---|---|

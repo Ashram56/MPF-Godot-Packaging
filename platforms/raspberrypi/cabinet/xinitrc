@@ -1,0 +1,9 @@
+#!/bin/sh
+# ~/.xinitrc: one screen, the game's, on HDMI-2 at 1920x1080 (primary); HDMI-1 off. Its forced video= mode in
+# cmdline.txt keeps it from appearing later as a phantom output. A second X output would cost a copy per frame.
+if xrandr | grep -q '^HDMI-2 connected'; then
+    xrandr --output HDMI-1 --off --output HDMI-2 --mode 1920x1080 --pos 0x0 --primary
+else
+    xrandr --output HDMI-1 --auto --primary
+fi
+exec openbox-session

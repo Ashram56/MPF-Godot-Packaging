@@ -1,0 +1,12 @@
+[Unit]
+Description=Grow the root partition to fill the card (first boot)
+After=local-fs.target
+Before=ssh.service systemd-networkd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/resizerootfs.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
