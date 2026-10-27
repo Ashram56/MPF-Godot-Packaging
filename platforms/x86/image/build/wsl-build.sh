@@ -11,5 +11,5 @@ HOME_DIR="$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)"
 export WORK="${WORK:-$HOME_DIR/x86-build}"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq debootstrap debian-archive-keyring gpg curl git \
-    e2fsprogs dosfstools mtools fdisk xz-utils grub-efi-amd64-bin grub-common
+    e2fsprogs dosfstools mtools fdisk xz-utils grub-efi-amd64-bin grub-common console-setup
 exec bash "$HERE/build-native.sh"

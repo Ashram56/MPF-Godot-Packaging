@@ -25,11 +25,11 @@ T="$(mktemp -d)"; mount "$(p 2)" "$T"; mkdir -p "$T/boot/efi"; mount "$(p 1)" "$
 echo "Copying the system (a few minutes)..."
 rsync -aHAX --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' --exclude='/tmp/*' \
     --exclude='/mnt/*' --exclude='/media/*' --exclude='/boot/efi/*' --exclude='/lost+found' / "$T/"
-rsync -rt /boot/efi/ "$T/boot/efi/"        # bootloader (EFI/BOOT/BOOTX64.EFI), mpf-network.txt
+rsync -rt /boot/efi/ "$T/boot/efi/"        # bootloaders, mpf-network.txt
 mkdir -p "$T"/{proc,sys,dev,run,tmp,mnt,media}; chmod 1777 "$T/tmp"
-# the copy boots from its own label (the loader reads EFI/BOOT/mpf-boot.cfg on its ESP), and grows its root partition
+# the copy boots from its own label (its loader is mpf-disk.efi, which looks for mpfroot), and grows its root partition
 sed -i -e 's/^LABEL=rootfs /LABEL=mpfroot /' -e 's/^LABEL=firmware /LABEL=mpfesp /' "$T/etc/fstab"
-echo 'set rootlabel=mpfroot' > "$T/boot/efi/EFI/BOOT/mpf-boot.cfg"
+cp /boot/efi/EFI/BOOT/mpf-disk.efi "$T/boot/efi/EFI/BOOT/BOOTX64.EFI"   # the loader that looks for the label mpfroot
 mkdir -p "$T/etc/systemd/system/multi-user.target.wants"
 ln -sf /etc/systemd/system/resizerootfs.service "$T/etc/systemd/system/multi-user.target.wants/resizerootfs.service"
 if command -v efibootmgr >/dev/null && [ -d /sys/firmware/efi ]; then

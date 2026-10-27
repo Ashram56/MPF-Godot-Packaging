@@ -17,6 +17,7 @@
 #       x11    : Xorg (modesetting), startx, openbox, xrandr, Mesa Vulkan (Intel ANV, AMD RADV) and GL drivers
 #       mpf    : MPF + Godot + GMC installed by install/install_linux.sh from this repository into
 #                /home/mpf/MPF-Godot; automatic login on tty1 and startx (needs video and x11, added when missing)
+#   KEYMAP=fr                  keyboard layout of GRUB, the console and X (xkb name; default fr = AZERTY; us for QWERTY)
 #   ROOT_PAD_MB=1024           free space left in the root filesystem of the image (grown at first boot anyway)
 # Output: $WORK/out/x86-debian13-uefi.img.xz and .sha256
 
@@ -30,6 +31,7 @@ IMG_NAME="x86-debian13-uefi.img"
 MPF_PASSWORD="${MPF_PASSWORD:-mpf}"
 EXTRAS="${EXTRAS-video x11 mpf}"
 ROOT_PAD_MB="${ROOT_PAD_MB:-1024}"
+KEYMAP="${KEYMAP:-fr}"
 ESP_MB=256
 REPO_ROOT="$(cd "$KIT/../../../.." && pwd)"
 
@@ -94,7 +96,7 @@ mkdir -p "$WORK" "$OUT"
 log "1/6 Host dependencies"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    debootstrap debian-archive-keyring curl gnupg xz-utils e2fsprogs dosfstools mtools fdisk grub-efi-amd64-bin grub-common >/dev/null
+    debootstrap debian-archive-keyring curl gnupg xz-utils e2fsprogs dosfstools mtools fdisk grub-efi-amd64-bin grub-common console-setup >/dev/null
 
 ##############################################################################
 log "2/6 Minimal Debian $SUITE amd64 rootfs"
@@ -135,30 +137,49 @@ in_chroot "apt-get install -y -qq linux-image-amd64 firmware-iwlwifi firmware-re
     intel-media-va-driver mesa-va-drivers libva2 libva-drm2 vainfo"
 in_chroot "ls /boot/vmlinuz-* /boot/initrd.img-* && test -L /vmlinuz && test -L /initrd.img"
 
-# Bootloader: one standalone GRUB EFI file. It reads EFI/BOOT/mpf-boot.cfg next to itself (the label of the root
-# partition: mpf-install-to-disk changes it), finds that partition by label and starts /vmlinuz (a symlink Debian keeps on
-# the newest kernel, so a kernel update needs no bootloader work).
+# Bootloader: standalone GRUB EFI files with their configuration inside (in a standalone GRUB $cmdpath is the memory disk, not
+# the ESP, so nothing can be read next to the file). The loader finds the root partition by label and starts /vmlinuz (a
+# symlink Debian keeps on the newest kernel, so a kernel update needs no bootloader work). Two loaders: EFI/BOOT/BOOTX64.EFI
+# looks for the stick's root label "rootfs"; EFI/BOOT/mpf-disk.efi looks for "mpfroot", and mpf-install-to-disk copies it
+# over BOOTX64.EFI of the internal disk.
 mkdir -p "$ESP/EFI/BOOT"
-echo 'set rootlabel=rootfs' > "$ESP/EFI/BOOT/mpf-boot.cfg"
-GRUBCFG="$WORK/grub-embedded.cfg"
-cat > "$GRUBCFG" <<'CFG'
+GRUBFILES=()
+KEYMAP_CMDS=""
+if [ "$KEYMAP" != us ]; then
+    grub-kbdcomp -o "$WORK/grub-keymap.gkb" "$KEYMAP" 2>/dev/null || { echo "grub-kbdcomp $KEYMAP failed"; exit 1; }
+    GRUBFILES+=("boot/grub/layouts/$KEYMAP.gkb=$WORK/grub-keymap.gkb")
+    KEYMAP_CMDS="insmod keymap
+keymap \$prefix/layouts/$KEYMAP.gkb
+"
+fi
+make_loader() {   # make_loader ROOT_LABEL OUTPUT
+    cat > "$WORK/grub-embedded.cfg" <<CFG
 set timeout=0
-set rootlabel=rootfs
-source $cmdpath/mpf-boot.cfg
-search --no-floppy --label $rootlabel --set=root
-linux /vmlinuz root=LABEL=$rootlabel rootfstype=ext4 rootwait net.ifnames=0 fsck.repair=yes quiet loglevel=3
+${KEYMAP_CMDS}search --no-floppy --label $1 --set=root
+linux /vmlinuz root=LABEL=$1 rootfstype=ext4 rootwait net.ifnames=0 fsck.repair=yes quiet loglevel=3
 initrd /initrd.img
 boot
 CFG
-grub-mkstandalone -O x86_64-efi -o "$ESP/EFI/BOOT/BOOTX64.EFI" \
-    --modules="part_gpt part_msdos fat ext2 search search_label search_fs_file linux normal configfile echo test all_video gzio" \
-    "boot/grub/grub.cfg=$GRUBCFG"
-[ -s "$ESP/EFI/BOOT/BOOTX64.EFI" ] || { echo "grub-mkstandalone failed"; exit 1; }
+    grub-mkstandalone -O x86_64-efi -o "$2" \
+        --modules="part_gpt part_msdos fat ext2 search search_label search_fs_file linux normal configfile echo test all_video gzio keymap" \
+        "boot/grub/grub.cfg=$WORK/grub-embedded.cfg" "${GRUBFILES[@]}"
+    [ -s "$2" ] || { echo "grub-mkstandalone failed"; exit 1; }
+}
+make_loader rootfs "$ESP/EFI/BOOT/BOOTX64.EFI"
+make_loader mpfroot "$ESP/EFI/BOOT/mpf-disk.efi"
 
 install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
 install -m 644 "$KIT/../../../raspberrypi/image/build/files/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
 install -m 755 "$KIT/files/mpf-install-to-disk.sh" "$R/usr/local/sbin/mpf-install-to-disk"
+install -m 755 "$KIT/files/mpf-installer.sh" "$R/usr/local/sbin/mpf-installer"
+# the stick's console menu runs without a password, nothing else does
+printf 'mpf ALL=(root) NOPASSWD: /usr/local/sbin/mpf-installer, /usr/local/sbin/mpf-install-to-disk\n' > "$R/etc/sudoers.d/mpf-installer"
+chmod 440 "$R/etc/sudoers.d/mpf-installer"
 
+printf 'XKBMODEL="pc105"\nXKBLAYOUT="%s"\nXKBVARIANT=""\nXKBOPTIONS=""\nBACKSPACE="guess"\n' "$KEYMAP" > "$R/etc/default/keyboard"
+mkdir -p "$R/etc/X11/xorg.conf.d"
+printf 'Section "InputClass"\n    Identifier "keyboard layout"\n    MatchIsKeyboard "on"\n    Option "XkbLayout" "%s"\nEndSection\n' "$KEYMAP" > "$R/etc/X11/xorg.conf.d/00-keyboard.conf"
+in_chroot "apt-get install -y -qq console-setup keyboard-configuration >/dev/null 2>&1 && setupcon --save-only >/dev/null 2>&1 || true"
 in_chroot "sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen >/dev/null && update-locale LANG=en_US.UTF-8"
 
 # Networking: systemd-networkd + resolved, wired preferred over Wi-Fi via route metric (interface names eth0, wlan0:
@@ -236,8 +257,11 @@ if [ -n "$EXTRAS" ]; then
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
         printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin mpf --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
         cat >> "$R/home/mpf/.profile" <<'PROF'
-# Start X on the first console (automatic login); remove this to get a plain shell
-if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then exec startx; fi
+# First console (automatic login): from the USB stick (root label "rootfs") the installer menu, from an installed disk X.
+# Remove this to get a plain shell.
+if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
+    if [ "$(findmnt -no LABEL /)" = rootfs ]; then exec sudo /usr/local/sbin/mpf-installer; else exec startx; fi
+fi
 PROF
     fi
     in_chroot "chown -R mpf:mpf /home/mpf"
