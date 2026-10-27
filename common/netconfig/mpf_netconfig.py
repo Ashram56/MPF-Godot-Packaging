@@ -417,9 +417,18 @@ def game_autostart():
     return run("systemctl", "is-enabled", "--quiet", "mpf-game.service").returncode == 0
 
 
+def settings_schema(game):
+    """The bundle's settings schema as this board sees it: its tool narrows the choices the board's profile limits
+    (platforms/README.md, Platform limits); the file itself if the tool cannot run."""
+    try:
+        return json.loads(tool(game, "list").stdout)
+    except ValueError:
+        return json.load(open(os.path.join(game, "scripts/package/options.json")))
+
+
 def settings_html(game):
     try:
-        schema = json.load(open(os.path.join(game, "scripts/package/options.json")))
+        schema = settings_schema(game)
         cur = json.loads(tool(game, "get").stdout or "{}")
     except (OSError, ValueError):
         return "<p>Settings unavailable.</p>"
@@ -441,14 +450,15 @@ def settings_html(game):
             else:
                 val = "" if v is None else html.escape(str(v), quote=True)
                 field = f"<input name='{name}' value='{val}' size=14 placeholder='default'>"
+            note = f" <small>(this board: {html.escape(o['limited'])})</small>" if o.get("limited") else ""
             out.append(f"<div title='{html.escape(o.get('help', ''), quote=True)}'>{html.escape(o['label'])}{hint}: {field}"
-                       f" {html.escape(o.get('unit', ''))}</div>")
+                       f" {html.escape(o.get('unit', ''))}{note}</div>")
     out.append("<button>Save settings</button> (restart the game to apply)</form>")
     return "".join(out)
 
 
 def settings_save(game, form):
-    schema = json.load(open(os.path.join(game, "scripts/package/options.json")))
+    schema = settings_schema(game)
     cur = json.loads(tool(game, "get").stdout or "{}")
     sets, unsets = [], []
     for o in schema["options"]:
