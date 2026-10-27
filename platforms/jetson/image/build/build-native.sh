@@ -41,8 +41,9 @@ in_chroot() { LC_ALL=C DEBIAN_FRONTEND=noninteractive chroot "$R" /usr/bin/env b
 mount_chroot() {
     mountpoint -q "$R/proc" || mount -t proc proc "$R/proc"
     mountpoint -q "$R/sys" || mount -t sysfs sys "$R/sys"
-    mountpoint -q "$R/dev" || mount -o bind /dev "$R/dev"
-    mountpoint -q "$R/dev/pts" || mount -o bind /dev/pts "$R/dev/pts"
+    # rslave: on WSL2 / and /dev are "shared", and a shared bind mount would propagate (un)mounts to the host
+    mountpoint -q "$R/dev" || { mount -o bind /dev "$R/dev"; mount --make-rslave "$R/dev"; }
+    mountpoint -q "$R/dev/pts" || { mount -o bind /dev/pts "$R/dev/pts"; mount --make-rslave "$R/dev/pts"; }
     # temporary DNS for apt inside the chroot
     if [ -L "$R/etc/resolv.conf" ] || [ -e "$R/etc/resolv.conf" ]; then
         mv "$R/etc/resolv.conf" "$R/etc/resolv.conf.build-bak"
@@ -55,7 +56,10 @@ mount_chroot() {
 umount_chroot() {
     rm -f "$R/usr/sbin/policy-rc.d"
     for m in dev/pts dev sys proc; do
-        mountpoint -q "$R/$m" && umount "$R/$m"
+        if mountpoint -q "$R/$m"; then
+            mount --make-private "$R/$m" 2>/dev/null || true
+            umount "$R/$m" 2>/dev/null || umount -l "$R/$m"
+        fi
     done
     if [ -e "$R/etc/resolv.conf.build-bak" ] || [ -L "$R/etc/resolv.conf.build-bak" ]; then
         mv -f "$R/etc/resolv.conf.build-bak" "$R/etc/resolv.conf"
@@ -191,6 +195,19 @@ in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 in_chroot "id jetson >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio -p \"\$(openssl passwd -6 '$JETSON_PASSWORD')\" -s /bin/bash jetson"
 printf 'if [ -d "/usr/local/cuda/bin" ] ; then\n  PATH="/usr/local/cuda/bin:$PATH"\nfi\n' >> "$R/home/jetson/.profile"
 
+# Wi-Fi / SSH setup shared with the other images (common/netconfig): text file read at every boot, setup web
+# page on port 8080, access point "MPF-Setup" when no network comes up. The file is /etc/mpf-network.txt: the
+# root partition is ext4 (Windows and macOS cannot mount it), so edit it over SSH, the web page, or WSL.
+in_chroot "apt-get install -y -qq python3 hostapd dnsmasq-base"
+in_chroot "systemctl disable hostapd >/dev/null 2>&1 || true; systemctl mask hostapd >/dev/null 2>&1 || true"
+NC="$KIT/../../../../common/netconfig"
+install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
+install -m 644 "$NC"/mpf-netconfig-*.service "$R/etc/systemd/system/"
+install -m 600 "$NC/mpf-network.txt.template" "$R/etc/mpf-network.txt"
+printf 'MPF_NETCONFIG_FILE=/etc/mpf-network.txt\nMPF_USER=jetson\nMPF_WLAN=wlan0\n' > "$R/etc/default/mpf-netconfig"
+[ -n "${WIFI_SSID:-}" ] && printf 'WIFI_SSID=%s\nWIFI_PSK=%s\nWIFI_COUNTRY=%s\n' "$WIFI_SSID" "${WIFI_PSK:-}" "${WIFI_COUNTRY:-}" > "$R/etc/mpf-network.txt"
+in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service >/dev/null 2>&1"
+
 in_chroot "apt-get clean"
 rm -rf "$R"/var/lib/apt/lists/* "$R"/root/.bash_history
 umount_chroot
@@ -237,6 +254,11 @@ rm -f nv_tegra/l4t_deb_packages/nvidia-l4t-nvpmodel-gui-tools*.deb \
 
 ##############################################################################
 log "5/7 Install NVIDIA L4T packages into the rootfs (apply_binaries.sh)"
+# nv-apply-debs.sh only looks for qemu-aarch64-static in Linux_for_Tegra/.., nv_tegra/ or /usr/bin;
+# Ubuntu 25.04+ ships the (static) binary as qemu-aarch64, so stage a copy in nv_tegra/
+if [ ! -f /usr/bin/qemu-aarch64-static ] && [ ! -f nv_tegra/qemu-aarch64-static ]; then
+    install -m 755 "$(command -v qemu-aarch64)" nv_tegra/qemu-aarch64-static
+fi
 ./apply_binaries.sh
 # Point NVIDIA's apt repo at the Xavier (t194) packages
 sed -i "s/<SOC>/$SOC/" "$R/etc/apt/sources.list.d/nvidia-l4t-apt-source.list"
@@ -307,9 +329,10 @@ XRC
         tar -C "$REPO_ROOT" --exclude=.git --exclude='platforms/jetson/image/build/work' -cf - . | tar -C "$R/home/jetson/MPF-Godot" -xf -
         in_chroot "chown -R jetson:jetson /home/jetson/MPF-Godot"
         in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
-        printf 'jetson ALL=(ALL) NOPASSWD:ALL\n' > "$R/etc/sudoers.d/99-build"; chmod 440 "$R/etc/sudoers.d/99-build"
-        in_chroot "su - jetson -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
-        rm -f "$R/etc/sudoers.d/99-build"
+        # As root with jetson's environment: sudo cannot work in the chroot (qemu-aarch64 is registered without
+        # the C flag, so setuid is ignored: "effective uid is not 0")
+        in_chroot "cd /home/jetson/MPF-Godot && HOME=/home/jetson USER=jetson LOGNAME=jetson SUDO_USER=jetson MPF_GODOT_DIR=/home/jetson/MPF-Godot bash install/install_linux.sh --yes"
+        in_chroot "chown -R jetson:jetson /home/jetson"
         # Cabinet boot: automatic login on tty1, X started from the login shell
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
         printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin jetson --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"

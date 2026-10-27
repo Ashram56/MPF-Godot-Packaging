@@ -6,6 +6,21 @@ Raspberry Pi OS (Debian 13), kernel 6.18.50+rpt-rpi-v8, X11 + openbox, one 1920x
 the 3.5 mm jack. The files named below are in [raspberrypi/cabinet/](raspberrypi/cabinet/); the minimal image
 ([raspberrypi/image/](raspberrypi/image/README.md)) does not apply them yet.
 
+## Platform limits (decided by the owner, 2026-10-26)
+
+A Raspberry Pi 4 shows the DMD in one of two ways, and nothing in between:
+
+1. **An external DMD** (PIN2DMD, or ZeDMD; classic 128x32 or HD 256x64 dots, monochrome or Serum colour). No DMD on the
+   screen, so the backglass window stays alone and page-flips.
+2. **The DMD drawn over the backglass** (`[dmd] window="overlay"`), as **256x64 colour dots** (a game's "color256" mode:
+   the colourisation's 256x64 pictures, the ROM's dot fonts), at a whole number of pixels per dot, not clipped.
+
+Not on a Pi 4: the LCD DMD with vector text (HD) and the colourisation's pictures: it costs 45 points of CPU, a 50 s
+start-up preload and twice the late frames (28.8 FPS, 7.7 % over 40 ms, 212 % CPU), and a separate DMD window, 3D light
+cycles and a DMD at native 1080p are out of reach. A game's Pi 4 board profile must therefore install exactly these
+settings and its setup page must offer only these two DMD choices on this board; other boards (PC, Jetson) keep all three
+DMD pipelines (classic external, HD external, LCD).
+
 ## The limits
 
 The GPU is the limit, then video decoding. 30 FPS steady is the target (the videos are 30 fps); 1080p rendering,
@@ -16,8 +31,13 @@ Vulkan and a second window are out of reach.
 | backglass videos, no DMD | 29.5 | 3.7 % | 166 % |
 | + classic dot DMD in the backglass window | 29.7 | 4.2 % | 168 % |
 | + 256x64 colour dot DMD, 2x exact | 29.7 | 4.0 % | 168 % |
-| + HD DMD (vector text, no glow), 512x128 | 28.7 | 7.2 % | 214 % (and a 50 s preload) |
+| + HD DMD (vector text, no glow), 512x128: **not offered on a Pi 4** | 28.7 | 7.2 % | 214 % (and a 50 s preload) |
 | DMD at native 1080p (3x, 1920x1080 render) | 18.2 | 82 % | 145 % |
+
+**Decision (the owner, 2026-10-26): no HD DMD on the Pi 4.** The platform's DMD is a real panel (PIN2DMD, ZeDMD,
+HD or not, driven by the panel) or the overlay in the backglass window: 128x32 dots, or 256x64 dots with a colour
+pack. The bundle's profile declares it as a limit ([limits.md](limits.md)), so the settings page does not offer HD
+and an HD value is put back at install and at each start.
 
 Not worth it: Vulkan (0.4-0.7 FPS, [fix](../fixes/godot/pi4-vulkan-freezes-with-video.md)), `v3d_freq=600` (no
 gain), a 30 Hz mode (the EDID offers none).
@@ -58,7 +78,7 @@ A game's bundle carries these as its Raspberry Pi 4 board profile (applied once 
 | DMD background | none (`[dmd] background="none"`) | 3D light cycles: 10 FPS |
 | DMD rounded corners | a panel behind, not clipped (`corner_clip=false`) | [clip_children](../fixes/godot/clip-children-slow-v3d.md): +20 points of GPU, 3x the late frames |
 | DMD size | a whole number of render pixels per dot (`view_size=[512, 128]`, nearest filter) | non-integer scaling: moiré |
-| HD DMD text glow | 0 | glow on: 25 FPS |
+| DMD mode | 256x64 colour dots (`color256`), or an external panel; never the LCD/HD vector mode | see the platform limits above |
 
 ## Sound and picture in sync
 

@@ -19,6 +19,7 @@ Upstream tracker: https://github.com/missionpinball/mpf/issues
 | [No P-ROC driver for MPF on Linux, nor on Apple silicon Macs](mpf/pinproc-linux-macos.md) | packaging | Linux x86_64 and arm64 (Jetson included); macOS (Apple sili… | `install/install_linux.sh --proc`, `install/install_macos.sh --proc`, `python -m mpf_godo… | pypinproc, https://github.com/missionpinball/pypinproc/issues (wheels… |
 | [P-ROC on Windows: "Could not import pinproc" without the VC++ runtime or FTDI's driver](mpf/pinproc-windows-vcredist.md) | packaging | Windows x86_64 and x86; Windows on ARM (no build at all) | `install/install_windows.ps1 -Proc` (the D2XX driver stays a manual step: FTDI's download… | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [`mpf` does not start once MPF Monitor is installed (ruamel.yaml.clib 0.2.15)](mpf/ruamel-yaml-clib-0.2.15.md) | packaging | all (Python before 3.13; ruamel.yaml does not use the C lib… | `python -m mpf_godot setup` (pip installs the pin next to MPF) | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
+| [ZeDMD does not start with MPF's zedmd platform (library fails to load, wrong architecture on a Pi)](mpf/zedmd-native-serial.md) | bug | Linux arm64 (Raspberry Pi, Jetson); any Python other than t… | a game's config: `mpf: platforms: zedmd_native: mpf_godot.zedmd_native.ZedmdNativePlatfor… | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 
 ## MPF Monitor
 
@@ -48,6 +49,7 @@ Upstream tracker: https://github.com/godotengine/godot/issues
 | Fix | Kind | Platforms | Applied by | Upstream |
 |---|---|---|---|---|
 | [Sound cracks, and videos run ahead of their sound, on a Raspberry Pi 4 (ALSA)](godot/alsa-output-latency.md) | bug (latency 0) / improvement (buffer) | Linux with ALSA (seen on a Raspberry Pi 4, analogue jack, n… | a project setting a game sets in its `project.godot`; the GoZen add-on; on the Pi image `… | Godot, https://github.com/godotengine/godot/issues; status: **draft,… |
+| [A music player driven by triggers keeps playing after the game was cancelled](godot/audio-only-screen-keeps-playing.md) | bug | all (seen on a Raspberry Pi 4) | the game's code | none needed |
 | [A rounded DMD frame costs 20 points of GPU on a Raspberry Pi 4 (`clip_children`)](godot/clip-children-slow-v3d.md) | improvement | Raspberry Pi 4 (V3D); not measured elsewhere | the game's code | none needed |
 | [Late frames on a 4-core board: Godot's main thread shares its core](godot/core-pinning-main-thread.md) | improvement | Linux with 4+ cores and a real display; measured on Jetson… | the launcher (`python -m mpf_godot run`), on Linux with 4+ cores, not under Xvfb | Godot, https://github.com/godotengine/godot/issues; status: none need… |
 | [Uneven frame rate with 30 fps videos on a 60 Hz screen: cap Godot at 30 FPS](godot/frame-cap-30.md) | improvement | all; it matters on boards that cannot hold 60 FPS (measured… | a project setting a game sets in its `project.godot` (Tron-Legacy-MPF does it on every pl… | none needed |
@@ -103,4 +105,4 @@ Upstream tracker: https://github.com/claytercek/godot-native-video/issues
 
 Test projects and repro programs the reports refer to: [repro/](repro/).
 
-44 documents.
+46 documents.

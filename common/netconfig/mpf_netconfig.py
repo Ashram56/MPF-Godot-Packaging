@@ -16,6 +16,8 @@ Settings (environment, defaults for the Raspberry Pi image):
   MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, TRON_VENV, DISPLAY, MPF_GAME_ARGS)
   MPF_GOZEN_SO        a GoZen library built for this board, copied over the bundle's own (optional; not when
                       the bundle's build already has MPF_GOZEN_NEEDS, bundle.json "gozen")
+  MPF_PLATFORM_DIR    this platform's checkout (its addons/gde_gozen is installed into a bundle that lists
+                      "platform_addons" in bundle.json; default: found from this file or from MPF_GOZEN_SO)
   MPF_GOZEN_NEEDS     v4l2m2m zero_copy   what the bundle's GoZen must carry to be kept
 Must run as root.
 """
@@ -33,6 +35,7 @@ GAMES = os.environ.get("MPF_GAMES_DIR", "/opt/games")
 UPLOADS = os.environ.get("MPF_UPLOAD_DIR", "/var/lib/mpf-uploads")
 GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
 GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
+PLATFORM_DIR = os.environ.get("MPF_PLATFORM_DIR", "")
 GOZEN_NEEDS = os.environ.get("MPF_GOZEN_NEEDS", "v4l2m2m zero_copy").split()
 AP_SSID, AP_PSK, AP_ADDR = "MPF-Setup", os.environ.get("MPF_AP_PSK", "mpf-setup"), "192.168.4.1"
 
@@ -278,6 +281,39 @@ def board_profile(game, b):
     job_log((r.stdout + r.stderr).strip() or "board profile: nothing to apply")
 
 
+def platform_addon(name):
+    """The platform's own copy of a binary add-on (addons/<name>), or None."""
+    cands = [PLATFORM_DIR, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
+    if GOZEN_SO:
+        cands.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(GOZEN_SO)))))
+    for c in cands:
+        if c and os.path.isfile(os.path.join(c, "addons", name, "gozen.gdextension" if name == "gde_gozen" else "plugin.cfg")):
+            return os.path.join(c, "addons", name)
+    return None
+
+
+def install_platform_addons(dest, b, me):
+    """Binary add-ons come from the platform, never from the game bundle: the same build for every game. Only
+    this machine's binaries are copied."""
+    for name in b.get("platform_addons", []):
+        src = platform_addon(name)
+        if not src:
+            raise JobError(f"the bundle needs the platform's {name} and this system has none (set MPF_PLATFORM_DIR)")
+        dst = os.path.join(dest, "game", "addons", name)
+        shutil.rmtree(dst, ignore_errors=True)
+        for base, _dirs, files in os.walk(src):
+            for f in files:
+                if os.path.relpath(base, src).startswith("bin") and f.startswith("libgozen") and \
+                        not re.match(r"libgozen\.linux\..*\.%s\.so$" % ("arm64" if me == "arm64" else "x86_64"), f):
+                    continue
+                if os.path.relpath(base, src).startswith("bin") and f.endswith(".dll"):
+                    continue
+                t = os.path.join(dst, os.path.relpath(os.path.join(base, f), src))
+                os.makedirs(os.path.dirname(t), exist_ok=True)
+                shutil.copy2(os.path.join(base, f), t)
+        job_log(f"{name}: the platform's build ({src}) installed for {me}")
+
+
 def install_game(archive, expect_sha):
     job_set(state="running", msg="Checking the archive")
     h = hashlib.sha256()
@@ -300,7 +336,8 @@ def install_game(archive, expect_sha):
     if b.get("format", 1) > 1:
         raise JobError(f"bundle format {b.get('format')} is newer than this page understands")
     tgt, me = b.get("target", {}), ARCH.get(platform.machine(), platform.machine())
-    if tgt.get("os", "linux") != "linux" or tgt.get("arch") != me:
+    # "arm64+x86_64": a bundle for several architectures (both texture formats, every native add-on)
+    if tgt.get("os", "linux") != "linux" or me not in str(tgt.get("arch")).split("+"):
         raise JobError(f"this bundle is for {tgt.get('os')}/{tgt.get('arch')}, this machine is linux/{me}")
     job_log(f"bundle {b.get('name')} {b.get('version')}")
     job_set(msg="Verifying every file (sha256sum)")
@@ -320,6 +357,7 @@ def install_game(archive, expect_sha):
     os.rename(root, dest)
     shutil.rmtree(stage, ignore_errors=True)
     shutil.rmtree(old, ignore_errors=True)
+    install_platform_addons(dest, b, me)
     if GOZEN_SO and os.path.isfile(GOZEN_SO):
         bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
         for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
@@ -417,9 +455,18 @@ def game_autostart():
     return run("systemctl", "is-enabled", "--quiet", "mpf-game.service").returncode == 0
 
 
+def settings_schema(game):
+    """The bundle's settings schema as this board sees it: its tool narrows the choices the board's profile limits
+    (platforms/README.md, Platform limits); the file itself if the tool cannot run."""
+    try:
+        return json.loads(tool(game, "list").stdout)
+    except ValueError:
+        return json.load(open(os.path.join(game, "scripts/package/options.json")))
+
+
 def settings_html(game):
     try:
-        schema = json.load(open(os.path.join(game, "scripts/package/options.json")))
+        schema = settings_schema(game)
         cur = json.loads(tool(game, "get").stdout or "{}")
     except (OSError, ValueError):
         return "<p>Settings unavailable.</p>"
@@ -441,14 +488,15 @@ def settings_html(game):
             else:
                 val = "" if v is None else html.escape(str(v), quote=True)
                 field = f"<input name='{name}' value='{val}' size=14 placeholder='default'>"
+            note = f" <small>(this board: {html.escape(o['limited'])})</small>" if o.get("limited") else ""
             out.append(f"<div title='{html.escape(o.get('help', ''), quote=True)}'>{html.escape(o['label'])}{hint}: {field}"
-                       f" {html.escape(o.get('unit', ''))}</div>")
+                       f" {html.escape(o.get('unit', ''))}{note}</div>")
     out.append("<button>Save settings</button> (restart the game to apply)</form>")
     return "".join(out)
 
 
 def settings_save(game, form):
-    schema = json.load(open(os.path.join(game, "scripts/package/options.json")))
+    schema = settings_schema(game)
     cur = json.loads(tool(game, "get").stdout or "{}")
     sets, unsets = [], []
     for o in schema["options"]:
@@ -466,7 +514,7 @@ def settings_save(game, form):
 
 
 GAME_PAGE = """<h2>Game</h2><p>%(state)s</p>
-<form onsubmit="up(this,'game');return false">Bundle <code>*-linux-%(arch)s.tar.xz</code> <input type=file name=f required><br>
+<form onsubmit="up(this,'game');return false">Bundle <code>*-linux-%(arch)s.tar.xz</code> or <code>*-linux-all.tar.xz</code> <input type=file name=f required><br>
 its <code>.sha256</code> file (optional) <input type=file name=s><br><button>Upload and install</button></form>
 <h2>PuP Pack</h2><form onsubmit="up(this,'pup');return false">Pack <code>.zip</code> <input type=file name=f accept=.zip required>
 <br><button>Upload and install</button></form>
