@@ -300,7 +300,8 @@ def install_game(archive, expect_sha):
     if b.get("format", 1) > 1:
         raise JobError(f"bundle format {b.get('format')} is newer than this page understands")
     tgt, me = b.get("target", {}), ARCH.get(platform.machine(), platform.machine())
-    if tgt.get("os", "linux") != "linux" or tgt.get("arch") != me:
+    # "arm64+x86_64": a bundle for several architectures (both texture formats, every native add-on)
+    if tgt.get("os", "linux") != "linux" or me not in str(tgt.get("arch")).split("+"):
         raise JobError(f"this bundle is for {tgt.get('os')}/{tgt.get('arch')}, this machine is linux/{me}")
     job_log(f"bundle {b.get('name')} {b.get('version')}")
     job_set(msg="Verifying every file (sha256sum)")
@@ -476,7 +477,7 @@ def settings_save(game, form):
 
 
 GAME_PAGE = """<h2>Game</h2><p>%(state)s</p>
-<form onsubmit="up(this,'game');return false">Bundle <code>*-linux-%(arch)s.tar.xz</code> <input type=file name=f required><br>
+<form onsubmit="up(this,'game');return false">Bundle <code>*-linux-%(arch)s.tar.xz</code> or <code>*-linux-all.tar.xz</code> <input type=file name=f required><br>
 its <code>.sha256</code> file (optional) <input type=file name=s><br><button>Upload and install</button></form>
 <h2>PuP Pack</h2><form onsubmit="up(this,'pup');return false">Pack <code>.zip</code> <input type=file name=f accept=.zip required>
 <br><button>Upload and install</button></form>
