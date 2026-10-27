@@ -7,6 +7,8 @@ improvement our pinball projects needed. Game agnostic: any MPF game with a Godo
 Every fix is documented on its own in [fixes/](fixes/README.md) (problem, cause, our fix, affected versions,
 platforms) with a draft issue for the upstream project. Every platform's set-up and what we learned there is in
 [platforms/](platforms/README.md); quick tips for WSL, hosts without usbipd and the Xavier NX: [platforms/tips.md](platforms/tips.md).
+All Godot / GoZen / MPF and platform findings of the Tron project are kept here (what goes where: [CONTRIBUTING.md](CONTRIBUTING.md));
+the ROM extraction and re-coding agents are in [Stern-SAM-Decryption](https://github.com/Ashram56/Stern-SAM-Decryption).
 
 | Pinned | Version | Why this one |
 |---|---|---|

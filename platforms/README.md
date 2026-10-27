@@ -10,6 +10,9 @@ installer step by step, its options and every lesson learned (numbered "Findings
 | [linux.md](linux.md) | `install/install_linux.sh` | Debian/Ubuntu (apt), Fedora/RHEL (dnf), Arch (pacman); x86_64 and arm64 |
 | [jetson.md](jetson.md) | `install/install_linux.sh`, then `platforms/jetson/install_jetson_hwdec.sh` | Jetson Xavier NX (L4T R35, JetPack 5), AGX Orin (L4T R36, JetPack 6) |
 | [jetson/image/README.md](jetson/image/README.md) | `platforms/jetson/image/build/`, `flash/` | a minimal Xavier NX image (L4T 35.6.4), SD card or NVMe |
+| [frame-rate-method.md](frame-rate-method.md) | any board | the checks, the V4L2 decoder, measuring and cross-building before promising a frame rate (Raspberry Pi 4 as the example) |
+| [godot-performance.md](godot-performance.md) | any slow target | GMC + Godot stalls, node pooling, a display drawn from data |
+| [video-playback.md](video-playback.md) | all | GDE GoZen and native video: switching, the Windows build, checking the decoder |
 | [tips.md](tips.md) | none | short tips for WSL, Linux hosts without usbipd, and the Xavier NX |
 
 Every installer ends by running `python -m mpf_godot setup` (`mpf_godot/setup_toolchain.py`), which is the same

@@ -324,3 +324,19 @@ variables above.
   a fifth of NVDEC on the Xavier NX (430 to 446 fps in total flat out).
 - **Versions:** L4T R35.
 - **Found:** 2026-10-09, observed (found on Tron Legacy MPF).
+
+
+## Moved from Stern-SAM-Decryption `agents/packaging.md` section 5a (2026-10-27)
+
+The rest of that section was already here. Also learned on Tron (Xavier NX, AGX Orin):
+
+- **Setup steps that matter on ARM:** `setup.py` bakes the clean HD fonts' signed distance fields
+  (`game/tools/bake_fonts.gd`, about 2 minutes on a Xavier NX; without it the first text froze the game 20 s and
+  more) and `gen_media.py` imports the HD effect frames VRAM-compressed. Both rerun when their inputs change.
+- **Run options**: `run.py --no-render-thread` / `TRON_RENDER_THREAD=0` (Godot's separate render thread is on by
+  default on Godot 4.6.3, where it won with three videos; on Godot 4.5.2 with the DMD alone it lost, so retest it at
+  every Godot upgrade), `TRON_PIN=0` (core pinning, Linux with 4+ cores), `TRON_PERF_DIR` (the performance probe; use
+  `scripts/perf/run.sh`). Each new run option reaches `docker/entrypoint.py` and `docker/tron.env.example` too.
+- **On the board by Remote Control:** the cabinet has no GitHub credentials, so the session there hands its changes
+  back as `git format-patch` files in the project's shared files, and a cloud thread applies, checks and pushes
+  them (observed, Tron on the AGX Orin).
