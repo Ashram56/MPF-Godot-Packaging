@@ -148,7 +148,7 @@ KEYMAP_CMDS=""
 if [ "$KEYMAP" != us ]; then
     grub-kbdcomp -o "$WORK/grub-keymap.gkb" "$KEYMAP" 2>/dev/null || { echo "grub-kbdcomp $KEYMAP failed"; exit 1; }
     GRUBFILES+=("boot/grub/layouts/$KEYMAP.gkb=$WORK/grub-keymap.gkb")
-    KEYMAP_CMDS="insmod keymap
+    KEYMAP_CMDS="insmod keylayouts
 keymap \$prefix/layouts/$KEYMAP.gkb
 "
 fi
@@ -161,7 +161,7 @@ initrd /initrd.img
 boot
 CFG
     grub-mkstandalone -O x86_64-efi -o "$2" \
-        --modules="part_gpt part_msdos fat ext2 search search_label search_fs_file linux normal configfile echo test all_video gzio keymap" \
+        --modules="part_gpt part_msdos fat ext2 search search_label search_fs_file linux normal configfile echo test all_video gzio keylayouts" \
         "boot/grub/grub.cfg=$WORK/grub-embedded.cfg" "${GRUBFILES[@]}"
     [ -s "$2" ] || { echo "grub-mkstandalone failed"; exit 1; }
 }

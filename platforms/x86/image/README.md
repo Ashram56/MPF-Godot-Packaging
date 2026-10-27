@@ -7,15 +7,15 @@ drivers (`intel-media-va-driver`, `mesa-va-drivers`) are in, and the game's GoZe
 ([platforms/raspberrypi/image](../../raspberrypi/image/README.md)), simpler to build: the host has the same architecture, so no emulation, and no
 loop device is needed (FAT via mtools, ext4 via `mke2fs -d`).
 
-**Status 2026-10-26: built and booted** (build in a cloud sandbox, QEMU + OVMF: GRUB, kernel 6.12, root grown to the disk, GPT backup header
-moved, Ethernet DHCP, SSH, setup page on 8080, no failed unit, X session started on tty1). Image 1.1 GB compressed, 3.8 GB raw. Not yet run on the
-AK2PLUS itself (VAAPI untested: QEMU has no Intel GPU). Behind a TLS-inspecting proxy the build gives the chroot the proxy and its CA while the
-installers run (removed again).
+**Status 2026-10-27: built, installed and booted under QEMU + OVMF** (cloud sandbox): the stick shows the installer menu, `mpf-install-to-disk` copies to a
+second virtual disk, that disk alone boots (GRUB, kernel 6.12, root grown, DHCP, SSH, setup page on 8080, X session on tty1). Image 1.1 GB compressed,
+4.3 GB raw. Not yet checked on the AK2PLUS beyond the first (stick) run: VAAPI untested (QEMU has no Intel GPU). Behind a TLS-inspecting proxy the build gives the chroot
+the proxy and its CA while the installers run (removed again).
 
 | Item | Value |
 |---|---|
 | Login | `mpf` / `mpf` (`MPF_PASSWORD=` at build time), in `sudo`; SSH on port 22 |
-| Boot | UEFI only (GPT, 256 MB FAT32 "firmware" ESP + ext4 "rootfs"); one GRUB file `EFI/BOOT/BOOTX64.EFI` reads `EFI/BOOT/mpf-boot.cfg` (the root label) and starts `/vmlinuz`. **Secure Boot must be off** (the loader is not signed) |
+| Boot | UEFI only (GPT, 256 MB FAT32 "firmware" ESP + ext4 "rootfs"); a standalone GRUB EFI file with its configuration inside (in a standalone GRUB the ESP is not the loader's own directory, so nothing can be read next to it): `EFI/BOOT/BOOTX64.EFI` finds the root partition labelled `rootfs` (the stick) and starts `/vmlinuz`; `EFI/BOOT/mpf-disk.efi` does the same for `mpfroot` and the installer copies it over `BOOTX64.EFI` of the internal disk (first version: one loader reading `mpf-boot.cfg` fell to a `grub>` prompt on the installed disk). Keyboard AZERTY in GRUB, console and X (`KEYMAP=us` at build time for QWERTY). **Secure Boot must be off** (the loader is not signed) |
 | Network | Ethernet by DHCP; Wi-Fi by wpa_supplicant on `wlan0` (`net.ifnames=0`: `eth0`, `wlan0`); Wi-Fi/SSH setup like the other images, below |
 | Firmware | `firmware-iwlwifi`, `firmware-realtek`, `firmware-mediatek`, `firmware-atheros`, `firmware-intel-graphics`, `firmware-intel-misc`: the usual Wi-Fi / Ethernet / graphics chips of mini PCs |
 | First boot | root partition grows to fill the disk; unique SSH host keys |
@@ -34,9 +34,7 @@ sudo bash wsl-build.sh        # installs host packages, work folder ~/x86-build,
 
 1. Write the `.img.xz` to a USB stick (balenaEtcher or Raspberry Pi Imager "Use custom" read `.xz`; or `xzcat img.xz | sudo dd of=/dev/sdX bs=4M status=progress`).
 2. In the firmware setup (Del or F2 at power on): Secure Boot off, boot from the USB stick. The system starts and the root partition grows to the stick.
-3. To use the internal disk (the mini PC's Windows is erased): `sudo mpf-install-to-disk /dev/sda` (the M.2 SATA or NVMe disk, `lsblk` lists them). It formats the disk,
-   copies the system, labels the partitions `mpfesp` / `mpfroot` and adds a boot entry; remove the stick and reboot. The disk's root grows to fill it at its first boot.
-   (Or write the image straight to the disk from another PC, with the disk in an adapter.)
+3. **Install on the internal disk**: from the stick the PC shows a menu on the screen (no game, no X): the internal disks (the stick is left out), you pick a number and type its name again; the whole disk is erased (Windows included), the system is copied (about 5 minutes on real hardware), then it powers off: remove the stick and switch on. The same menu over SSH: `sudo mpf-installer`; without the menu: `sudo mpf-install-to-disk /dev/sda --yes` (`lsblk -dpno NAME,SIZE,TRAN` lists the disks; the AK2PLUS has an M.2 SATA, so `sda`, not `nvme`). In the menu `s` gives a shell and `g` starts the game session from the stick. Only an installed disk starts the game by itself. The disk's root grows to fill it at its first boot.
 
 ## Wi-Fi and SSH
 
