@@ -111,16 +111,22 @@ class Install(Base):
         os.makedirs(os.path.join(gmc, "scripts"))
         open(os.path.join(gmc, "plugin.cfg"), "w").write("[plugin]\n")
         open(os.path.join(gmc, "scripts", "bcp_server.gd"), "w").write("# mpf-godot fix bcp-partial-lines\n")
+        fake = os.path.join(self.t.name, "godot")
+        with open(fake, "w") as f:
+            f.write("#!/bin/sh\necho \"$@\" > %s/godot.called\n" % self.t.name)
+        os.chmod(fake, 0o755)
+        open(C.GAME_ENV, "w").write(f"GODOT={fake}\n")
         saved = C.PLATFORM_DIR
         C.PLATFORM_DIR = plat
         try:
             state, msg = self.install(extra={"platform_addons": ["mpf-gmc"]},
-                                      files={"game/addons/mpf-gmc/scripts/bcp_server.gd": b"# the bundle's own, unpatched\n"})
+                                      files={"game/project.godot": b"", "game/addons/mpf-gmc/scripts/bcp_server.gd": b"# the bundle's own, unpatched\n"})
         finally:
             C.PLATFORM_DIR = saved
         self.assertEqual(state, "done", msg)
         p = os.path.join(C.GAMES, "demo@1.0", "game", "addons", "mpf-gmc", "scripts", "bcp_server.gd")
         self.assertIn("mpf-godot fix", open(p).read())
+        self.assertTrue(os.path.isfile(os.path.join(self.t.name, "godot.called")))      # the project was re-imported once
         state, msg = self.install(version="2", extra={"platform_addons": ["mpf-gmc"]})       # no platform GMC: refused, not silently skipped
         self.assertEqual(state, "error")
 

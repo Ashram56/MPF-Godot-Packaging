@@ -306,6 +306,29 @@ def install_platform_addons(dest, b, me):
         job_log(f"{name}: the platform's build ({src}) installed for {me}")
 
 
+def reimport_scripts(dest, b):
+    """A platform add-on made of scripts (mpf-gmc) that is put into a bundle exported without it leaves Godot's class cache
+    (game/.godot/global_script_class_cache.cfg) without its classes: the game would stop at "Could not find base class". One
+    headless import of the project (a few seconds) rebuilds it. Runs as the game user; the data goes under the game folder."""
+    if not any(platform_addon(n) and not os.path.isdir(os.path.join(platform_addon(n), "bin")) for n in b.get("platform_addons", [])):
+        return
+    godot = game_env().get("GODOT") or shutil.which("godot") or ""
+    project = os.path.join(dest, "game")
+    if not godot or not os.path.isfile(os.path.join(project, "project.godot")):
+        job_log("no Godot or no project.godot: the script classes of the platform add-ons are not re-imported")
+        return
+    pw = pwd.getpwnam(C.USER)
+    env = dict(os.environ, HOME=pw.pw_dir, **ram_xdg_env())
+    job_set(msg="Importing the project (a few seconds)")
+    cmd = ["runuser", "-u", C.USER, "--", "env"] + [f"{k}={v}" for k, v in env.items() if k in ("HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")]
+    cmd += [godot, "--headless", "--path", project, "--import"]
+    job_log("$ " + " ".join(cmd[-5:]))
+    r = run(*cmd)
+    job_log((r.stdout + r.stderr)[-1500:])
+    if r.returncode:
+        raise JobError(f"the Godot import failed ({r.returncode})")
+
+
 # ---------------------------------------------------------------- install
 def copy_keep(src, dst, linked):
     """Carry a kept path from an installed version to a new one. A PuP Pack and its media are large and never rewritten in
@@ -409,6 +432,7 @@ def install_game(archive, expect_sha, keep_old=True):
                 job_log(f"{n}: replaced by this board's GoZen")
     pw = pwd.getpwnam(C.USER)
     sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", dest)
+    reimport_scripts(dest, b)
     os.remove(archive)
     first_run_defaults(dest, b)
     board_profile(dest, b)
@@ -451,6 +475,7 @@ def install_pup(zipfile, folder=None):
     # a pack install that tidies the game's add-ons must not lose the platform's GoZen: put it back
     if b.get("platform_addons"):
         install_platform_addons(game, b, C.ARCH.get(platform.machine(), platform.machine()))
+        reimport_scripts(game, b)
         sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", os.path.join(game, "game", "addons"))
     os.remove(zipfile)
     if options_tool(game):
