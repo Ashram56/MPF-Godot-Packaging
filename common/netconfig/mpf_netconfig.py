@@ -593,8 +593,8 @@ class Handler(BaseHTTPRequestHandler):
             state += "<b>running</b>" if game_running() else "stopped"
             ctl = ("<form method=post action=/game style='display:inline'><button name=do value=%s>%s</button> "
                    "<button name=do value=%s>%s</button></form>"
-                   % (("stop", "Stop the game") if game_running() else ("start", "Start the game"),
-                      ("disable", "Do not start at power-on") if game_autostart() else ("enable", "Start at power-on")))
+                   % (*(("stop", "Stop the game") if game_running() else ("start", "Start the game")),
+                      *(("disable", "Do not start at power-on") if game_autostart() else ("enable", "Start at power-on"))))
             ctl += "<h2>Game settings</h2>" + settings_html(game)
         else:
             state, ctl = "No game installed.", ""
