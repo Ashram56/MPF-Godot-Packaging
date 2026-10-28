@@ -17,8 +17,11 @@ SPEC.json (paths relative to the spec's folder, the game's repository root):
                                [params]\ncompress/mode=2\n"; Godot fills in path and uid) next to every .png under dir
                                (searched recursively) whose file name does not start with a skip_prefixes entry
   platform_addons              ["gde_gozen"]: installed by the platform for the machine, never packed
-  run, options, requires,      copied into bundle.json as they are
-  keep_on_update, extra
+  precheck                     a command (list) run in the game's root first; a non-zero exit stops the build (e.g. "are
+                               the generated media current?")
+  source_commits               {"name": "git rev-parse argument"} recorded in bundle.json "source" (default game_commit: HEAD)
+  run, options, requires,      copied into bundle.json as they are; "pup": {"install", "pack_dir", "needs_restart"}
+  pup, keep_on_update, extra   tells the setup page how to install the game's PuP Pack (install: a command with ZIP_PATH_OR_URL)
 Run from this platform's checkout (python -m mpf_godot), with GODOT=/path/to/godot unless `mpf_godot setup` ran.
 The version defaults to YYYY.MM.DD-<short commit>; requires.godot is this platform's pinned Godot; keep_on_update
 defaults to []; game/.godot (the import) is packed on purpose.
@@ -206,15 +209,27 @@ def write_sums(stage):
     return len(lines)
 
 
+def sizes(stage):
+    """MB per top-level folder of the staged tree."""
+    out = {}
+    for name in sorted(os.listdir(stage)):
+        path = os.path.join(stage, name)
+        total = os.path.getsize(path) if os.path.isfile(path) else sum(
+            os.path.getsize(os.path.join(b, f)) for b, _, fs in os.walk(path) for f in fs)
+        out[name] = round(total / 1e6, 1)
+    return out
+
+
 def manifest(root, spec, version, target):
     m = {"format": FORMAT, "id": spec["id"], "name": spec.get("name", spec["id"]), "version": version,
          "built": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
          "target": {"os": "linux", "arch": ARCH[target], "texture_formats": FORMATS[target]},
-         "source": {"game_commit": git(root, "rev-parse", "HEAD")},
+         "source": dict({"game_commit": git(root, "rev-parse", "HEAD")},
+                        **{k: git(root, "rev-parse", v) for k, v in spec.get("source_commits", {}).items()}),
          "requires": dict(spec.get("requires", {}), godot=tc.GODOT_VERSION),
          "platform_addons": list(spec.get("platform_addons", [])),
          "keep_on_update": list(spec.get("keep_on_update", []))}
-    for k in ("run", "options"):
+    for k in ("run", "options", "pup"):
         if k in spec:
             m[k] = spec[k]
     m.update(spec.get("extra", {}))
@@ -234,6 +249,9 @@ def main(argv=None):
     with open(spec_path, encoding="utf-8") as f:
         spec = json.load(f)
     game_rel = spec.get("game_dir", "game")
+    if spec.get("precheck"):
+        if subprocess.run(spec["precheck"], cwd=root).returncode != 0:
+            raise SystemExit("the game's precheck failed: " + " ".join(spec["precheck"]))
     version = args.version or "{}-{}".format(datetime.date.today().strftime("%Y.%m.%d"),
                                               git(root, "rev-parse", "--short", "HEAD") or "nogit")
     formats = FORMATS[args.target]
@@ -256,8 +274,10 @@ def main(argv=None):
     for rel in spec.get("never", []):          # the import itself may have made some (.godot is not cabinet data)
         if rel != game_rel + "/.godot" and os.path.exists(os.path.join(stage, rel)):
             raise SystemExit("cabinet data appeared in the bundle: " + rel)
+    m = manifest(root, spec, version, args.target)
+    m["sizes"] = sizes(stage)
     with open(os.path.join(stage, "bundle.json"), "w", encoding="utf-8") as f:
-        json.dump(manifest(root, spec, version, args.target), f, indent=2)
+        json.dump(m, f, indent=2)
     say("== SHA256SUMS: {} files".format(write_sums(stage)))
     if args.no_archive:
         say("== " + stage)

@@ -13,7 +13,7 @@ Settings (environment, defaults for the Raspberry Pi image):
   MPF_WEB_PORT        8080
   MPF_GAMES_DIR       /opt/games          where an uploaded game bundle is installed (<dir>/<bundle id>)
   MPF_UPLOAD_DIR      /var/lib/mpf-uploads  uploads are written here, then unpacked
-  MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, TRON_VENV, DISPLAY, MPF_GAME_ARGS)
+  MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, MPF_GAME_VENV, DISPLAY, MPF_GAME_ARGS; the names in bundle.json requires.env are forwarded)
   MPF_GOZEN_SO        a GoZen library built for this board, copied over the bundle's own (optional; not when
                       the bundle's build already has MPF_GOZEN_NEEDS, bundle.json "gozen")
   MPF_PLATFORM_DIR    this platform's checkout (its addons/gde_gozen is installed into a bundle that lists
@@ -241,14 +241,24 @@ def installed_game():
 
 
 def game_python():
-    venv = game_env().get("TRON_VENV")
+    env = game_env()
+    venv = env.get("MPF_GAME_VENV") or env.get("TRON_VENV")
     py = os.path.join(venv, "bin", "python") if venv else ""
     return py if py and os.path.exists(py) else "python3"
 
 
+def bundle_meta(game):
+    try:
+        with open(os.path.join(game, "bundle.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def tool(game, *args):
-    """Run the bundle's own settings tool as the game user; returns the CompletedProcess."""
-    return run("runuser", "-u", USER, "--", game_python(), os.path.join(game, "scripts/package/bundle_options.py"), *args, cwd=game)
+    """Run the bundle's own settings tool (bundle.json options.tool) as the game user; returns the CompletedProcess."""
+    t = bundle_meta(game).get("options", {}).get("tool", "scripts/package/bundle_options.py")
+    return run("runuser", "-u", USER, "--", game_python(), os.path.join(game, t), *args, cwd=game)
 
 
 def free_gb(path):
@@ -264,7 +274,8 @@ def first_run_defaults(game):
         have = {}
     # no dmd.mode here: the DMD look is a matter of the board (the Raspberry Pi 4 cannot draw the HD one), so it comes from
     # the bundle's board profile (board_profile below); a board without a profile keeps the bundle's default
-    pup = "true" if os.path.isdir(os.path.join(game, "pup_pack/trn_174h")) else "false"
+    pack = bundle_meta(game).get("pup", {}).get("pack_dir", "pup_pack")
+    pup = "true" if os.path.isdir(os.path.join(game, pack)) else "false"
     want = [x for x in (("pup.enabled", pup),) if x[0] not in have]
     if want:
         job_log(tool(game, "set", *[v for kv in want for v in kv]).stderr)
@@ -445,12 +456,14 @@ def game_exec():
     os.setuid(pw.pw_uid)
     child = dict(os.environ, HOME=pw.pw_dir, USER=USER, DISPLAY=env.get("DISPLAY", ":0"),
                  XAUTHORITY=env.get("XAUTHORITY", os.path.join(pw.pw_dir, ".Xauthority")))
-    for k in ("GODOT", "TRON_VENV"):
+    meta = bundle_meta(game)
+    for k in ["GODOT"] + list(meta.get("requires", {}).get("env", {"TRON_VENV": ""})):
         if env.get(k):
             child[k] = env[k]
+    start = meta.get("run", {}).get("start", "python3 scripts/package/start.py").split()[1:]
     py = game_python()
     os.execve(py if os.path.isabs(py) else shutil.which(py),
-              [py, "scripts/package/start.py"] + env.get("MPF_GAME_ARGS", "").split(), child)
+              [py] + start + env.get("MPF_GAME_ARGS", "").split(), child)
 
 
 def game_start():

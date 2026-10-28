@@ -55,6 +55,29 @@ board-specific build when `MPF_GOZEN_SO` is set; apply the board profile and fir
 
 Same thing by hand: `python -m mpf_godot addons GAME --video` copies the patched GMC and GoZen into a game folder.
 
+## The game's PuP Pack
+
+The pack is the author's zip, never in a bundle. A game that has a PuP integration (Stern-SAM-Decryption `agents/pup_pack.md`)
+declares in `bundle.json` how to install it; the setup page's "PuP Pack" upload calls that command in the installed game:
+
+```json
+"pup": {"install": "python3 scripts/pup/pup_setup.py --pup-zip ZIP_PATH_OR_URL",
+        "pack_dir": "pup_pack/mygame", "needs_restart": true}
+```
+
+`ZIP_PATH_OR_URL` is replaced by the uploaded zip, `pack_dir` (relative to the game) tells the page whether a pack is installed
+(it then sets `pup.enabled`), and `pup_pack`, `pup_media` belong in `keep_on_update`. The page reads the settings tool
+from `options.tool`, the start command from `run.start` and the environment names to forward from `requires.env`
+(`MPF_GAME_VENV` names the game's Python venv), so nothing in the page is specific to a game.
+
+## Platform or game
+
+| Platform (this repository, the same for every game) | Game (its repository, built with `bundle_spec.json`) |
+|---|---|
+| Python, MPF, Godot, ffmpeg, display stack, kernel and board work | MPF machine config, rules, DMD frames, sounds, fonts |
+| GoZen and native_video binaries, patched GMC, the setup page, `mpf_godot bundle` | `bundle_spec.json`, the settings schema and tool, board profiles (`profiles` in `bundle.json`) |
+| Board limits and fixes (`platforms/`, `fixes/`) | the PuP integration code and its install command; the pack itself comes from its author |
+
 ## Checklist for a new game
 
 - [ ] A `bundle_spec.json` at the game's root; the build refuses cabinet data and packs no binary.
