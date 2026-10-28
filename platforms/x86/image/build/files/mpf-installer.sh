@@ -28,7 +28,7 @@ while true; do
     case "$a" in *[!0-9]*) continue;; esac
     D="${DISKS[$((a-1))]:-}"; [ -n "$D" ] || continue
     if mpf-install-to-disk "$D"; then
-        echo; read -r -p "Installed. Remove the USB stick, then press Enter to power off... " _; poweroff; exit 0
+        echo; read -r -p "Installed. Press Enter to power off, and remove the USB stick only once the PC is off... " _; poweroff; exit 0
     fi
     read -r -p "Installation failed or cancelled. Enter to go back to the menu... " _
 done
