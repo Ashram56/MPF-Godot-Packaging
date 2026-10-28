@@ -7,6 +7,11 @@ SRC is the folder that holds your game (an MPF machine folder, a Godot project, 
 can run). It is copied to `game/` inside the bundle, the bundle's working folder is `game/`, and the result is
 `<id>@<version>.tar.xz` with a `.sha256` beside it. The format is described in common/games/README.md.
 
+Every bundle gets a **Hardware** setting on the setup page, `virtual` (default) or `proc` (a P-ROC): the start command is then
+`scripts/package/start.py`, which adds `--hw-virtual-args` or `--hw-proc-args` to your `--start` command (the choice is stored in
+`settings/options.json`, carried over by updates). Your own settings page entries can be added by editing the generated
+`scripts/package/options.json` before the archive is made (`--no-hw-option` skips all of this).
+
 Options of the common cases:
   --start CMD        what runs the game (default `python3 run.py`). `python3` is the base system's venv python (MPF installed),
                      any other name is looked up in that venv's bin first (`mpf`), then on the PATH. It runs in `game/`.
@@ -19,6 +24,10 @@ Options of the common cases:
   --arch ARCH        `all` (default: no native binary), `arm64`, `x86_64` or `arm64+x86_64`
   --platform-addon N take the platform's own build of a binary add-on (`gde_gozen`) instead of one from your folder
   --exclude GLOB     leave out files (repeatable; `.git`, `__pycache__`, `*.pyc`, `logs` are always left out)
+  --no-hw-option     do not add the "Hardware" setting (see below)
+  --hw-virtual-args=A  (write it with `=`: it may start with `-`) arguments added to the start command in virtual mode (default `-x`: MPF's virtual platform)
+  --hw-proc-args=A     arguments added in P-ROC mode (default none: the hardware platform your config asks for; e.g. `-c proc` for
+                     an extra config file)
   --description T / --icon FILE   text and picture shown on the page's game list (icon relative to `game/`)
 """
 import argparse
@@ -32,6 +41,88 @@ import tarfile
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
+OPTIONS_JSON = {
+    "groups": [{"id": "machine", "label": "Machine"}],
+    "options": [{"id": "machine.hw", "group": "machine", "label": "Hardware", "type": "choice", "choices": ["virtual", "proc"],
+                 "default": "virtual", "help": "virtual: no machine, play with the keyboard. proc: a Multimorphic P-ROC on the machine.",
+                 "restart": True}],
+}
+
+START_PY = '''#!/usr/bin/env python3
+"""Start the game: the command of launch.json plus the arguments of the chosen hardware mode (settings/options.json)."""
+import json
+import os
+import shlex
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+launch = json.load(open(os.path.join(HERE, "launch.json")))
+try:
+    hw = json.load(open(os.path.join(ROOT, "settings", "options.json"))).get("machine.hw", "virtual")
+except (OSError, ValueError):
+    hw = "virtual"
+argv = shlex.split(launch["start"]) + shlex.split(launch["proc_args"] if hw == "proc" else launch["virtual_args"])
+bindir = os.path.dirname(sys.executable)
+if argv[0] in ("python", "python3"):
+    argv[0] = sys.executable
+os.chdir(os.path.join(ROOT, "game"))
+os.environ["PATH"] = bindir + os.pathsep + os.environ.get("PATH", "")
+os.execvp(argv[0], argv)
+'''
+
+OPTIONS_PY = '''#!/usr/bin/env python3
+"""The setup page's settings tool: list | get | set ID VALUE... | unset ID... (values in settings/options.json)."""
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+STORE = os.path.join(os.path.dirname(os.path.dirname(HERE)), "settings", "options.json")
+schema = json.load(open(os.path.join(HERE, "options.json")))
+by_id = {o["id"]: o for o in schema["options"]}
+
+
+def read():
+    try:
+        return json.load(open(STORE))
+    except (OSError, ValueError):
+        return {}
+
+
+def write(values):
+    os.makedirs(os.path.dirname(STORE), exist_ok=True)
+    with open(STORE, "w") as f:
+        json.dump(values, f, indent=2)
+
+
+cmd, args = (sys.argv[1] if len(sys.argv) > 1 else "list"), sys.argv[2:]
+if cmd == "list":
+    print(json.dumps(schema))
+elif cmd == "get":
+    print(json.dumps(read()))
+elif cmd == "set":
+    values = read()
+    pairs = list(zip(args[::2], args[1::2]))
+    for k, v in pairs:
+        o = by_id.get(k)
+        if o is None:
+            sys.exit(f"unknown setting {k}")
+        if o["type"] == "choice" and v not in o["choices"]:
+            sys.exit(f"{k}: one of {', '.join(o['choices'])}")
+        if o["type"] == "bool":
+            v = v.lower() in ("1", "true", "yes", "on")
+        values[k] = v
+    write(values)
+elif cmd == "unset":
+    values = read()
+    for k in args:
+        values.pop(k, None)
+    write(values)
+else:
+    sys.exit("usage: bundle_options.py list|get|set|unset")
+'''
+
 ALWAYS = [".git", "__pycache__", "*.pyc", "logs", ".venv", ".godot/mono"]
 
 
@@ -57,6 +148,9 @@ def main():
     ap.add_argument("--no-display", action="store_true")
     ap.add_argument("--keep", action="append", default=[])
     ap.add_argument("--pup-dir")
+    ap.add_argument("--no-hw-option", action="store_true")
+    ap.add_argument("--hw-virtual-args", default="-x")
+    ap.add_argument("--hw-proc-args", default="")
     ap.add_argument("--pup-media")
     ap.add_argument("--pup-install")
     ap.add_argument("--arch", default="all")
@@ -87,6 +181,10 @@ def main():
     }
     if (a.pup_media or a.pup_install) and not a.pup_dir:
         die("--pup-media and --pup-install go with --pup-dir")
+    if not a.no_hw_option:
+        bundle["run"]["start"] = "python3 ../scripts/package/start.py"
+        bundle["options"] = {"tool": "scripts/package/bundle_options.py", "schema": "scripts/package/options.json"}
+        bundle["keep_on_update"].append("settings")
     if a.pup_dir:
         bundle["pup"] = {"pack_dir": "game/" + a.pup_dir.strip("/"), "needs_restart": True}
         if a.pup_install:
@@ -120,12 +218,20 @@ def main():
     out = os.path.join(a.output_dir, top + ".tar.xz")
     import io
     with tarfile.open(out, "w:xz") as t:
-        def add_bytes(name, data):
+        def add_bytes(name, data, mode=0o644):
             i = tarfile.TarInfo(f"{top}/{name}")
-            i.size, i.mode = len(data), 0o644
+            i.size, i.mode = len(data), mode
             t.addfile(i, io.BytesIO(data))
         add_bytes("bundle.json", (json.dumps(bundle, indent=2) + "\n").encode())
+        extra = {}
+        if not a.no_hw_option:
+            extra = {"scripts/package/start.py": START_PY, "scripts/package/bundle_options.py": OPTIONS_PY,
+                     "scripts/package/options.json": json.dumps(OPTIONS_JSON, indent=2) + "\n",
+                     "scripts/package/launch.json": json.dumps({"start": a.start, "virtual_args": a.hw_virtual_args, "proc_args": a.hw_proc_args}, indent=2) + "\n"}
+            sums += "".join(f"{hashlib.sha256(v.encode()).hexdigest()}  {k}\n" for k, v in extra.items())
         add_bytes("SHA256SUMS", sums.encode())
+        for k, v in extra.items():
+            add_bytes(k, v.encode(), 0o755 if k.endswith(".py") else 0o644)
         for r in files:
             p = os.path.join(a.src, r)
             i = t.gettarinfo(p, f"{top}/game/{r}")

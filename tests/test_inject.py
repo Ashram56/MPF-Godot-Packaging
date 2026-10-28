@@ -31,7 +31,7 @@ class MakeBundle(TG.Base):
 
     def test_bundle_installs_and_starts_with_the_given_command(self):
         out = os.path.join(self.t.name, "out")
-        r = tool("make_bundle.py", self.src(), "--id", "my-game", "--name", "My game", "--version", "2.1", "--keep", "data", "-o", out)
+        r = tool("make_bundle.py", self.src(), "--id", "my-game", "--name", "My game", "--version", "2.1", "--keep", "data", "--no-hw-option", "-o", out)
         self.assertEqual(r.returncode, 0, r.stderr)
         arc = os.path.join(out, "my-game@2.1.tar.xz")
         self.assertTrue(os.path.isfile(arc + ".sha256"))
@@ -48,6 +48,32 @@ class MakeBundle(TG.Base):
         self.assertEqual(argv[1:], ["run.py"])
         self.assertEqual(cwd, os.path.join(game, "game"))
 
+    def test_hardware_option_virtual_or_proc(self):
+        s = self.src()
+        with open(os.path.join(s, "run.py"), "w") as f:
+            f.write("import sys\nprint('ARGS', *sys.argv[1:])\n")
+        out = os.path.join(self.t.name, "out")
+        r = tool("make_bundle.py", s, "--id", "hw", "--version", "1", "--hw-virtual-args=--virtual", "--hw-proc-args=--proc", "-o", out)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        G.JOB_LOCK.acquire()
+        G.run_job(G.install_game, os.path.join(out, "hw@1.tar.xz"), "")
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"] + G.JOB["log"])
+        game = os.path.join(C.GAMES, "hw@1")
+        b = G.read_bundle(game)
+        self.assertIn("settings", b["keep_on_update"])
+        argv, cwd = G.game_command(game, b, {})
+        self.assertEqual(argv[1:], ["../scripts/package/start.py"])
+        run = lambda: subprocess.run([sys.executable, os.path.join(game, "scripts/package/start.py")], capture_output=True, text=True).stdout.strip()
+        self.assertEqual(run(), "ARGS --virtual")
+        schema = json.loads(G.tool(game, "list").stdout)
+        self.assertEqual(schema["options"][0]["id"], "machine.hw")
+        self.assertEqual(G.tool(game, "set", "machine.hw", "proc").returncode, 0)
+        self.assertEqual(json.loads(G.tool(game, "get").stdout), {"machine.hw": "proc"})
+        self.assertEqual(run(), "ARGS --proc")
+        self.assertNotEqual(G.tool(game, "set", "machine.hw", "bogus").returncode, 0)
+        self.assertEqual(G.tool(game, "unset", "machine.hw").returncode, 0)
+        self.assertEqual(run(), "ARGS --virtual")
+
     def test_bad_arguments(self):
         s = self.src()
         for extra in (["--id", "Bad Id", "--version", "1"], ["--id", "ok", "--version", "bad version"], ["--id", "ok", "--version", "1", "--keep", "../x"]):
@@ -61,7 +87,7 @@ class MakeBundle(TG.Base):
         open(os.path.join(s, "data", "scores"), "w").write("1")
         out = os.path.join(self.t.name, "out")
         for v in ("1", "2"):
-            tool("make_bundle.py", s, "--id", "g", "--version", v, "--keep", "data", "--pup-dir", "pup", "-o", out)
+            tool("make_bundle.py", s, "--id", "g", "--version", v, "--keep", "data", "--pup-dir", "pup", "--no-hw-option", "-o", out)
             G.JOB_LOCK.acquire()
             G.run_job(G.install_game, os.path.join(out, f"g@{v}.tar.xz"), "")
             self.assertEqual(G.JOB["state"], "done", G.JOB["msg"])

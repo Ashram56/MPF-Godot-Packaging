@@ -28,9 +28,13 @@ python3 common/games/make_bundle.py ~/my-machine --id my-machine --name "My mach
    then on the `PATH`. Several words are fine (`mpf both -t`, `python3 run.py --fullscreen`).
 2. `--keep PATH` lists what an update carries over to the next version: the files your game *writes* (settings, high scores, audits),
    relative to `game/`. Everything else is replaced by the new version. Without `--keep` an update starts from a clean state.
-3. No `--pup-dir`: the bundle has no PuP Pack, the page shows no pack upload for it. Godot, GoZen and the media controller are not
+3. **Virtual or P-ROC**: every bundle made this way gets a *Hardware* setting on the page, `virtual` (default) or `proc`. The bundle
+   starts `scripts/package/start.py`, which runs your `--start` command plus `--hw-virtual-args=-x` (MPF's virtual platform) or
+   `--hw-proc-args=...` (nothing by default: the hardware platform your config asks for; for example `--hw-proc-args="-c proc"` for
+   an extra config file). The choice is kept in `settings/options.json` and carried over by updates. `--no-hw-option` leaves it out.
+4. No `--pup-dir`: the bundle has no PuP Pack, the page shows no pack upload for it. Godot, GoZen and the media controller are not
    needed unless your game uses them. Use `--no-display` for a game that opens no window.
-4. Put the archive on the machine: upload it on the page (*Games*, *Add a game*), or copy it (and its `.sha256`) to `/data/inbox/` over
+5. Put the archive on the machine: upload it on the page (*Games*, *Add a game*), or copy it (and its `.sha256`) to `/data/inbox/` over
    SSH and reboot, or put it in the image before flashing (next section). It is checked, installed to `/opt/games/my-machine@1.0`
    and, if it is the first game, becomes the active one.
 
