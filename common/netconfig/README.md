@@ -30,3 +30,5 @@ above), not in the setup page: the profile sets the board's only allowed choices
 Raspberry Pi 4 the DMD is an external panel or the 256x64 colour dots over the backglass, never the HD vector mode
 ([platforms/raspberrypi.md](../../platforms/raspberrypi.md), "Platform limits"). Record each new limit there with its
 measurement, and in the game's profile.
+
+How a game builds a bundle for this page: [platforms/game-bundles.md](../../platforms/game-bundles.md).

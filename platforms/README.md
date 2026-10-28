@@ -91,3 +91,5 @@ The installers of this repository were renamed from Tron's (`install_prereqs_*` 
 | Godot downloads from downloads.tuxfamily.org failed on some networks | Godot from GitHub releases (`toolchain.GODOT_RELEASES`) | code |
 | Release tags cannot be pushed from a cloud session (git proxy answers 403) | the owner creates the tag on GitHub or from a clone | observed, Tron PuP fork |
 | A board without GitHub credentials (Remote Control) cannot push | it hands changes back as `git format-patch` files; a cloud session applies and pushes them | observed, Tron on the AGX Orin |
+
+- [game-bundles.md](game-bundles.md): how a game builds its universal bundle (code and multimedia, no binary) and how this platform installs it.
