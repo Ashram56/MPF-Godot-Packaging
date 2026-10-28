@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpf_common as C  # noqa: E402
 import mpf_games as G  # noqa: E402
 import mpf_netconfig as N  # noqa: E402
+import mpf_ota as O  # noqa: E402
 from mpf_common import run  # noqa: E402
 
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
@@ -82,6 +83,7 @@ def state():
                     "degraded": os.path.exists("/run/mpf-persist.degraded")},
         "mode": {"mode": mode[0], "stay": mode[1]} if mode else None,
         "job": G.job_state(),
+        "ota": O.public(),
         "inbox": sorted(n for n in (os.listdir(C.INBOX) if os.path.isdir(C.INBOX) else []) if n.endswith((".tar.xz", ".zip"))),
     }
 
@@ -217,6 +219,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(G.job_state())
         if p == "/api/state":
             return self._json(state())
+        if p == "/api/ota/list":
+            try:
+                return self._json(O.list_remote())
+            except ValueError as e:
+                return self._json({"ok": False, "msg": str(e)}, 400)
         if p == "/api/scan":
             return self._json(N.scan())
         if p == "/api/logs":
@@ -254,6 +261,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/wifi":
             N.add_wifi(form.get("ssid", ""), form.get("psk", ""), form.get("country", "").upper())
             return "Wi-Fi saved, connecting (the address may change)."
+        if path == "/api/ota/config":
+            O.save(form.get("url", ""), form.get("user", ""), form.get("password", ""))
+            return "Update server saved."
+        if path == "/api/ota/install":
+            # the item comes from the server's own listing, never from the browser's address: the saved password must not be
+            # sent to an address the page was handed
+            item = next((i for i in O.list_remote() if i["key"] == form.get("key") and i["compatible"]), None)
+            if item is None:
+                raise ValueError("that file is not on the server (any more) or is not for this machine")
+            if not G.JOB_LOCK.acquire(blocking=False):
+                raise ValueError("an install is already running")
+            G.job_set(state="running", msg="Starting the download", log="")
+            threading.Thread(target=G.run_job, args=(O.install_item, item), daemon=True).start()
+            return "Installing " + item["name"]
         if path == "/api/ssh":
             if form.get("key"):
                 N.add_ssh_key(form["key"].strip())
@@ -393,6 +414,13 @@ fieldset label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px
 <div class="mt hide" id="jobBox"><div class="row"><b id="jobMsg" class="grow"></b><span class="badge" id="jobBadge"></span></div><div class="bar mt" id="jobBar"><i></i></div><pre id="jobLog" class="mt hide"></pre></div>
 <p class="muted mt" id="inboxNote"></p></div></section>
 
+<section><h2><svg stroke="currentColor"><use href="#i-redo"/></svg><span data-t="ota"></span></h2><div class="card">
+ <form class="form" id="otaForm"><div class="two"><label><span data-t="otaUrl"></span><input name="url" id="otaUrl" placeholder="https://…/games/" autocomplete="off"></label>
+ <label><span data-t="otaUser"></span><input name="user" id="otaUser" autocomplete="off"></label></div>
+ <label><span data-t="otaPw"></span><input name="password" id="otaPw" type="password" autocomplete="new-password"></label>
+ <div class="row"><button type="submit"><span data-t="otaSave"></span></button><button type="button" id="otaCheck" class="pri"><span data-t="otaCheck"></span></button><span class="muted" data-t="otaHint"></span></div></form>
+ <div class="nets mt" id="otaList"></div></div></section>
+
 <div class="two">
 <section><h2><svg stroke="currentColor"><use href="#i-wifi"/></svg><span data-t="network"></span></h2><div class="card">
  <div class="row"><span id="netNow" class="grow"></span><button id="scanBtn"><svg><use href="#i-redo"/></svg><span data-t="scan"></span></button></div>
@@ -423,7 +451,7 @@ game:"Game",storage:"Storage",free:"free",uptime:"Up",online:"Online",offline:"O
 mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"The system is read-only: the flash is not worn. Games, settings, scores, Wi-Fi and SSH keys are stored on the data partition and can be changed.",
 maintTxt:"The system is writable (for updates of the operating system). Go back to production when you are done.",toMaint:"Maintenance until reboot",toMaintStay:"Maintenance, also after reboots",toProd:"Back to production",
 degraded:"No data partition: settings and scores are kept in RAM and are lost at power-off.",inbox:"Waiting in the inbox (installed at the next boot): ",inboxHelp:"Files copied to the inbox folder are installed at boot.",
-uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none"},
+uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none",ota:"Updates (WebDAV)",otaUrl:"Server address",otaUser:"User",otaPw:"Password",otaPwKept:"unchanged",otaSave:"Save",otaCheck:"Check for updates",otaInstall:"Install",otaDone:"Installed",otaChanged:"Changed on the server",otaNone:"Nothing found in this folder",otaGame:"Game",otaPack:"PuP Pack",otaHint:"Folders of the server: bundles (.tar.xz, with a .sha256) and packs named <game>.pup.zip."},
 fr:{games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
 keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
 sshKey:"Clé publique SSH",sshPw:"Connexion SSH par mot de passe",unchanged:"inchangé",save:"Enregistrer",logs:"Sortie du jeu",active:"Actif",activate:"Activer au démarrage",start:"Démarrer",stop:"Arrêter",restart:"Redémarrer",settings:"Réglages",delete:"Supprimer",
@@ -432,7 +460,7 @@ game:"Jeu",storage:"Stockage",free:"libres",uptime:"Démarré depuis",online:"En
 mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"Le système est en lecture seule : la flash ne s'use pas. Jeux, réglages, scores, Wi-Fi et clés SSH sont sur la partition de données et restent modifiables.",
 maintTxt:"Le système est modifiable (mises à jour du système). Revenez en production quand vous avez fini.",toMaint:"Maintenance jusqu'au redémarrage",toMaintStay:"Maintenance, même après redémarrage",toProd:"Retour en production",
 degraded:"Pas de partition de données : réglages et scores sont en RAM et perdus à l'extinction.",inbox:"En attente dans la boîte d'arrivée (installés au prochain démarrage) : ",inboxHelp:"Les fichiers copiés dans le dossier inbox sont installés au démarrage.",
-uploading:"Envoi",installing:"Installation",done:"Terminé",error:"Erreur",hostPrefix:"Adresse",signal:"signal",openNet:"ouvert",selectGame:"Choisir un jeu",saved:"Enregistré",close:"Fermer",cancel:"Annuler",saveSettings:"Enregistrer les réglages",none:"aucun"}};
+uploading:"Envoi",installing:"Installation",done:"Terminé",error:"Erreur",hostPrefix:"Adresse",signal:"signal",openNet:"ouvert",selectGame:"Choisir un jeu",saved:"Enregistré",close:"Fermer",cancel:"Annuler",saveSettings:"Enregistrer les réglages",none:"aucun",ota:"Mises à jour (WebDAV)",otaUrl:"Adresse du serveur",otaUser:"Utilisateur",otaPw:"Mot de passe",otaPwKept:"inchangé",otaSave:"Enregistrer",otaCheck:"Chercher les mises à jour",otaInstall:"Installer",otaDone:"Installé",otaChanged:"Modifié sur le serveur",otaNone:"Rien dans ce dossier",otaGame:"Jeu",otaPack:"PuP Pack",otaHint:"Dossiers du serveur : bundles (.tar.xz, avec un .sha256) et packs nommés <jeu>.pup.zip."}};
 let L=(localStorage.getItem('mpfLang')||navigator.language||'en').slice(0,2);if(!T[L])L='en';
 const t=k=>(T[L]&&T[L][k])||T.en[k]||k, $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ico=(n,c='')=>`<svg class="${c}" stroke="currentColor"><use href="#i-${n}"/></svg>`;
@@ -513,7 +541,13 @@ $('#scanBtn').onclick=scan;$('#nets').onclick=e=>{const n=e.target.closest('.net
 $('#wifiForm').onsubmit=e=>{e.preventDefault();post('/api/wifi',Object.fromEntries(new FormData(e.target)))};
 $('#sshForm').onsubmit=e=>{e.preventDefault();post('/api/ssh',Object.fromEntries(new FormData(e.target)))};
 $('#logsBtn').onclick=async()=>{const p=$('#logs');p.classList.remove('hide');p.textContent='…';p.textContent=await (await fetch('/api/logs')).text();p.scrollTop=p.scrollHeight};
-async function refresh(){try{S=await (await fetch('/api/state')).json();render(S)}catch(e){}}
+function otaFill(o){if(!o)return;if(document.activeElement!==$('#otaUrl'))$('#otaUrl').value=o.url||'';if(document.activeElement!==$('#otaUser'))$('#otaUser').value=o.user||'';$('#otaPw').placeholder=o.has_password?t('otaPwKept'):''}
+$('#otaForm').onsubmit=e=>{e.preventDefault();post('/api/ota/config',Object.fromEntries(new FormData(e.target)))};
+$('#otaCheck').onclick=async()=>{const b=$('#otaCheck');b.disabled=true;$('#otaList').innerHTML='<span class="muted">…</span>';
+ try{const r=await fetch('/api/ota/list');const j=await r.json();if(!r.ok){toast(j.msg||'?',true);$('#otaList').innerHTML='';b.disabled=false;return}
+ $('#otaList').innerHTML=j.map(i=>`<div class="net"><b class="grow">${esc((i.group?i.group+' / ':'')+i.name)}</b><span class="muted">${i.kind==='game'?t('otaGame'):t('otaPack')} · ${fmtB(i.size)}</span>${i.changed?`<span class="badge">${t('otaChanged')}</span>`:i.installed?`<span class="badge">${t('otaDone')}</span>`:''}${i.compatible?`<button data-k="${esc(i.key)}">${t('otaInstall')}</button>`:''}</div>`).join('')||'<span class="muted">'+t('otaNone')+'</span>'}catch(e){toast('?',true)}b.disabled=false};
+$('#otaList').onclick=async e=>{const b=e.target.closest('button[data-k]');if(!b)return;b.disabled=true;await post('/api/ota/install',{key:b.dataset.k});poll()};
+async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);otaFill(S.ota)}catch(e){}}
 applyLang();refresh();poll();setInterval(refresh,4000);
 </script></body></html>
 """

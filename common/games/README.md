@@ -82,6 +82,12 @@ what starts at power-on, what the page's settings card configures, and what a pa
 - *Delete* on the page removes one version; the data of the others is untouched. The disk is the limit: the page refuses an upload that
   would not fit.
 
+## Updates over the air (WebDAV)
+
+The page's *Updates* card reads a WebDAV folder: one folder, or one sub-folder per game, holding `<id>@<version>.tar.xz` (+ `.sha256`)
+and packs named `<id>.pup.zip` or `<id>@<version>.pup.zip` (the name says which installed game a pack is for). Installing from the
+list follows the rules above (new version kept beside the old one, settings, scores and pack carried over).
+
 ## The bundle
 
 An archive (`tar -cJf`, `.tar.xz`) with **one top folder** of any name, holding `bundle.json` and, optionally, `SHA256SUMS` (checked with
@@ -146,4 +152,4 @@ Anything else in `bundle.json` is the game's own: loaders ignore unknown keys.
 | `make_bundle.py` | a folder of your code → `<id>@<version>.tar.xz` + `.sha256` |
 | `inject_image.py` | bundles and packs → an image, before flashing |
 | [`../netconfig/mpf_games.py`](../netconfig/mpf_games.py) | the loader: install, versions, active game, inbox, start and stop |
-| `tests/test_games.py`, `tests/test_inject.py` | the loader's contract and the two tools |
+| `tests/test_games.py`, `tests/test_inject.py`, `tests/test_ota.py` | the loader's contract, the two tools and the WebDAV updates |

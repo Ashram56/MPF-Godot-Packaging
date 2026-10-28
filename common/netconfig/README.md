@@ -9,6 +9,7 @@ Shared by every image (Raspberry Pi 4, Jetson Xavier NX, x86 mini PC). Standard 
 | `mpf_netconfig.py` | Entry point and network side. `apply` (read the file at boot; the Wi-Fi password is erased from it afterwards), `web` (setup page on port 8080), `ap` (access point `MPF-Setup`, password `mpf-setup`, page at http://192.168.4.1:8080 when no network came up in 90 s), `game` (what `mpf-game.service` runs), `inbox` (install what is waiting in the inbox) |
 | `mpf_common.py` | Settings read from the environment and `/etc/mpf-readonly.conf`, the writable-window helper for read-only mode |
 | `mpf_games.py` | Everything about games: install, versions, the active game, PuP Packs, settings, start and stop, the inbox |
+| `mpf_ota.py` | Updates of games and PuP Packs from a WebDAV folder (list, download, install; address, user and password kept in `ota.json`, mode 0600) |
 | `mpf_web.py` | The page (one HTML file, English and French) and its HTTP routes |
 | `mpf-netconfig-*.service`, `mpf-game.service` | systemd units: apply, web, ap, inbox, and the game |
 
@@ -80,3 +81,11 @@ above), not in the setup page: the profile sets the board's only allowed choices
 Raspberry Pi 4 the DMD is an external panel or the 256x64 colour dots over the backglass, never the HD vector mode
 ([platforms/raspberrypi.md](../../platforms/raspberrypi.md), "Platform limits"). Record each new limit there with its
 measurement, and in the game's profile.
+
+## Updates from a WebDAV server (*Updates* card)
+
+Type the folder's address, user and password once (kept on this machine only, in `ota.json` of the state folder, never shown again;
+an empty password field keeps the saved one; redirects are refused). *Check for updates* lists the bundles (`*.tar.xz`, with a
+`.sha256` beside) and PuP Packs in the folder and its sub-folders; *Install* downloads one and installs it exactly like an upload.
+The list says *installed* or *changed on the server* (size or date differ from what was installed). The engine itself (the base
+system) is not updated this way yet.
