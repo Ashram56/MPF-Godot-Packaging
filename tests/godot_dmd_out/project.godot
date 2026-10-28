@@ -1,0 +1,16 @@
+; A bare Godot project for tests/test_dmd_out_godot.py: addons/dmd_out between a fake MPF and a probe.
+config_version=5
+
+[application]
+config/name="dmd_out probe"
+run/main_scene="res://main.tscn"
+
+[autoload]
+MPF="*res://fake_mpf.gd"
+DmdOut="*res://dmd_out.gd"
+Probe="*res://probe.gd"
+
+[display]
+window/size/viewport_width=128
+window/size/viewport_height=32
+window/stretch/mode="viewport"
