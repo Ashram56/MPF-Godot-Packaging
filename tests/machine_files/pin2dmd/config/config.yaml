@@ -1,0 +1,17 @@
+#config_version=6
+
+# A bare machine with a DMD display, plus the platform's PIN2DMD overlay: tests/test_pin2dmd_boot.py
+config:
+  - ../../../../examples/dmd_devices/pin2dmd.yaml
+
+displays:
+  dmd:
+    width: 128
+    height: 32
+
+dmds:
+  dmd:
+    source_display: dmd
+
+hardware:
+  platform: virtual

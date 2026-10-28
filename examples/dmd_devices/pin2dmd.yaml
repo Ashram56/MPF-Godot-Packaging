@@ -3,7 +3,8 @@
 # A PIN2DMD (RGB LED DMD on USB) as an extra DMD output. Given after the game's hardware config:
 #   mpf game . -c config,pin2dmd          (Godot started with "-- --pin2dmd", addons/dmd_out/dmd_out.gd)
 # MPF's own pin2dmd platform (pyusb, USB 0314:e457) takes the 128x32 RGB frames Godot sends as "rgb_dmd_frame".
-# platforms/dmd_devices.md.
+# PIN2DMD XL: resolution 192x64, Godot with "-- --pin2dmd --dmd-size=192x64"; PIN2DMD HD: 256x64 and --dmd-size=256x64
+# (the game must offer a picture of that size: --dmd-feed=NAME, platforms/dmd_devices.md).
 
 hardware:
   rgb_dmd: pin2dmd
