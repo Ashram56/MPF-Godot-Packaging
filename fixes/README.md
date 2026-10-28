@@ -19,6 +19,7 @@ Upstream tracker: https://github.com/missionpinball/mpf/issues
 | [No P-ROC driver for MPF on Linux, nor on Apple silicon Macs](mpf/pinproc-linux-macos.md) | packaging | Linux x86_64 and arm64 (Jetson included); macOS (Apple sili… | `install/install_linux.sh --proc`, `install/install_macos.sh --proc`, `python -m mpf_godo… | pypinproc, https://github.com/missionpinball/pypinproc/issues (wheels… |
 | [P-ROC on Windows: "Could not import pinproc" without the VC++ runtime or FTDI's driver](mpf/pinproc-windows-vcredist.md) | packaging | Windows x86_64 and x86; Windows on ARM (no build at all) | `install/install_windows.ps1 -Proc` (the D2XX driver stays a manual step: FTDI's download… | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [`mpf` does not start once MPF Monitor is installed (ruamel.yaml.clib 0.2.15)](mpf/ruamel-yaml-clib-0.2.15.md) | packaging | all (Python before 3.13; ruamel.yaml does not use the C lib… | `python -m mpf_godot setup` (pip installs the pin next to MPF) | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
+| [A Visual Pinball table written for PinMAME stops, stays dark or never fires a coil with MPF's `virtual_pinball`](mpf/virtual-pinball-vpinmame-answers.md) | improvement | all (VPX itself runs on Windows; the platform's answers are… | the game's config (`custom_code:` in its VPX overlay); nothing to apply | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 
 ## MPF Monitor
 
@@ -94,4 +95,4 @@ Upstream tracker: https://github.com/claytercek/godot-native-video/issues
 
 Test projects and repro programs the reports refer to: [repro/](repro/).
 
-35 documents.
+36 documents.
