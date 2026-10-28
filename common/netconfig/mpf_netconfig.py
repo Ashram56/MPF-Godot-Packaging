@@ -617,7 +617,7 @@ class Handler(BaseHTTPRequestHandler):
                 me = ARCH.get(platform.machine(), platform.machine())
                 if not ok:
                     raise ValueError("expected a .tar.xz bundle" if kind == "game" else "expected a .zip pack")
-                if "linux-" in name and kind == "game" and not name.endswith(f"linux-{me}.tar.xz"):
+                if "linux-" in name and kind == "game" and not name.endswith((f"linux-{me}.tar.xz", "linux-all.tar.xz")):
                     raise ValueError(f"this machine is {me}: wrong bundle")
                 if kind == "pup" and not installed_game():
                     raise ValueError("install the game first")
