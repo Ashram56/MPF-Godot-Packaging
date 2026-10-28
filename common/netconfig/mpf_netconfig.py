@@ -257,14 +257,15 @@ def free_gb(path):
 
 
 def first_run_defaults(game):
-    """The ROM's own DMD look, no PuP until a pack is installed, and start at power-on: only for what nobody set yet."""
+    """No PuP until a pack is installed, and start at power-on: only for what nobody set yet."""
     try:
         have = json.loads(tool(game, "get").stdout or "{}")
     except ValueError:
         have = {}
-    # the ROM's look only on the ARM boards (a Pi cannot draw the HD DMD); a PC keeps the bundle's default, HD
-    classic = (("dmd.mode", "classic"),) if platform.machine() in ("aarch64", "arm64") else ()
-    want = [x for x in (*classic, ("pup.enabled", "false" if not os.path.isdir(os.path.join(game, "pup_pack/trn_174h")) else "true")) if x[0] not in have]
+    # no dmd.mode here: the DMD look is a matter of the board (the Raspberry Pi 4 cannot draw the HD one), so it comes from
+    # the bundle's board profile (board_profile below); a board without a profile keeps the bundle's default
+    pup = "true" if os.path.isdir(os.path.join(game, "pup_pack/trn_174h")) else "false"
+    want = [x for x in (("pup.enabled", pup),) if x[0] not in have]
     if want:
         job_log(tool(game, "set", *[v for kv in want for v in kv]).stderr)
     run("systemctl", "enable", "mpf-game.service")
