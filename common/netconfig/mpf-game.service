@@ -6,7 +6,7 @@ ConditionPathExistsGlob=/opt/games/*/bundle.json
 [Service]
 EnvironmentFile=-/etc/default/mpf-netconfig
 ExecStart=/usr/local/bin/mpf_netconfig.py game
-Restart=on-failure
+Restart=always
 RestartSec=10
 KillMode=control-group
 
