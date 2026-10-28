@@ -69,7 +69,7 @@ the game starts; if anything fails the file goes to `/data/inbox/failed/` with a
 Every game lives in `/opt/games/<id>@<version>` (`/data/persist/games` on a production image). One is the **active game**: it is
 what starts at power-on, what the page's settings card configures, and what a pack without a game name goes to.
 
-- Installing a **new version** of a game keeps the old one: it stays in the list, and *Play this one* on the page goes back to it.
+- Installing a **new version** of a game keeps the old one: it stays in the list, and *Activate at startup* on the page goes back to it.
   The new version starts with a copy of the old one's settings and scores (`keep_on_update`) and **shares its PuP Pack** (hard links,
   one copy of the videos on the disk). An update of the *active* game becomes active at once.
 - Installing **another game** (another `id`) leaves the active one alone: pick it on the page. Each game has its own folder, settings,

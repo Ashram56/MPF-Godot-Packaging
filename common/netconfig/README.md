@@ -23,7 +23,7 @@ copy the template to the configured path as `mpf-network.txt`.
 One screen, in the browser's language (English or French, a selector at the top), with cards that show only what applies:
 
 - **Status**: addresses, Wi-Fi network and signal, free space, mode (production or maintenance), the game running or not.
-- **Games**: every installed game and version with its name, version, size, the active one marked; *Play this one*, *Delete*, and the
+- **Games**: every installed game and version with its name, version, size, the active one marked; *Activate at startup*, *Delete*, and the
   upload of a new bundle or of a PuP Pack for the selected game. Start, stop, restart, start at power-on, the last lines of the log.
 - **Settings** of the active game, built from the bundle's own settings schema (`options.tool`, `options.schema`).
 - **Wi-Fi**: the networks in range (tap to choose), password, country. **SSH**: a public key, password logins on or off.

@@ -280,9 +280,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/activate":
             was = G.game_running()
             G.set_active(form.get("folder", ""))
+            G.set_autostart(True)
             if was:
                 G.game_restart()
-            return "Game selected" + (" and restarting." if was else ".")
+            g = G.installed_game(form.get("folder", ""))
+            pack = " with its PuP Pack" if g and G.pup_installed(g) else (" (it has no PuP Pack)" if g else "")
+            return "This game now starts at power-on" + pack + (" and is restarting." if was else ".")
         if path == "/api/delete":
             G.delete_game(form.get("folder", ""))
             return "Game removed."
@@ -414,7 +417,7 @@ fieldset label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px
 <script>
 const T={en:{games:"Games",add:"Add a game or a PuP Pack",dropGame:"Game bundle",dropGameHint:"Drop a .tar.xz here or click",dropPup:"PuP Pack",dropPupHint:"Drop the pack's .zip here or click",
 keepOld:"Keep the older versions of this game",sha:"Its .sha256 file (optional)",packFor:"Install the pack for",network:"Network",system:"System",scan:"Scan",ssid:"Network name",psk:"Password",country:"Country code",connect:"Save and connect",
-sshKey:"SSH public key",sshPw:"SSH password login",unchanged:"unchanged",save:"Save",logs:"Game output",active:"Active",activate:"Play this one",start:"Start",stop:"Stop",restart:"Restart",settings:"Settings",delete:"Remove",
+sshKey:"SSH public key",sshPw:"SSH password login",unchanged:"unchanged",save:"Save",logs:"Game output",active:"Active",activate:"Activate at startup",start:"Start",stop:"Stop",restart:"Restart",settings:"Settings",delete:"Remove",
 running:"Running",stopped:"Stopped",noGames:"No game installed yet. Add a bundle below.",pupYes:"PuP Pack installed",pupNo:"no PuP Pack",version:"Version",confirmDel:"Remove this game with its settings and scores?",
 game:"Game",storage:"Storage",free:"free",uptime:"Up",online:"Online",offline:"Offline",autostart:"Starts at power-on",noAuto:"Does not start at power-on",enableAuto:"Start at power-on",disableAuto:"Do not start at power-on",
 mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"The system is read-only: the flash is not worn. Games, settings, scores, Wi-Fi and SSH keys are stored on the data partition and can be changed.",
@@ -423,7 +426,7 @@ degraded:"No data partition: settings and scores are kept in RAM and are lost at
 uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none"},
 fr:{games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
 keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
-sshKey:"Clé publique SSH",sshPw:"Connexion SSH par mot de passe",unchanged:"inchangé",save:"Enregistrer",logs:"Sortie du jeu",active:"Actif",activate:"Jouer à celui-ci",start:"Démarrer",stop:"Arrêter",restart:"Redémarrer",settings:"Réglages",delete:"Supprimer",
+sshKey:"Clé publique SSH",sshPw:"Connexion SSH par mot de passe",unchanged:"inchangé",save:"Enregistrer",logs:"Sortie du jeu",active:"Actif",activate:"Activer au démarrage",start:"Démarrer",stop:"Arrêter",restart:"Redémarrer",settings:"Réglages",delete:"Supprimer",
 running:"En marche",stopped:"Arrêté",noGames:"Aucun jeu installé. Ajoutez un bundle ci-dessous.",pupYes:"PuP Pack installé",pupNo:"pas de PuP Pack",version:"Version",confirmDel:"Supprimer ce jeu avec ses réglages et ses scores ?",
 game:"Jeu",storage:"Stockage",free:"libres",uptime:"Démarré depuis",online:"En ligne",offline:"Hors ligne",autostart:"Démarre à la mise sous tension",noAuto:"Ne démarre pas à la mise sous tension",enableAuto:"Démarrer à la mise sous tension",disableAuto:"Ne pas démarrer à la mise sous tension",
 mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"Le système est en lecture seule : la flash ne s'use pas. Jeux, réglages, scores, Wi-Fi et clés SSH sont sur la partition de données et restent modifiables.",
