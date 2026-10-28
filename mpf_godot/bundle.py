@@ -9,13 +9,19 @@ SPEC.json (paths relative to the spec's folder, the game's repository root):
   git_tracked                  folders whose git-tracked files are copied (default [game_dir])
   git_exclude                  path prefixes left out of those (default [game_dir + "/addons/"]: add-ons come from the platform)
   copy                         extra files/folders copied as they are (generated config, media, sounds, scripts, assets ...)
-  never                        paths that must not be in the tree (cabinet data); the build stops if one is
+  never                        paths that must not be in the staged tree (cabinet data); the build stops if one is.
+                               Only what is staged is checked: untracked files outside `copy` are simply left out
   never_names                  file name patterns that must not be in it (e.g. "*.local.cfg")
-  import_seed                  [{"dir", "template", "skip_prefixes"}]: write the .import file `template` (a file of
-                               the game) next to every .png under dir that the game does not track
+  import_seed                  [{"dir", "template", "skip_prefixes"}]: write the .import file `template` (the text of
+                               a Godot .import file, e.g. "[remap]\nimporter=\"texture\"\ntype=\"CompressedTexture2D\"\n
+                               [params]\ncompress/mode=2\n"; Godot fills in path and uid) next to every .png under dir
+                               (searched recursively) whose file name does not start with a skip_prefixes entry
   platform_addons              ["gde_gozen"]: installed by the platform for the machine, never packed
   run, options, requires,      copied into bundle.json as they are
   keep_on_update, extra
+Run from this platform's checkout (python -m mpf_godot), with GODOT=/path/to/godot unless `mpf_godot setup` ran.
+The version defaults to YYYY.MM.DD-<short commit>; requires.godot is this platform's pinned Godot; keep_on_update
+defaults to []; game/.godot (the import) is packed on purpose.
 Texture formats follow the target: arm64 -> etc2, x86_64 -> s3tc, all -> both (imported offline, one archive for every machine).
 """
 import argparse
@@ -246,7 +252,7 @@ def main(argv=None):
     say("== Godot import: {} .import files seeded".format(seed_imports(root, spec, stage)))
     set_texture_formats(os.path.join(game, "project.godot"), formats)
     godot_import(game, tc.godot_path())
-    say("   dropped {} texture files the target cannot use".format(prune_formats(game, formats)))
+    say("   removed {} imported textures of formats the target cannot use".format(prune_formats(game, formats)))
     for rel in spec.get("never", []):          # the import itself may have made some (.godot is not cabinet data)
         if rel != game_rel + "/.godot" and os.path.exists(os.path.join(stage, rel)):
             raise SystemExit("cabinet data appeared in the bundle: " + rel)
