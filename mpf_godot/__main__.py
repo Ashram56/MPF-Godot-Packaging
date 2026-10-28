@@ -2,6 +2,7 @@
 
     setup       install MPF, MPF Monitor, Godot and GMC with our fixes (mpf_godot/setup_toolchain.py)
     addons      copy the patched GMC (and with --video the video add-ons) into a game folder
+    dmd-detect  say which RGB DMD answers: pin2dmd, zedmd or nothing (mpf_godot/dmd_panel.py)
     bundle      build a game bundle (code and multimedia, no binary) from the game's spec (mpf_godot/bundle.py)
     patch-gmc   apply our GMC fixes to a GMC folder (default: toolchain/addons/mpf-gmc)
     run         start a game: Godot (GMC) first, then MPF, optionally MPF Monitor (mpf_godot/launcher.py)
@@ -24,10 +25,13 @@ def addons(argv):
     p.add_argument("--video", action="store_true", help="also GDE GoZen (Linux, Windows) and native_video "
                                                          "(Windows, macOS), with our fixes (fixes/gde-gozen/, "
                                                          "fixes/native-video/)")
+    p.add_argument("--dmd", action="store_true", help="also addons/dmd_out (frames to a PIN2DMD or ZeDMD, platforms/dmd_devices.md)")
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
     dest = os.path.join(os.path.abspath(args.game), "addons")
     jobs = [(tc.gmc_dir(), os.path.join(dest, "mpf-gmc"))]
+    if args.dmd:
+        jobs.append((tc.addon_dir("dmd_out"), os.path.join(dest, "dmd_out")))
     if args.video:
         if tc.gozen_supported():
             jobs.append((tc.addon_dir("gde_gozen"), os.path.join(dest, "gde_gozen")))
@@ -60,6 +64,9 @@ def main(argv=None):
         return setup_toolchain.main(rest)
     if cmd == "addons":
         return addons(rest)
+    if cmd == "dmd-detect":
+        from mpf_godot import dmd_panel
+        return dmd_panel.main(rest)
     if cmd == "bundle":
         from mpf_godot import bundle
         return bundle.main(rest)
