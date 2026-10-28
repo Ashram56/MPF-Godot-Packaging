@@ -15,6 +15,7 @@ installer step by step, its options and every lesson learned (numbered "Findings
 | [godot-performance.md](godot-performance.md) | any slow target | GMC + Godot stalls, node pooling, a display drawn from data |
 | [video-playback.md](video-playback.md) | all | GDE GoZen and native video: switching, the Windows build, checking the decoder |
 | [dmd_devices.md](dmd_devices.md) | `addons/dmd_out/`, `examples/dmd_devices/` | PIN2DMD and ZeDMD RGB LED DMDs, any OS (feeder: Linux, macOS) |
+| [pup-remote-topper.md](pup-remote-topper.md) | `mpf_godot/pup_remote/` | PuP screens on a Raspberry Pi (a topper): server for the game, agent and installer for the Pi |
 | [limits.md](limits.md) | none | what each platform cannot run, and how the settings page, the installer and each start enforce it |
 | [tips.md](tips.md) | none | short tips for WSL, Linux hosts without usbipd, and the Xavier NX |
 
