@@ -16,12 +16,13 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpf_common as C  # noqa: E402
 import mpf_games as G  # noqa: E402
 import mpf_netconfig as N  # noqa: E402
+import mpf_monitor as MON  # noqa: E402
 import mpf_ota as O  # noqa: E402
 from mpf_common import run  # noqa: E402
 
@@ -228,6 +229,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(N.scan())
         if p == "/api/logs":
             return self._send(200, game_logs(), "text/plain; charset=utf-8")
+        if p == "/api/logs/saved":
+            return self._json(MON.saved_logs()[::-1])
+        if p.startswith("/api/logs/saved/"):
+            text = MON.read_saved(unquote(p.rsplit("/", 1)[1]))
+            if text is None:
+                return self._send(404, "not found", "text/plain")
+            return self._send(200, text, "text/plain; charset=utf-8", [("Content-Disposition", 'attachment; filename="%s"' % unquote(p.rsplit("/", 1)[1]))])
+        if p == "/api/monitor":
+            return self._json(MON.MON.snapshot(float(parse_qs(u.query).get("since", ["0"])[0] or 0)))
         if p.startswith("/api/settings/"):
             game = G.installed_game(p.rsplit("/", 1)[1])
             return self._json({"html": settings_form(game)}) if game else self._json({"error": "no such game"}, 404)
@@ -275,6 +285,12 @@ class Handler(BaseHTTPRequestHandler):
             G.job_set(state="running", msg="Starting the download", log="")
             threading.Thread(target=G.run_job, args=(O.install_item, item), daemon=True).start()
             return "Installing " + item["name"]
+        if path == "/api/logs/save":
+            name = MON.save_log(next((g for g in G.installed_games() if g["active"]), None))
+            return f"Saved as {name} in {MON.SAVED}"
+        if path == "/api/monitor/switch":
+            MON.MON.set_switch(form.get("name", ""), form.get("do", "toggle"))
+            return "ok"
         if path == "/api/ssh":
             if form.get("key"):
                 N.add_ssh_key(form["key"].strip())
@@ -340,10 +356,10 @@ header{display:flex;align-items:center;gap:14px;padding:18px clamp(14px,4vw,40px
 .logo svg{width:24px;height:24px;stroke:#fff}
 h1{font-size:20px;margin:0;letter-spacing:.3px;white-space:nowrap}a{color:var(--accent)}input[type=file]{padding:6px}input[type=file]::file-selector-button{font:inherit;margin-right:10px;border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:8px;padding:5px 10px;cursor:pointer}header small{color:var(--dim);display:block;font-size:12.5px}
 .sp{flex:1}.lang{width:auto;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font:inherit}
-main{max-width:1180px;margin:0 auto;padding:6px clamp(14px,4vw,40px) 60px;display:grid;gap:22px}
+main{max-width:980px;margin:0 auto;padding:6px clamp(14px,4vw,40px) 60px;display:grid;gap:22px}
 h2{font-size:13px;letter-spacing:1.6px;text-transform:uppercase;color:var(--dim);margin:6px 2px 10px;display:flex;align-items:center;gap:8px}
 h2 svg{width:16px;height:16px}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:14px}
 .card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:var(--shadow)}
 .tile{display:flex;gap:12px;align-items:flex-start}.tile .ic{width:40px;height:40px;border-radius:11px;background:rgba(55,210,255,.12);display:grid;place-items:center;flex:none}
 .tile .ic svg{width:22px;height:22px;stroke:var(--accent)}.tile b{display:block;font-size:16px}.tile span{color:var(--dim);font-size:13px;word-break:break-word}
@@ -351,7 +367,7 @@ h2 svg{width:16px;height:16px}
 .badge.ok{color:var(--ok);border-color:rgba(61,220,151,.4);background:rgba(61,220,151,.1)}.badge.warn{color:var(--warn);border-color:rgba(255,184,77,.45);background:rgba(255,184,77,.1)}
 .badge.bad{color:var(--bad);border-color:rgba(255,107,129,.45);background:rgba(255,107,129,.1)}.badge.acc{color:var(--accent);border-color:rgba(55,210,255,.45);background:rgba(55,210,255,.1)}
 .dot{width:8px;height:8px;border-radius:50%;background:currentColor}.pulse .dot{animation:p 1.4s infinite}@keyframes p{50%{opacity:.25}}
-.games{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
+.games{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(280px,100%),1fr));gap:16px}
 .game{display:flex;flex-direction:column;gap:12px;position:relative;overflow:hidden}.game.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 32px rgba(55,210,255,.2)}
 .cover{height:120px;border-radius:12px;background:linear-gradient(135deg,#1c2a63,#3a2a7a) center/cover;display:grid;place-items:center;color:rgba(255,255,255,.85)}
 .cover svg{width:44px;height:44px;stroke:currentColor;opacity:.8}.game h3{margin:0;font-size:17px}.game p{margin:0;color:var(--dim);font-size:13px}
@@ -361,16 +377,17 @@ button:hover{border-color:var(--accent);transform:translateY(-1px)}button svg{wi
 button.pri{background:linear-gradient(135deg,var(--accent),var(--accent2));border:0;color:#fff;font-weight:600}button.dng:hover{border-color:var(--bad);color:var(--bad)}button:disabled{opacity:.5;cursor:default;transform:none}
 .drop{border:2px dashed var(--line);border-radius:var(--r);padding:26px 16px;text-align:center;color:var(--dim);transition:.15s;cursor:pointer;background:rgba(55,210,255,.03)}
 .drop:hover,.drop.over{border-color:var(--accent);color:var(--text);background:rgba(55,210,255,.08)}.drop svg{width:34px;height:34px;stroke:var(--accent);margin-bottom:6px}.drop b{display:block;color:var(--text)}
-.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:16px}
 .bar{height:10px;background:var(--bg2);border-radius:99px;overflow:hidden;border:1px solid var(--line)}.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .3s}
 .bar.run i{background-size:200% 100%;animation:mv 1.2s linear infinite}@keyframes mv{to{background-position:-200% 0}}
 input,select,textarea{font:inherit;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;width:100%}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
 .form{display:grid;gap:10px}.form label{display:grid;gap:4px;color:var(--dim);font-size:13px}
 .nets{display:grid;gap:6px;max-height:260px;overflow:auto;margin:8px 0}.net{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);cursor:pointer;background:var(--bg2)}
-.net:hover{border-color:var(--accent)}.sig{display:inline-flex;gap:2px;align-items:flex-end;height:16px}.sig i{width:4px;background:var(--line);border-radius:1px}.sig i.on{background:var(--accent)}
+.net:hover{border-color:var(--accent)}a.net{color:var(--text);text-decoration:none}.net svg{width:16px;height:16px;flex:none}.sig{display:inline-flex;gap:2px;align-items:flex-end;height:16px}.sig i{width:4px;background:var(--line);border-radius:1px}.sig i.on{background:var(--accent)}
 .sig i:nth-child(1){height:5px}.sig i:nth-child(2){height:8px}.sig i:nth-child(3){height:12px}.sig i:nth-child(4){height:16px}
-pre{margin:0;max-height:300px;overflow:auto;background:#05081a;color:#b8c4ff;padding:12px;border-radius:12px;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;border:1px solid var(--line)}
+main>*,.card,.two>*,.games>*,.tiles>*{min-width:0}html,body{overflow-x:hidden}
+pre{margin:0;max-height:300px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#05081a;color:#b8c4ff;padding:12px;border-radius:12px;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;border:1px solid var(--line)}
 dialog{border:1px solid var(--line);border-radius:var(--r);background:var(--card);color:var(--text);max-width:min(720px,94vw);width:100%;padding:0}dialog::backdrop{background:rgba(3,6,20,.7);backdrop-filter:blur(3px)}
 dialog .hd{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}dialog .bd{padding:14px 18px;max-height:70vh;overflow:auto}dialog .ft{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
 fieldset{border:1px solid var(--line);border-radius:12px;margin:0 0 12px;padding:10px 12px;display:grid;gap:8px}legend{color:var(--accent);padding:0 6px;font-weight:600}
@@ -378,6 +395,11 @@ fieldset label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px
 #toast{position:fixed;left:50%;bottom:24px;opacity:0;pointer-events:none;transform:translateX(-50%) translateY(120px);background:var(--card2);border:1px solid var(--line);padding:11px 18px;border-radius:12px;box-shadow:var(--shadow);transition:.3s;z-index:20;max-width:92vw}
 #toast.show{transform:translateX(-50%);opacity:1}#toast.err{border-color:var(--bad);color:var(--bad)}
 .banner{border-radius:var(--r);padding:12px 16px;border:1px solid rgba(255,184,77,.5);background:rgba(255,184,77,.1);color:var(--warn)}.banner.bad{border-color:rgba(255,107,129,.5);background:rgba(255,107,129,.1);color:var(--bad)}
+.tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);overflow-x:auto}.tabs button{border:0;border-bottom:2px solid transparent;border-radius:10px 10px 0 0;background:none;color:var(--dim);padding:10px 16px}
+.tabs button:hover{transform:none;color:var(--text)}.tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
+dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
+.sw{justify-content:flex-start;padding:6px 10px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;text-align:left}
+.sw.on{background:var(--ok);border-color:var(--ok);color:#04210f;font-weight:600}.sw small{display:block;opacity:.7;font-size:11px}
 .hide{display:none!important}.muted{color:var(--dim)}.mt{margin-top:10px}
 @media (max-width:560px){fieldset label{grid-template-columns:1fr}}
 </style></head><body>
@@ -400,10 +422,11 @@ fieldset label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px
 <main>
 <div id="banners"></div>
 <section><div class="tiles" id="tiles"></div></section>
+<nav class="tabs" id="tabs"><button data-go="games"><span data-t="tabGames"></span></button><button data-go="install"><span data-t="tabInstall"></span></button><button data-go="config"><span data-t="tabConfig"></span></button></nav>
 
-<section><h2><svg stroke="currentColor"><use href="#i-play"/></svg><span data-t="games"></span></h2><div class="games" id="games"></div><p class="muted mt" id="autoNote"></p></section>
+<section data-tab="games"><h2><svg stroke="currentColor"><use href="#i-play"/></svg><span data-t="games"></span></h2><div class="games" id="games"></div><p class="muted mt" id="autoNote"></p></section>
 
-<section><h2><svg stroke="currentColor"><use href="#i-up"/></svg><span data-t="add"></span></h2>
+<section data-tab="install"><h2><svg stroke="currentColor"><use href="#i-up"/></svg><span data-t="add"></span></h2>
 <div class="card"><div class="two">
  <div><div class="drop" id="dropGame"><svg><use href="#i-up"/></svg><b data-t="dropGame"></b><span data-t="dropGameHint"></span></div>
   <input type="file" id="fGame" accept=".xz" class="hide"><label class="row mt muted"><input type="checkbox" id="keepOld" checked style="width:auto"> <span data-t="keepOld"></span></label>
@@ -414,14 +437,14 @@ fieldset label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px
 <div class="mt hide" id="jobBox"><div class="row"><b id="jobMsg" class="grow"></b><span class="badge" id="jobBadge"></span></div><div class="bar mt" id="jobBar"><i></i></div><pre id="jobLog" class="mt hide"></pre></div>
 <p class="muted mt" id="inboxNote"></p></div></section>
 
-<section><h2><svg stroke="currentColor"><use href="#i-redo"/></svg><span data-t="ota"></span></h2><div class="card">
+<section data-tab="install"><h2><svg stroke="currentColor"><use href="#i-redo"/></svg><span data-t="ota"></span></h2><div class="card">
  <form class="form" id="otaForm"><div class="two"><label><span data-t="otaUrl"></span><input name="url" id="otaUrl" placeholder="https://…/games/" autocomplete="off"></label>
  <label><span data-t="otaUser"></span><input name="user" id="otaUser" autocomplete="off"></label></div>
  <label><span data-t="otaPw"></span><input name="password" id="otaPw" type="password" autocomplete="new-password"></label>
  <div class="row"><button type="submit"><span data-t="otaSave"></span></button><button type="button" id="otaCheck" class="pri"><span data-t="otaCheck"></span></button><span class="muted" data-t="otaHint"></span></div></form>
  <div class="nets mt" id="otaList"></div></div></section>
 
-<div class="two">
+<div class="two" data-tab="config">
 <section><h2><svg stroke="currentColor"><use href="#i-wifi"/></svg><span data-t="network"></span></h2><div class="card">
  <div class="row"><span id="netNow" class="grow"></span><button id="scanBtn"><svg><use href="#i-redo"/></svg><span data-t="scan"></span></button></div>
  <div class="nets" id="nets"></div>
@@ -435,15 +458,21 @@ fieldset label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px
  <label><span data-t="sshPw"></span><select name="pwlogin"><option value="" data-t="unchanged"></option><option value="yes">yes</option><option value="no">no</option></select></label>
  <div><button type="submit"><span data-t="save"></span></button></div></form>
  <div id="modeBox" class="mt hide"></div>
- <div class="row mt"><button id="logsBtn"><svg><use href="#i-term"/></svg><span data-t="logs"></span></button></div><pre id="logs" class="mt hide"></pre></div></section>
+ </div></section>
 </div>
+<section data-tab="config"><h2><svg stroke="currentColor"><use href="#i-term"/></svg><span data-t="diag"></span></h2><div class="card">
+ <div class="row"><button id="logsBtn"><svg><use href="#i-term"/></svg><span data-t="logs"></span></button><button id="saveLogBtn" class="pri"><svg><use href="#i-disk"/></svg><span data-t="saveLog"></span></button><button id="monBtn"><svg><use href="#i-cpu"/></svg><span data-t="monitor"></span></button></div>
+ <p class="muted mt" data-t="saveLogHint"></p><pre id="logs" class="mt hide"></pre><div class="nets" id="savedLogs"></div></div></section>
 </main>
 
 <dialog id="dlg"><div class="hd"><b id="dlgTitle" class="grow"></b><button id="dlgClose">✕</button></div><div class="bd" id="dlgBody"></div><div class="ft" id="dlgFoot"></div></dialog>
+<dialog id="monDlg" class="wide"><div class="hd"><b class="grow" data-t="monitor"></b><span class="badge" id="monBadge"></span>&nbsp;<button id="monClose">✕</button></div>
+<div class="bd"><div class="row"><input id="monFilter" style="max-width:240px" data-ph="monFilter"><select id="monMode" style="width:auto"><option value="toggle" data-t="monToggle"></option><option value="tap" data-t="monTap"></option></select><span class="muted" id="monCount"></span></div>
+<p class="muted" data-t="monHint"></p><div class="sws mt" id="monGrid"></div><h2 class="mt"><span data-t="monLog"></span></h2><pre id="monLogBox" style="max-height:160px"></pre></div></dialog>
 <div id="toast"></div>
 
 <script>
-const T={en:{games:"Games",add:"Add a game or a PuP Pack",dropGame:"Game bundle",dropGameHint:"Drop a .tar.xz here or click",dropPup:"PuP Pack",dropPupHint:"Drop the pack's .zip here or click",
+const T={en:{tabGames:"Games",tabInstall:"Install and updates",tabConfig:"Configuration",diag:"Diagnostics",saveLog:"Save the game log",saveLogHint:"Writes the game output, the machine state and the latest switch changes to one file on the data partition (the live logs are in RAM), to hand it over for debugging.",savedLogs:"Saved logs",monitor:"Switch monitor",monFilter:"Filter…",monToggle:"Click flips the switch",monTap:"Click taps the switch",monHint:"Shows the machine's switches live (lit = active) through MPF's BCP connection. The game must be running.",monLog:"Latest changes",monNone:"No switch yet",monOn:"on",monOff:"off",monConn:"Connected",monDisc:"Not connected",games:"Games",add:"Add a game or a PuP Pack",dropGame:"Game bundle",dropGameHint:"Drop a .tar.xz here or click",dropPup:"PuP Pack",dropPupHint:"Drop the pack's .zip here or click",
 keepOld:"Keep the older versions of this game",sha:"Its .sha256 file (optional)",packFor:"Install the pack for",network:"Network",system:"System",scan:"Scan",ssid:"Network name",psk:"Password",country:"Country code",connect:"Save and connect",
 sshKey:"SSH public key",sshPw:"SSH password login",unchanged:"unchanged",save:"Save",logs:"Game output",active:"Active",activate:"Activate at startup",start:"Start",stop:"Stop",restart:"Restart",settings:"Settings",delete:"Remove",
 running:"Running",stopped:"Stopped",noGames:"No game installed yet. Add a bundle below.",pupYes:"PuP Pack installed",pupNo:"no PuP Pack",version:"Version",confirmDel:"Remove this game with its settings and scores?",
@@ -452,7 +481,7 @@ mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"The syste
 maintTxt:"The system is writable (for updates of the operating system). Go back to production when you are done.",toMaint:"Maintenance until reboot",toMaintStay:"Maintenance, also after reboots",toProd:"Back to production",
 degraded:"No data partition: settings and scores are kept in RAM and are lost at power-off.",inbox:"Waiting in the inbox (installed at the next boot): ",inboxHelp:"Files copied to the inbox folder are installed at boot.",
 uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none",ota:"Updates (WebDAV)",otaUrl:"Server address",otaUser:"User",otaPw:"Password",otaPwKept:"unchanged",otaSave:"Save",otaCheck:"Check for updates",otaInstall:"Install",otaDone:"Installed",otaChanged:"Changed on the server",otaNone:"Nothing found in this folder",otaGame:"Game",otaPack:"PuP Pack",otaHint:"Folders of the server: bundles (.tar.xz, with a .sha256) and packs named <game>.pup.zip."},
-fr:{games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
+fr:{tabGames:"Jeux",tabInstall:"Installation et mises à jour",tabConfig:"Configuration",diag:"Diagnostic",saveLog:"Enregistrer le jeu (log)",saveLogHint:"Écrit la sortie du jeu, l'état de la machine et les derniers changements de switches dans un fichier sur la partition de données (les logs en cours sont en RAM), à fournir pour le débogage.",savedLogs:"Logs enregistrés",monitor:"Moniteur de switches",monFilter:"Filtrer…",monToggle:"Un clic inverse le switch",monTap:"Un clic fait une impulsion",monHint:"Affiche les switches de la machine en direct (allumé = actif) par la connexion BCP de MPF. Le jeu doit être démarré.",monLog:"Derniers changements",monNone:"Aucun switch",monOn:"actif",monOff:"inactif",monConn:"Connecté",monDisc:"Non connecté",games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
 keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
 sshKey:"Clé publique SSH",sshPw:"Connexion SSH par mot de passe",unchanged:"inchangé",save:"Enregistrer",logs:"Sortie du jeu",active:"Actif",activate:"Activer au démarrage",start:"Démarrer",stop:"Arrêter",restart:"Redémarrer",settings:"Réglages",delete:"Supprimer",
 running:"En marche",stopped:"Arrêté",noGames:"Aucun jeu installé. Ajoutez un bundle ci-dessous.",pupYes:"PuP Pack installé",pupNo:"pas de PuP Pack",version:"Version",confirmDel:"Supprimer ce jeu avec ses réglages et ses scores ?",
@@ -464,7 +493,7 @@ uploading:"Envoi",installing:"Installation",done:"Terminé",error:"Erreur",hostP
 let L=(localStorage.getItem('mpfLang')||navigator.language||'en').slice(0,2);if(!T[L])L='en';
 const t=k=>(T[L]&&T[L][k])||T.en[k]||k, $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ico=(n,c='')=>`<svg class="${c}" stroke="currentColor"><use href="#i-${n}"/></svg>`;
-function applyLang(){document.documentElement.lang=L;$('#lang').value=L;document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));if(S)render(S)}
+function applyLang(){document.documentElement.lang=L;$('#lang').value=L;document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));document.querySelectorAll('[data-ph]').forEach(e=>e.placeholder=t(e.dataset.ph));if(S)render(S)}
 $('#lang').onchange=e=>{L=e.target.value;localStorage.setItem('mpfLang',L);applyLang()};
 let S=null,toastT;
 function toast(m,err){const e=$('#toast');e.textContent=m;e.className='show'+(err?' err':'');clearTimeout(toastT);toastT=setTimeout(()=>e.className='',4200)}
@@ -548,6 +577,24 @@ $('#otaCheck').onclick=async()=>{const b=$('#otaCheck');b.disabled=true;$('#otaL
  $('#otaList').innerHTML=j.map(i=>`<div class="net"><b class="grow">${esc((i.group?i.group+' / ':'')+i.name)}</b><span class="muted">${i.kind==='game'?t('otaGame'):t('otaPack')} · ${fmtB(i.size)}</span>${i.changed?`<span class="badge">${t('otaChanged')}</span>`:i.installed?`<span class="badge">${t('otaDone')}</span>`:''}${i.compatible?`<button data-k="${esc(i.key)}">${t('otaInstall')}</button>`:''}</div>`).join('')||'<span class="muted">'+t('otaNone')+'</span>'}catch(e){toast('?',true)}b.disabled=false};
 $('#otaList').onclick=async e=>{const b=e.target.closest('button[data-k]');if(!b)return;b.disabled=true;await post('/api/ota/install',{key:b.dataset.k});poll()};
 async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);otaFill(S.ota)}catch(e){}}
-applyLang();refresh();poll();setInterval(refresh,4000);
+const TABS=['games','install','config'];let TAB=(location.hash||'').slice(1);if(!TABS.includes(TAB))TAB='games';
+function showTab(){document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('hide',e.dataset.tab!==TAB));document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.go===TAB))}
+$('#tabs').onclick=e=>{const b=e.target.closest('button[data-go]');if(!b)return;TAB=b.dataset.go;history.replaceState(null,'','#'+TAB);showTab();if(TAB==='config')savedList()};
+async function savedList(){try{const l=await (await fetch('/api/logs/saved')).json();$('#savedLogs').innerHTML=l.map(n=>`<a class="net" href="/api/logs/saved/${encodeURIComponent(n)}" download>${ico('disk')}<b class="grow">${esc(n)}</b></a>`).join('')}catch(e){}}
+$('#saveLogBtn').onclick=async()=>{const b=$('#saveLogBtn');b.disabled=true;await post('/api/logs/save',{});b.disabled=false;savedList()};
+let monT=null,monSince=0,monLast='',monLog=[];
+function monDraw(j){const b=$('#monBadge');b.className='badge '+(j.connected?'ok':'bad');b.textContent=j.connected?t('monConn'):t('monDisc');
+ const f=$('#monFilter').value.toLowerCase(),sw=j.switches.filter(x=>!f||(x.name+' '+x.label).toLowerCase().includes(f));
+ $('#monCount').textContent=j.error||(j.switches.filter(x=>x.state).length+' / '+j.switches.length);
+ const h=sw.map(x=>`<button class="sw ${x.state?'on':''}" data-n="${esc(x.name)}" title="${esc(x.board+' '+x.number+' '+x.label)}">${esc(x.name)}<small>${esc(x.number)}</small></button>`).join('')||`<span class="muted">${t('monNone')}</span>`;
+ if(h!==monLast){monLast=h;$('#monGrid').innerHTML=h}
+ monLog=monLog.concat(j.log).slice(-100);if(j.log.length)monSince=j.log[j.log.length-1][0];
+ $('#monLogBox').textContent=monLog.slice().reverse().map(e=>new Date(e[0]*1000).toTimeString().slice(0,8)+' '+e[1]+' '+(e[2]?t('monOn'):t('monOff'))).join('\n')}
+async function monPoll(){try{monDraw(await (await fetch('/api/monitor?since='+monSince)).json())}catch(e){}}
+$('#monBtn').onclick=()=>{monSince=0;monLog=[];monLast='';$('#monDlg').showModal();monPoll();monT=setInterval(monPoll,1000)};
+$('#monDlg').onclose=()=>{clearInterval(monT)};$('#monClose').onclick=()=>$('#monDlg').close();$('#monFilter').oninput=()=>{monLast='';monPoll()};
+$('#monGrid').onclick=async e=>{const b=e.target.closest('button[data-n]');if(!b)return;const r=await fetch('/api/monitor/switch',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({name:b.dataset.n,do:$('#monMode').value})});
+ const j=await r.json().catch(()=>({}));if(!j.ok)toast(j.msg||'?',true);else setTimeout(monPoll,200)};
+applyLang();showTab();if(TAB==="config")savedList();refresh();poll();setInterval(refresh,4000);
 </script></body></html>
 """

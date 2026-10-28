@@ -9,6 +9,7 @@ Shared by every image (Raspberry Pi 4, Jetson Xavier NX, x86 mini PC). Standard 
 | `mpf_netconfig.py` | Entry point and network side. `apply` (read the file at boot; the Wi-Fi password is erased from it afterwards), `web` (setup page on port 8080), `ap` (access point `MPF-Setup`, password `mpf-setup`, page at http://192.168.4.1:8080 when no network came up in 90 s), `game` (what `mpf-game.service` runs), `inbox` (install what is waiting in the inbox) |
 | `mpf_common.py` | Settings read from the environment and `/etc/mpf-readonly.conf`, the writable-window helper for read-only mode |
 | `mpf_games.py` | Everything about games: install, versions, the active game, PuP Packs, settings, start and stop, the inbox |
+| `mpf_monitor.py` | Switch monitor (BCP client of the running game) and saved log snapshots |
 | `mpf_ota.py` | Updates of games and PuP Packs from a WebDAV folder (list, download, install; address, user and password kept in `ota.json`, mode 0600) |
 | `mpf_web.py` | The page (one HTML file, English and French) and its HTTP routes |
 | `mpf-netconfig-*.service`, `mpf-game.service` | systemd units: apply, web, ap, inbox, and the game |
@@ -89,3 +90,14 @@ an empty password field keeps the saved one; redirects are refused). *Check for 
 `.sha256` beside) and PuP Packs in the folder and its sub-folders; *Install* downloads one and installs it exactly like an upload.
 The list says *installed* or *changed on the server* (size or date differ from what was installed). The engine itself (the base
 system) is not updated this way yet.
+
+## Configuration tab: switch monitor and saved logs
+
+The page has three tabs (*Games*, *Install and updates*, *Configuration*; the address keeps the tab: `#config`).
+
+- **Switch monitor** (*Configuration > Diagnostics*): the machine's switches live, lit when active, from MPF's own BCP server for outside
+  clients (`127.0.0.1:5051`, the one MPF Monitor uses; `MPF_BCP_HOST` / `MPF_BCP_PORT` change it). A click flips a switch or taps it
+  (a 150 ms pulse), as chosen. The game must be running; the connection exists only while the monitor is open.
+- **Save the game log**: writes one text file (machine state, journal of the game and of this page, the game's log files, latest switch
+  changes) to `/data/logs` (`/var/lib/mpf-logs` on an ordinary image, `MPF_SAVED_LOGS_DIR`), keeps the latest 20, and lists them for
+  download. In read-only mode the live logs are in RAM, so this is the way to keep them for someone who debugs the machine.
