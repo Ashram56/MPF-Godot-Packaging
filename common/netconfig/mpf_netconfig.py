@@ -311,6 +311,17 @@ def install_platform_addons(dest, b, me):
                 t = os.path.join(dst, os.path.relpath(os.path.join(base, f), src))
                 os.makedirs(os.path.dirname(t), exist_ok=True)
                 shutil.copy2(os.path.join(base, f), t)
+        # Godot loads an add-on's native extension only if .godot/extension_list.cfg names it (the editor writes that file;
+        # a bundle exported without the add-on's binaries does not have it)
+        lst = os.path.join(dest, "game", ".godot", "extension_list.cfg")
+        for f in sorted(os.listdir(dst)):
+            if f.endswith(".gdextension"):
+                line = f"res://addons/{name}/{f}"
+                have = open(lst).read().split() if os.path.isfile(lst) else []
+                if line not in have:
+                    os.makedirs(os.path.dirname(lst), exist_ok=True)
+                    with open(lst, "a") as fh:
+                        fh.write(line + "\n")
         job_log(f"{name}: the platform's build ({src}) installed for {me}")
 
 
