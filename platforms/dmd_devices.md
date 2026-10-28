@@ -61,3 +61,18 @@ port (the ESP32's own USB 303a:1001, or a CH340 / CP210x bridge, ids other board
 Wi-Fi is not looked for. A game's launcher runs `dmd-detect` at start and, if it names a device, starts Godot with
 `--pin2dmd` / `--zedmd` and MPF with the matching overlay; a choice made by the player (the setup page's "DMD display")
 wins over detection. The game itself only has to keep its DMD classic 128x32 when one of these args is present.
+
+## Sizes and pictures a game can publish
+
+A game can offer more than the classic dots. In Godot it calls `get_node("/root/dmd_out").publish("hd", viewport)` (any name;
+`classic`, the root viewport, is the default) and the machine's launcher starts Godot with the device's size and the picture
+it wants:
+
+| Device | `resolution` / size arg | Picture |
+|---|---|---|
+| ZeDMD, PIN2DMD | `128x32` (default) | `classic`: the exact dots, 16 shades |
+| PIN2DMD XL | `192x64`, `--dmd-size=192x64` | any published picture, Lanczos to size, 8 bits |
+| PIN2DMD HD, ZeDMD HD | `256x64`, `--dmd-size=256x64` | e.g. `--dmd-feed=256x64` or `hd` |
+
+MPF's pin2dmd platform takes 128x32, 192x64 and 256x64. The native ZeDMD feeder is 128x32 only. Colour stays the game's
+business: without it the add-on sends one colour scaled by brightness. Not run on a device.
