@@ -30,7 +30,10 @@ What it does, in order:
    `*.local.cfg`, `options.json`) is in the tree.
 2. **Seed** the `.import` files the game generates but does not track (`import_seed`: the text of a Godot `.import` file, e.g. `[remap]`, `importer="texture"`, `type="CompressedTexture2D"`, `[params]`, `compress/mode=2`; `skip_prefixes` are file-name prefixes), so Godot imports them
    VRAM-compressed, then **import** (`godot --headless --import`, twice) so the machine does not. The VRAM
-   texture format depends on the GPU: ARM GPUs (Pi 4, Jetson) take ETC2/ASTC, PCs S3TC/BPTC. `--target all` keeps
+   **A texture is only VRAM compressed if its `.import` says `compress/mode=2`**: a game whose textures use Godot's
+   default (lossless) import gets no S3TC/ETC2 variant, whatever the project setting says, and the bundle carries none (the
+   builder warns). Tracked `.import` files: list their folders in `force_vram`; untracked ones: `import_seed`.
+   The VRAM texture format depends on the GPU: ARM GPUs (Pi 4, Jetson) take ETC2/ASTC, PCs S3TC/BPTC. `--target all` keeps
    **both** (about 300 MB packed for Tron), so one archive installs anywhere; a single target drops the other
    format from every `.import` and deletes its `.ctex` (Godot imports the host's preferred format whatever the setting says).
 3. **No binary:** `platform_addons` goes into `bundle.json`; nothing from `addons/` is packed except what the game tracks itself.

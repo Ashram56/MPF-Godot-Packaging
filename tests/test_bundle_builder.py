@@ -60,6 +60,16 @@ class Builder(unittest.TestCase):
         self.assertIn("import_etc2_astc=true", text)
         self.assertIn("import_s3tc_bptc=true", text)
 
+    def test_force_vram(self):
+        stage = os.path.join(self.root, "stage")
+        p = os.path.join(stage, "art", "a.png.import")
+        write(p, '[remap]\nimporter="texture"\n[params]\ncompress/mode=0\n')
+        write(os.path.join(stage, "art", "b.png.import"), '[remap]\nimporter="texture"\n[params]\ncompress/mode=2\n')
+        self.assertEqual(bundle.force_vram(stage, ["art"]), 1)
+        self.assertIn("compress/mode=2", open(p).read())
+        self.assertNotIn("compress/mode=0", open(p).read())
+        self.assertEqual(bundle.count_compressed(os.path.join(stage, "nogame")), 0)
+
     def test_prune_etc2(self):
         game = os.path.join(self.root, "pg")
         write(os.path.join(game, "t.png.import"), IMPORT)

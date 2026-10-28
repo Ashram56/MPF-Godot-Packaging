@@ -12,6 +12,7 @@ SPEC.json (paths relative to the spec's folder, the game's repository root):
   never                        paths that must not be in the staged tree (cabinet data); the build stops if one is.
                                Only what is staged is checked: untracked files outside `copy` are simply left out
   never_names                  file name patterns that must not be in it (e.g. "*.local.cfg")
+  force_vram                   [dir, ...]: set compress/mode=2 (VRAM compressed) in the tracked .import files under these dirs
   import_seed                  [{"dir", "template", "skip_prefixes"}]: write the .import file `template` (the text of
                                a Godot .import file, e.g. "[remap]\nimporter=\"texture\"\ntype=\"CompressedTexture2D\"\n
                                [params]\ncompress/mode=2\n"; Godot fills in path and uid) next to every .png under dir
@@ -122,6 +123,35 @@ def seed_imports(root, spec, stage):
                         f.write(template)
                     n += 1
     return n
+
+
+def force_vram(stage, dirs):
+    """Sets compress/mode=2 (VRAM compressed) in the .import files under `dirs` of the staged tree: textures a game tracks
+    with Godot's default (lossless) import produce no S3TC/ETC2 variant, so the bundle would carry none."""
+    n = 0
+    for d in dirs:
+        for base, _, files in os.walk(os.path.join(stage, d)):
+            for name in files:
+                if not name.endswith(".import"):
+                    continue
+                path = os.path.join(base, name)
+                with open(path, encoding="utf-8") as f:
+                    text = f.read()
+                if 'importer="texture"' not in text or "compress/mode=2" in text:
+                    continue
+                new = re.sub(r"^compress/mode=\d+$", "compress/mode=2", text, flags=re.M)
+                if new != text:
+                    with open(path, "w", encoding="utf-8", newline="\n") as f:
+                        f.write(new)
+                    n += 1
+    return n
+
+
+def count_compressed(game):
+    """How many imported textures are VRAM compressed (.s3tc/.etc2/.bptc/.astc .ctex) in game/.godot/imported."""
+    imported = os.path.join(game, ".godot", "imported")
+    return sum(1 for n in os.listdir(imported) if re.search(r"\.(s3tc|etc2|bptc|astc)\.ctex$", n)) \
+        if os.path.isdir(imported) else 0
 
 
 def set_texture_formats(project, formats):
@@ -268,8 +298,13 @@ def main(argv=None):
         raise SystemExit("cabinet data in the bundle: " + ", ".join(bad))
     game = os.path.join(stage, game_rel)
     say("== Godot import: {} .import files seeded".format(seed_imports(root, spec, stage)))
+    if spec.get("force_vram"):
+        say("   {} .import files set to VRAM compression".format(force_vram(stage, spec["force_vram"])))
     set_texture_formats(os.path.join(game, "project.godot"), formats)
     godot_import(game, tc.godot_path())
+    if not count_compressed(game):
+        say("   WARNING: no VRAM-compressed texture was imported: the bundle has no S3TC/ETC2 variants. Textures need "
+            "compress/mode=2 in their .import files (spec keys import_seed for untracked ones, force_vram for tracked ones)")
     say("   removed {} imported textures of formats the target cannot use".format(prune_formats(game, formats)))
     for rel in spec.get("never", []):          # the import itself may have made some (.godot is not cabinet data)
         if rel != game_rel + "/.godot" and os.path.exists(os.path.join(stage, rel)):
