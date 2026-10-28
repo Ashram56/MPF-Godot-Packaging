@@ -115,13 +115,30 @@ class MonitorTest(unittest.TestCase):
         self.assertTrue(wait(lambda: self.mon.snapshot()["devices"].get("light", {}).get("l_a") == "#00ff00"))
         self.assertNotIn("logic_block", self.mon.snapshot()["devices"])
 
+    def test_deltas(self):
+        self.mon.snapshot()
+        self.assertTrue(wait(lambda: len(self.mon.snapshot()["switches"]) == 2))
+        full = self.mon.snapshot()
+        self.assertTrue(full["full"])
+        again = self.mon.snapshot(0, full["rev"], full["epoch"])
+        self.assertFalse(again["full"])
+        self.assertEqual((again["switches"], again["devices"]), ([], {}))
+        self.bcp.send("switch?name=s_start&state=int:1")
+        self.bcp.send("device?json=" + json.dumps({"type": "light", "name": "l_a", "state": {"color": [1, 2, 3]}}))
+        self.assertTrue(wait(lambda: self.mon.snapshot(0, full["rev"], full["epoch"])["devices"]))
+        d = self.mon.snapshot(0, full["rev"], full["epoch"])
+        self.assertEqual([s["name"] for s in d["switches"]], ["s_start"])
+        self.assertEqual(d["devices"], {"light": {"l_a": "#010203"}})
+        self.assertTrue(self.mon.snapshot(0, full["rev"], full["epoch"] + 1)["full"])
+
     def test_layout(self):
         g = os.path.join(self.tmp, "game")
         os.makedirs(os.path.join(g, "game", "monitor"))
         with open(os.path.join(g, "game", "monitor", "monitor.yaml"), "w") as f:
             f.write("# c\nlight:\n  l_a:\n    size: 0.02\n    x: 0.5\n    y: 0.25\nswitch:\n  s_a:\n    x: 0.1\n    y: 0.2\ndevice_size: 0.05\n")
         self.assertIsNone(M.layout({"path": g, "bundle": {}}))      # no picture yet
-        open(os.path.join(g, "game", "monitor", "playfield.jpg"), "wb").write(b"x")
+        with open(os.path.join(g, "game", "monitor", "playfield.jpg"), "wb") as f:
+            f.write(b"x")
         lay = M.layout({"path": g, "bundle": {}})
         self.assertEqual(lay["spots"]["light"]["l_a"], {"size": 0.02, "x": 0.5, "y": 0.25})
         self.assertEqual(lay["spots"]["switch"]["s_a"]["x"], 0.1)

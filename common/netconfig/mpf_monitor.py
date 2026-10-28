@@ -148,6 +148,9 @@ class Monitor:
         self.switches = {}       # name -> {name, label, number, board, state}
         self.order = []
         self.devices = {}        # type -> name -> value (light "#rrggbb", ball_device balls, flipper/autofire enabled)
+        self.rev = 1             # bumped at every change; rev_sw / rev_dev remember the revision of each item
+        self.epoch = 0           # bumped when the whole list is replaced (the game restarted)
+        self.rev_sw, self.rev_dev = {}, {}
         self.log = []            # latest changes, oldest first: [time, name, state]
         self.error = ""
         self.last_use = 0.0
@@ -207,6 +210,8 @@ class Monitor:
         with self.lock:
             if cmd == "list_switches":
                 self.switches, self.order = {}, []
+                self.epoch += 1
+                self.rev_sw, self.rev_dev, self.devices = {}, {}, {}
                 for row in kw.get("switches", []):
                     try:
                         name, label, number, board, state = row
@@ -215,10 +220,16 @@ class Monitor:
                     self.switches[name] = {"name": name, "label": "" if label in (None, "%") else label, "number": str(number), "board": board or "", "state": int(state or 0)}
                     self.order.append(name)
             elif cmd == "device" and kw.get("type") in SHOWN:
-                self.devices.setdefault(kw["type"], {})[kw.get("name")] = device_value(kw["type"], kw.get("state") or {})
+                val = device_value(kw["type"], kw.get("state") or {})
+                if self.devices.get(kw["type"], {}).get(kw.get("name"), None) != val or kw.get("name") not in self.devices.get(kw["type"], {}):
+                    self.devices.setdefault(kw["type"], {})[kw.get("name")] = val
+                    self.rev += 1
+                    self.rev_dev[(kw["type"], kw.get("name"))] = self.rev
             elif cmd == "switch" and kw.get("name") in self.switches:
                 st = 1 if int(kw.get("state") or 0) else 0
                 self.switches[kw["name"]]["state"] = st
+                self.rev += 1
+                self.rev_sw[kw["name"]] = self.rev
                 self.log.append([round(time.time(), 2), kw["name"], st])
                 del self.log[:-200]
 
@@ -229,12 +240,24 @@ class Monitor:
             self.thread.start()
 
     # -------------------------------------------------------------- the page
-    def snapshot(self, since=0):
+    def snapshot(self, since=0, rev=0, epoch=0):
+        """The state for the page. With the `rev` and `epoch` of the page's last answer only what changed since is sent."""
         self._touch()
         with self.lock:
-            return {"connected": self.sock is not None, "error": self.error,
-                    "switches": [self.switches[n] for n in self.order], "devices": {k: dict(v) for k, v in self.devices.items()}, "now": round(time.time(), 2),
-                    "log": [e for e in self.log if e[0] > since][-100:]}
+            full = not rev or epoch != self.epoch
+            out = {"connected": self.sock is not None, "error": self.error, "rev": self.rev, "epoch": self.epoch, "full": full,
+                   "now": round(time.time(), 2), "log": [e for e in self.log if e[0] > since][-100:]}
+            if full:
+                out["switches"] = [self.switches[n] for n in self.order]
+                out["devices"] = {k: dict(v) for k, v in self.devices.items()}
+            else:
+                out["switches"] = [self.switches[n] for n, r in self.rev_sw.items() if r > rev and n in self.switches]
+                dev = {}
+                for (k, n), r in self.rev_dev.items():
+                    if r > rev:
+                        dev.setdefault(k, {})[n] = self.devices[k][n]
+                out["devices"] = dev
+            return out
 
     def set_switch(self, name, do):
         with self.lock:

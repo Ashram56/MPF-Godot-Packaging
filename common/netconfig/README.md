@@ -95,10 +95,12 @@ system) is not updated this way yet.
 
 The page has four tabs (*Games*, *Install and updates*, *Configuration*, *Switch monitor*; the address keeps the tab: `#monitor`).
 
+- **Game tile** (top of the page): its round button starts or stops the game.
 - **Monitor** (tab, also a button in *Configuration > Diagnostics*): like MPF Monitor, in the page. The **playfield picture with the
   switches, lamps (inserts, in their real colour), flippers, autofires, ball devices and coils** at the places the game's own layout gives,
-  or a plain list of switches when the game has none. A click on a switch flips it or taps it (a 150 ms pulse), as chosen; the filter
-  dims the others. It uses MPF's BCP server for outside clients (`127.0.0.1:5051`, the one MPF Monitor uses; `MPF_BCP_HOST` /
+  or a plain list of switches when the game has none. Mouse as in MPF Monitor: a short press closes and opens the switch, a long press keeps it closed while held, a right click flips it; the filter
+  dims the others. Zoom (slider, Ctrl + wheel) and a size slider for the points are kept in the browser. The page asks for changes every 100 ms
+  (only what changed is sent), so fast lamp effects are followed as far as MPF's own lamp update rate (50 Hz by default). It uses MPF's BCP server for outside clients (`127.0.0.1:5051`, the one MPF Monitor uses; `MPF_BCP_HOST` /
   `MPF_BCP_PORT` change it), so the game must be running; the connection exists only while the tab is open.
 - **The layout is the game's**: `game/monitor/monitor.yaml` and `game/monitor/playfield.jpg` of the active game (or the paths in
   `bundle.json`: `"monitor": {"layout": "...", "image": "..."}`). It is MPF Monitor's own file (`light: name: {x, y, size}`, x and y as

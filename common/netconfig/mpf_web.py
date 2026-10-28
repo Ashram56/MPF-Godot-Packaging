@@ -245,7 +245,8 @@ class Handler(BaseHTTPRequestHandler):
             with open(img, "rb") as f:
                 return self._send(200, f.read(), mimetypes.guess_type(img)[0] or "image/jpeg", [("Cache-Control", "max-age=300")])
         if p == "/api/monitor":
-            return self._json(MON.MON.snapshot(float(parse_qs(u.query).get("since", ["0"])[0] or 0)))
+            q = parse_qs(u.query)
+            return self._json(MON.MON.snapshot(*(float(q.get(k, ["0"])[0] or 0) for k in ("since",)), *(int(q.get(k, ["0"])[0] or 0) for k in ("rev", "epoch"))))
         if p.startswith("/api/settings/"):
             game = G.installed_game(p.rsplit("/", 1)[1])
             return self._json({"html": settings_form(game)}) if game else self._json({"error": "no such game"}, 404)
@@ -370,7 +371,7 @@ h2 svg{width:16px;height:16px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:14px}
 .card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:var(--r);padding:16px;box-shadow:var(--shadow)}
 .tile{display:flex;gap:12px;align-items:flex-start}.tile .ic{width:40px;height:40px;border-radius:11px;background:rgba(55,210,255,.12);display:grid;place-items:center;flex:none}
-.tile .ic svg{width:22px;height:22px;stroke:var(--accent)}.tile b{display:block;font-size:16px}.tile span{color:var(--dim);font-size:13px;word-break:break-word}
+.tile button.ic{border:0;padding:0;cursor:pointer}.tile button.ic:hover{background:rgba(55,210,255,.28);transform:none}.tile .ic svg{width:22px;height:22px;stroke:var(--accent)}.tile b{display:block;font-size:16px}.tile span{color:var(--dim);font-size:13px;word-break:break-word}
 .badge{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid var(--line);background:var(--bg2);color:var(--dim)}
 .badge.ok{color:var(--ok);border-color:rgba(61,220,151,.4);background:rgba(61,220,151,.1)}.badge.warn{color:var(--warn);border-color:rgba(255,184,77,.45);background:rgba(255,184,77,.1)}
 .badge.bad{color:var(--bad);border-color:rgba(255,107,129,.45);background:rgba(255,107,129,.1)}.badge.acc{color:var(--accent);border-color:rgba(55,210,255,.45);background:rgba(55,210,255,.1)}
@@ -408,11 +409,11 @@ fieldset label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px
 dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
 .sw{justify-content:flex-start;padding:6px 10px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;text-align:left}
 .sw.on{background:var(--ok);border-color:var(--ok);color:#04210f;font-weight:600}.sw small{display:block;opacity:.7;font-size:11px}
-.pfw{position:relative;display:inline-block;line-height:0}.pfw img{height:min(80vh,860px);max-width:100%;width:auto;display:block;border-radius:10px}
-.sp{position:absolute;transform:translate(-50%,-50%);aspect-ratio:1;min-width:7px;border-radius:50%;border:1.5px solid rgba(255,255,255,.6);background:rgba(0,0,0,.4);color:#fff;display:grid;place-items:center;font:bold 10px/1 sans-serif;transition:background .08s}
+.pfw{position:relative;display:inline-block;line-height:0}.pfw img{height:calc(var(--z,1)*min(80vh,860px));max-width:100%;width:auto;display:block;border-radius:10px}
+.sp{position:absolute;transform:translate(-50%,-50%);aspect-ratio:1;min-width:12px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:50%;border:1.5px solid rgba(255,255,255,.6);background:rgba(0,0,0,.4);color:#fff;display:grid;place-items:center;font:bold 10px/1 sans-serif;transition:background .08s}
 .sp.switch{border-radius:3px;cursor:pointer}.sp.switch.on{background:#3ddc97;border-color:#fff;box-shadow:0 0 8px #3ddc97}
 .sp.light{border-width:1px;border-color:rgba(255,255,255,.35)}.sp.light.lit{box-shadow:0 0 9px 2px currentColor;border-color:#fff}
-.sp.coil{border-radius:2px;border-style:dashed;opacity:.55;min-width:5px}.sp.flipper,.sp.autofire,.sp.diverter,.sp.drop_target{border-color:#7b6bff}.sp.flipper.on,.sp.autofire.on,.sp.diverter.on,.sp.drop_target.on{background:#7b6bff}
+.sp.coil{border-radius:2px;border-style:dashed;opacity:.55;min-width:8px}.sp.flipper,.sp.autofire,.sp.diverter,.sp.drop_target{border-color:#7b6bff}.sp.flipper.on,.sp.autofire.on,.sp.diverter.on,.sp.drop_target.on{background:#7b6bff}
 .sp.ball_device{border-radius:5px;border-color:#37d2ff}.sp.ball_device.on{background:#37d2ff;color:#04210f}.sp.dim{opacity:.12}
 .hide{display:none!important}.muted{color:var(--dim)}.mt{margin-top:10px}
 @media (max-width:560px){fieldset label{grid-template-columns:1fr}}
@@ -477,15 +478,15 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
 <section data-tab="config"><h2><svg stroke="currentColor"><use href="#i-term"/></svg><span data-t="diag"></span></h2><div class="card">
  <div class="row"><button id="logsBtn"><svg><use href="#i-term"/></svg><span data-t="logs"></span></button><button id="saveLogBtn" class="pri"><svg><use href="#i-disk"/></svg><span data-t="saveLog"></span></button><button id="monBtn"><svg><use href="#i-cpu"/></svg><span data-t="monitor"></span></button></div>
  <p class="muted mt" data-t="saveLogHint"></p><div class="nets" id="savedLogs"></div></div></section>
-<section data-tab="monitor"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="monitor"></span>&nbsp;<span class="badge" id="monBadge"></span></h2><div class="card"><div class="row"><input id="monFilter" style="max-width:240px" data-ph="monFilter"><select id="monMode" style="width:auto"><option value="toggle" data-t="monToggle"></option><option value="tap" data-t="monTap"></option></select><select id="monView" style="width:auto" class="hide"><option value="pf" data-t="monViewPf"></option><option value="list" data-t="monViewList"></option></select><span class="muted" id="monCount"></span></div>
-<p class="muted" data-t="monHint"></p><div id="monPf" class="hide" style="text-align:center"><div class="pfw" id="pfw"><img id="pfImg" alt=""></div></div><div class="sws mt" id="monGrid"></div><h2 class="mt"><span data-t="monLog"></span></h2><pre id="monLogBox" style="max-height:160px"></pre></div></section>
+<section data-tab="monitor"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="monitor"></span>&nbsp;<span class="badge" id="monBadge"></span></h2><div class="card"><div class="row"><input id="monFilter" style="max-width:240px" data-ph="monFilter"><span id="monZoomBox" class="row hide"><label class="muted row" style="gap:6px"><span data-t="monZoom"></span><input type="range" id="monZ" min="0.5" max="4" step="0.1" style="width:110px;padding:0"></label><label class="muted row" style="gap:6px"><span data-t="monSize"></span><input type="range" id="monK" min="0.8" max="4" step="0.1" style="width:90px;padding:0"></label><button id="monFit" type="button">1:1</button></span><select id="monView" style="width:auto" class="hide"><option value="pf" data-t="monViewPf"></option><option value="list" data-t="monViewList"></option></select><span class="muted" id="monCount"></span></div>
+<p class="muted" data-t="monHint"></p><div id="monPf" class="hide" style="text-align:center;overflow:auto;max-height:84vh"><div class="pfw" id="pfw"><img id="pfImg" alt=""></div></div><div class="sws mt" id="monGrid"></div><h2 class="mt"><span data-t="monLog"></span></h2><pre id="monLogBox" style="max-height:160px"></pre></div></section>
 </main>
 
 <dialog id="dlg"><div class="hd"><b id="dlgTitle" class="grow"></b><button id="dlgClose">✕</button></div><div class="bd" id="dlgBody"></div><div class="ft" id="dlgFoot"></div></dialog>
 <div id="toast"></div>
 
 <script>
-const T={en:{tabGames:"Games",tabInstall:"Install and updates",tabConfig:"Configuration",diag:"Diagnostics",saveLog:"Save the game log",saveLogHint:"Writes the game output, the machine state and the latest switch changes to one file on the data partition (the live logs are in RAM), to hand it over for debugging.",savedLogs:"Saved logs",monitor:"Switch monitor",monFilter:"Filter…",monToggle:"Click flips the switch",monTap:"Click taps the switch",monHint:"Shows the machine's switches live (lit = active) through MPF's BCP connection. The game must be running.",monLog:"Latest changes",monNone:"No switch yet",monViewPf:"Playfield",monViewList:"List",monOn:"on",monOff:"off",monConn:"Connected",monDisc:"Not connected",games:"Games",add:"Add a game or a PuP Pack",dropGame:"Game bundle",dropGameHint:"Drop a .tar.xz here or click",dropPup:"PuP Pack",dropPupHint:"Drop the pack's .zip here or click",
+const T={en:{tabGames:"Games",tabInstall:"Install and updates",tabConfig:"Configuration",diag:"Diagnostics",saveLog:"Save the game log",saveLogHint:"Writes the game output, the machine state and the latest switch changes to one file on the data partition (the live logs are in RAM), to hand it over for debugging.",savedLogs:"Saved logs",monitor:"Switch monitor",monFilter:"Filter…",monToggle:"Click flips the switch",monTap:"Click taps the switch",monHint:"Live view through MPF's BCP connection (the game must be running). Short press = the switch closes and opens, long press = it stays closed while you hold, right click = flips it. Ctrl + wheel zooms.",monLog:"Latest changes",monNone:"No switch yet",monZoom:"Zoom",monSize:"Size",monViewPf:"Playfield",monViewList:"List",monOn:"on",monOff:"off",monConn:"Connected",monDisc:"Not connected",games:"Games",add:"Add a game or a PuP Pack",dropGame:"Game bundle",dropGameHint:"Drop a .tar.xz here or click",dropPup:"PuP Pack",dropPupHint:"Drop the pack's .zip here or click",
 keepOld:"Keep the older versions of this game",sha:"Its .sha256 file (optional)",packFor:"Install the pack for",network:"Network",system:"System",scan:"Scan",ssid:"Network name",psk:"Password",country:"Country code",connect:"Save and connect",
 sshKey:"SSH public key",sshPw:"SSH password login",unchanged:"unchanged",save:"Save",logs:"Game output",active:"Active",activate:"Activate at startup",start:"Start",stop:"Stop",restart:"Restart",settings:"Settings",delete:"Remove",
 running:"Running",stopped:"Stopped",noGames:"No game installed yet. Add a bundle below.",pupYes:"PuP Pack installed",pupNo:"no PuP Pack",version:"Version",confirmDel:"Remove this game with its settings and scores?",
@@ -494,7 +495,7 @@ mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"The syste
 maintTxt:"The system is writable (for updates of the operating system). Go back to production when you are done.",toMaint:"Maintenance until reboot",toMaintStay:"Maintenance, also after reboots",toProd:"Back to production",
 degraded:"No data partition: settings and scores are kept in RAM and are lost at power-off.",inbox:"Waiting in the inbox (installed at the next boot): ",inboxHelp:"Files copied to the inbox folder are installed at boot.",
 uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none",ota:"Updates (WebDAV)",otaUrl:"Server address",otaUser:"User",otaPw:"Password",otaPwKept:"unchanged",otaSave:"Save",otaCheck:"Check for updates",otaInstall:"Install",otaDone:"Installed",otaChanged:"Changed on the server",otaNone:"Nothing found in this folder",otaGame:"Game",otaPack:"PuP Pack",otaHint:"Folders of the server: bundles (.tar.xz, with a .sha256) and packs named <game>.pup.zip."},
-fr:{tabGames:"Jeux",tabInstall:"Installation et mises à jour",tabConfig:"Configuration",diag:"Diagnostic",saveLog:"Enregistrer le jeu (log)",saveLogHint:"Écrit la sortie du jeu, l'état de la machine et les derniers changements de switches dans un fichier sur la partition de données (les logs en cours sont en RAM), à fournir pour le débogage.",savedLogs:"Logs enregistrés",monitor:"Moniteur de switches",monFilter:"Filtrer…",monToggle:"Un clic inverse le switch",monTap:"Un clic fait une impulsion",monHint:"Affiche les switches de la machine en direct (allumé = actif) par la connexion BCP de MPF. Le jeu doit être démarré.",monLog:"Derniers changements",monNone:"Aucun switch",monViewPf:"Plateau",monViewList:"Liste",monOn:"actif",monOff:"inactif",monConn:"Connecté",monDisc:"Non connecté",games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
+fr:{tabGames:"Jeux",tabInstall:"Installation et mises à jour",tabConfig:"Configuration",diag:"Diagnostic",saveLog:"Enregistrer le jeu (log)",saveLogHint:"Écrit la sortie du jeu, l'état de la machine et les derniers changements de switches dans un fichier sur la partition de données (les logs en cours sont en RAM), à fournir pour le débogage.",savedLogs:"Logs enregistrés",monitor:"Moniteur de switches",monFilter:"Filtrer…",monToggle:"Un clic inverse le switch",monTap:"Un clic fait une impulsion",monHint:"Vue en direct par la connexion BCP de MPF (le jeu doit être démarré). Appui court = le switch se ferme puis s'ouvre, appui long = il reste fermé tant que vous maintenez, clic droit = bascule. Ctrl + molette = zoom.",monLog:"Derniers changements",monNone:"Aucun switch",monZoom:"Zoom",monSize:"Taille",monViewPf:"Plateau",monViewList:"Liste",monOn:"actif",monOff:"inactif",monConn:"Connecté",monDisc:"Non connecté",games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
 keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
 sshKey:"Clé publique SSH",sshPw:"Connexion SSH par mot de passe",unchanged:"inchangé",save:"Enregistrer",logs:"Sortie du jeu",active:"Actif",activate:"Activer au démarrage",start:"Démarrer",stop:"Arrêter",restart:"Redémarrer",settings:"Réglages",delete:"Supprimer",
 running:"En marche",stopped:"Arrêté",noGames:"Aucun jeu installé. Ajoutez un bundle ci-dessous.",pupYes:"PuP Pack installé",pupNo:"pas de PuP Pack",version:"Version",confirmDel:"Supprimer ce jeu avec ses réglages et ses scores ?",
@@ -519,7 +520,7 @@ function render(s){
  $('#host').textContent=s.hostname+' · '+s.arch;
  const wf=s.network.wifi,ad=s.network.addresses,on=ad.length>0,g=s.games.find(x=>x.active),st=s.storage.games;
  const tiles=[];
- tiles.push(`<div class="card tile"><div class="ic">${ico('play')}</div><div><span>${t('game')}</span><b>${g?esc(g.name):t('none')}</b>
+ tiles.push(`<div class="card tile"><button class="ic" data-a="${s.game.running?'stop':'start'}" title="${s.game.running?t('stop'):t('start')}">${ico(s.game.running?'stop':'play')}</button><div><span>${t('game')}</span><b>${g?esc(g.name):t('none')}</b>
   <span class="badge ${s.game.running?'ok pulse':'warn'}"><i class="dot"></i>${s.game.running?t('running'):t('stopped')}</span></div></div>`);
  tiles.push(`<div class="card tile"><div class="ic">${ico('wifi')}</div><div><span>${t('network')}</span><b>${on?t('online'):t('offline')}</b><span>${ad.map(a=>esc(a[0])+' '+esc(a[1])).join('<br>')}${wf?'<br>'+esc(wf.ssid)+' '+(wf.signal!=null?wf.signal+' dBm':''):''}</span></div></div>`);
  if(st){const used=st.total-st.free,pct=Math.round(used*100/st.total);tiles.push(`<div class="card tile"><div class="ic">${ico('disk')}</div><div style="flex:1"><span>${t('storage')}</span><b>${fmtB(st.free)} ${t('free')}</b><div class="bar" style="margin-top:6px"><i style="width:${pct}%"></i></div></div></div>`)}
@@ -598,37 +599,50 @@ function showTab(){if(TAB==='monitor')monStart();else monStop();document.querySe
 $('#tabs').onclick=e=>{const b=e.target.closest('button[data-go]');if(!b)return;TAB=b.dataset.go;history.replaceState(null,'','#'+TAB);showTab();if(TAB==='config')savedList()};
 async function savedList(){try{const l=await (await fetch('/api/logs/saved')).json();$('#savedLogs').innerHTML=l.map(n=>`<a class="net" href="/api/logs/saved/${encodeURIComponent(n)}" download>${ico('disk')}<b class="grow">${esc(n)}</b></a>`).join('')}catch(e){}}
 $('#saveLogBtn').onclick=async()=>{const b=$('#saveLogBtn');b.disabled=true;await post('/api/logs/save',{});b.disabled=false;savedList()};
-let monT=null,monSince=0,monLast='',monLog=[],monLay=null;
-function monDraw(j){if(monLay)monPf(j);const b=$('#monBadge');b.className='badge '+(j.connected?'ok':'bad');b.textContent=j.connected?t('monConn'):t('monDisc');
- const f=$('#monFilter').value.toLowerCase(),sw=j.switches.filter(x=>!f||(x.name+' '+x.label).toLowerCase().includes(f));
+let monT=null,monSince=0,monLast='',monLog=[],monLay=null,monRev=0,monEpoch=0,monSw={},monOrder=[],monDev={},monBusy=false,monQ=Promise.resolve();
+const monPref=(()=>{try{return JSON.parse(localStorage.getItem('mpfMon')||'{}')}catch(e){return{}}})();
+function monSave(){try{localStorage.setItem('mpfMon',JSON.stringify(monPref))}catch(e){}}
+function monApply(){const z=monPref.z||1,k=monPref.k||1.8,w=$('#pfw');w.style.setProperty('--z',z);w.style.setProperty('--k',k);$('#monZ').value=z;$('#monK').value=k}
+function monMerge(j){if(j.full){monSw={};monOrder=[];monDev={}}
+ j.switches.forEach(x=>{if(!(x.name in monSw))monOrder.push(x.name);monSw[x.name]=x});
+ Object.entries(j.devices||{}).forEach(([k,v])=>{monDev[k]=Object.assign(monDev[k]||{},v)});
+ monRev=j.rev;monEpoch=j.epoch;
+ return {connected:j.connected,error:j.error,log:j.log,switches:monOrder.map(n=>monSw[n]),devices:monDev}}
+function monDraw(j){const b=$('#monBadge');b.className='badge '+(j.connected?'ok':'bad');b.textContent=j.connected?t('monConn'):t('monDisc');
  $('#monCount').textContent=j.error||(j.switches.filter(x=>x.state).length+' / '+j.switches.length);
- const h=sw.map(x=>`<button class="sw ${x.state?'on':''}" data-n="${esc(x.name)}" title="${esc(x.board+' '+x.number+' '+x.label)}">${esc(x.name)}<small>${esc(x.number)}</small></button>`).join('')||`<span class="muted">${t('monNone')}</span>`;
- if(h!==monLast){monLast=h;$('#monGrid').innerHTML=h}
- monLog=monLog.concat(j.log).slice(-100);if(j.log.length)monSince=j.log[j.log.length-1][0];
- $('#monLogBox').textContent=monLog.slice().reverse().map(e=>new Date(e[0]*1000).toTimeString().slice(0,8)+' '+e[1]+' '+(e[2]?t('monOn'):t('monOff'))).join('\n')}
+ if(monLay&&!$('#monPf').classList.contains('hide'))monPf(j);
+ else if(!$('#monGrid').classList.contains('hide')){const f=$('#monFilter').value.toLowerCase(),sw=j.switches.filter(x=>!f||(x.name+' '+x.label).toLowerCase().includes(f));
+  const key=sw.map(x=>x.name).join();
+  if(key!==monLast){monLast=key;$('#monGrid').innerHTML=sw.map(x=>`<button class="sw" data-n="${esc(x.name)}" title="${esc(x.board+' '+x.number+' '+x.label)}">${esc(x.name)}<small>${esc(x.number)}</small></button>`).join('')||`<span class="muted">${t('monNone')}</span>`}
+  const st={};sw.forEach(x=>st[x.name]=x.state);$('#monGrid').querySelectorAll('button[data-n]').forEach(e=>e.classList.toggle('on',!!st[e.dataset.n]))}
+ if(j.log.length){monLog=monLog.concat(j.log).slice(-100);monSince=j.log[j.log.length-1][0];
+  $('#monLogBox').textContent=monLog.slice().reverse().map(e=>new Date(e[0]*1000).toTimeString().slice(0,8)+' '+e[1]+' '+(e[2]?t('monOn'):t('monOff'))).join('\n')}}
 function monPf(j){const f=$('#monFilter').value.toLowerCase(),sw={};j.switches.forEach(x=>sw[x.name]=x);const dv=j.devices||{};
  document.querySelectorAll('#pfw .sp').forEach(e=>{const k=e.dataset.k,n=e.dataset.n;let on=false,v;
   if(k==='switch'){on=sw[n]&&sw[n].state}else if(k==='light'){v=(dv.light||{})[n];on=!!v;e.style.background=v||'';e.style.color=v||'';e.classList.toggle('lit',on)}
   else if(k==='ball_device'){v=(dv.ball_device||{})[n]||0;on=v>0;e.textContent=v||''}else if(dv[k]&&n in dv[k]){on=!!dv[k][n]}
   e.classList.toggle('on',!!on);e.classList.toggle('dim',!!f&&!n.toLowerCase().includes(f))})}
 async function monLayout(){monLay=null;try{const l=await (await fetch('/api/monitor/layout')).json();if(l&&l.image)monLay=l}catch(e){}
- const w=$('#pfw');w.querySelectorAll('.sp').forEach(e=>e.remove());$('#monView').classList.toggle('hide',!monLay);
+ const w=$('#pfw');w.querySelectorAll('.sp').forEach(e=>e.remove());$('#monView').classList.toggle('hide',!monLay);$('#monZoomBox').classList.toggle('hide',!monLay);
  if(!monLay){monView();return}
  $('#pfImg').src=monLay.image;const order=['coil','light','autofire','flipper','diverter','drop_target','ball_device','switch'];
  order.forEach(k=>Object.entries(monLay.spots[k]||{}).forEach(([n,d])=>{const e=document.createElement('div');e.className='sp '+k;e.dataset.k=k;e.dataset.n=n;e.title=k+' '+n;
-  const sz=(d.size||monLay.size)*(k==='light'?1:1);e.style.cssText=`left:${d.x*100}%;top:${d.y*100}%;width:${sz*100}%`;
+  e.style.cssText=`left:${d.x*100}%;top:${d.y*100}%;width:calc(var(--k,1.8) * ${(d.size||monLay.size)*100}%)`;
   if(d.rotation){e.style.transform=`translate(-50%,-50%) rotate(${d.rotation}deg)`;e.style.aspectRatio='3/1';e.style.borderRadius='6px'}w.appendChild(e)}));
- $('#monView').value='pf';monView()}
-function monView(){const pf=monLay&&$('#monView').value==='pf';$('#monPf').classList.toggle('hide',!pf);$('#monGrid').classList.toggle('hide',!!pf)}
-async function monPoll(){try{monDraw(await (await fetch('/api/monitor?since='+monSince)).json())}catch(e){}}
-$('#monView').onchange=monView;$('#pfw').onclick=e=>{const b=e.target.closest('.sp.switch');if(b)monSet(b.dataset.n)};
-async function monStart(){if(monT)return;monT=setInterval(monPoll,1000);monSince=0;monLog=[];monLast='';await monLayout();monPoll()}
+ monApply();$('#monView').value='pf';monView()}
+function monView(){const pf=monLay&&$('#monView').value==='pf';$('#monPf').classList.toggle('hide',!pf);$('#monGrid').classList.toggle('hide',!!pf);monLast=''}
+async function monPoll(){if(monBusy)return;monBusy=true;try{monDraw(monMerge(await (await fetch(`/api/monitor?since=${monSince}&rev=${monRev}&epoch=${monEpoch}`)).json()))}catch(e){}monBusy=false}
+async function monStart(){if(monT)return;monT=setInterval(monPoll,100);monSince=0;monLog=[];monLast='';monRev=0;await monLayout();monPoll()}
 function monStop(){clearInterval(monT);monT=null}
-$('#monBtn').onclick=()=>$('#tabs button[data-go=monitor]').click();
-$('#monFilter').oninput=()=>{monLast='';monPoll()};
-async function monSet(n){const r=await fetch('/api/monitor/switch',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({name:n,do:$('#monMode').value})});
- const j=await r.json().catch(()=>({}));if(!j.ok)toast(j.msg||'?',true);else setTimeout(monPoll,200)}
-$('#monGrid').onclick=e=>{const b=e.target.closest('button[data-n]');if(b)monSet(b.dataset.n)};
+$('#monView').onchange=monView;$('#monBtn').onclick=()=>$('#tabs button[data-go=monitor]').click();$('#monFilter').oninput=monPoll;
+$('#monZ').oninput=e=>{monPref.z=+e.target.value;monSave();monApply()};$('#monK').oninput=e=>{monPref.k=+e.target.value;monSave();monApply()};$('#monFit').onclick=()=>{monPref.z=1;monSave();monApply()};
+$('#monPf').addEventListener('wheel',e=>{if(!e.ctrlKey)return;e.preventDefault();monPref.z=Math.min(4,Math.max(.5,Math.round(((monPref.z||1)*(e.deltaY<0?1.1:1/1.1))*10)/10));monSave();monApply()},{passive:false});
+function monSend(n,d){monQ=monQ.then(()=>fetch('/api/monitor/switch',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({name:n,do:d})}).then(r=>r.json()).then(j=>{if(!j.ok)toast(j.msg||'?',true)}).catch(()=>{}))}
+function monBind(root,sel){root.addEventListener('pointerdown',e=>{const b=e.target.closest(sel);if(!b||e.button!==0)return;e.preventDefault();try{b.setPointerCapture(e.pointerId)}catch(x){}b.dataset.held='1';monSend(b.dataset.n,'on')});
+ const up=e=>{const b=e.target.closest(sel);if(!b||!b.dataset.held)return;delete b.dataset.held;monSend(b.dataset.n,'off')};
+ root.addEventListener('pointerup',up);root.addEventListener('pointercancel',up);
+ root.addEventListener('contextmenu',e=>{const b=e.target.closest(sel);if(!b)return;e.preventDefault();monSend(b.dataset.n,'toggle')})}
+monBind($('#pfw'),'.sp.switch');monBind($('#monGrid'),'button[data-n]');monApply();
 applyLang();showTab();if(TAB==="config")savedList();refresh();poll();setInterval(refresh,4000);
 </script></body></html>
 """
