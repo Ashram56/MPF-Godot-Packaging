@@ -16,7 +16,7 @@ template to the configured path as `mpf-network.txt`.
 
 ## Game bundle and PuP Pack upload
 
-The page also installs a game bundle (`<name>-<version>-linux-<arch>.tar.xz`, format of Tron-Legacy-MPF `docs/bundle.md`) and an optional PuP Pack `.zip`.
+The page also installs a game bundle (`<name>-<version>-linux-<arch>.tar.xz`, or `-linux-all`: one universal bundle for every machine, both texture formats and no binary (`target.arch` `arm64+x86_64`; `platform_addons: ["gde_gozen"]` makes the page install this platform's own GoZen build for the machine, `MPF_PLATFORM_DIR`), format of Tron-Legacy-MPF `docs/bundle.md`) and an optional PuP Pack `.zip`.
 Files are streamed to `MPF_UPLOAD_DIR`, never held in memory. The bundle is checked (format, `target.arch`, optional `.sha256` of the archive,
 `sha256sum -c SHA256SUMS`), unpacked to `MPF_GAMES_DIR/<id>`; on an update the `keep_on_update` paths of the old install are carried over.
 The pack is installed with the bundle's own `pup.install` command. The page then shows the bundle's settings (built from `options.json`,
@@ -30,3 +30,5 @@ above), not in the setup page: the profile sets the board's only allowed choices
 Raspberry Pi 4 the DMD is an external panel or the 256x64 colour dots over the backglass, never the HD vector mode
 ([platforms/raspberrypi.md](../../platforms/raspberrypi.md), "Platform limits"). Record each new limit there with its
 measurement, and in the game's profile.
+
+How a game builds a bundle for this page: [platforms/game-bundles.md](../../platforms/game-bundles.md).

@@ -1,0 +1,21 @@
+{
+  "id": "mygame",
+  "name": "My Game (Stern 20xx), MPF recreation",
+  "game_dir": "game",
+  "git_tracked": ["game"],
+  "git_exclude": ["game/addons/"],
+  "copy": [
+    "scripts/run.py",
+    "game/config/rom", "game/sounds", "game/media", "game/fonts_ttf/baked",
+    "assets/rom_data/io", "assets/rom_data/settings"
+  ],
+  "never": ["game/data", "game/audits", "game/logs", "game/options.json", "game/.godot"],
+  "never_names": ["*.local.cfg", "machine_vars.yaml"],
+  "import_seed": [
+    {"dir": "game/media/dmd_hd", "template": "game/media/hd_frame.import.template", "skip_prefixes": ["solid", "hollow"]}
+  ],
+  "platform_addons": ["gde_gozen"],
+  "requires": {"python": ">=3.10", "programs": ["ffmpeg"]},
+  "run": {"start": "python3 scripts/run.py", "cwd": "."},
+  "keep_on_update": ["game/data", "game/audits", "game/logs", "game/options.json", "game/pup.local.cfg"]
+}

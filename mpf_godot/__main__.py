@@ -2,6 +2,7 @@
 
     setup       install MPF, MPF Monitor, Godot and GMC with our fixes (mpf_godot/setup_toolchain.py)
     addons      copy the patched GMC (and with --video the video add-ons) into a game folder
+    bundle      build a game bundle (code and multimedia, no binary) from the game's spec (mpf_godot/bundle.py)
     patch-gmc   apply our GMC fixes to a GMC folder (default: toolchain/addons/mpf-gmc)
     run         start a game: Godot (GMC) first, then MPF, optionally MPF Monitor (mpf_godot/launcher.py)
     info        the paths and versions in use
@@ -59,6 +60,9 @@ def main(argv=None):
         return setup_toolchain.main(rest)
     if cmd == "addons":
         return addons(rest)
+    if cmd == "bundle":
+        from mpf_godot import bundle
+        return bundle.main(rest)
     if cmd == "patch-gmc":
         print(gmc_patch.patch(rest[0] if rest else None, quiet=True))
         return 0

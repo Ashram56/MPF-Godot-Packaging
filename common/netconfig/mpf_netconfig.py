@@ -13,9 +13,11 @@ Settings (environment, defaults for the Raspberry Pi image):
   MPF_WEB_PORT        8080
   MPF_GAMES_DIR       /opt/games          where an uploaded game bundle is installed (<dir>/<bundle id>)
   MPF_UPLOAD_DIR      /var/lib/mpf-uploads  uploads are written here, then unpacked
-  MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, TRON_VENV, DISPLAY, MPF_GAME_ARGS)
+  MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, MPF_GAME_VENV, DISPLAY, MPF_GAME_ARGS; the names in bundle.json requires.env are forwarded)
   MPF_GOZEN_SO        a GoZen library built for this board, copied over the bundle's own (optional; not when
                       the bundle's build already has MPF_GOZEN_NEEDS, bundle.json "gozen")
+  MPF_PLATFORM_DIR    this platform's checkout (its addons/gde_gozen is installed into a bundle that lists
+                      "platform_addons" in bundle.json; default: found from this file or from MPF_GOZEN_SO)
   MPF_GOZEN_NEEDS     v4l2m2m zero_copy   what the bundle's GoZen must carry to be kept
 Must run as root.
 """
@@ -33,6 +35,7 @@ GAMES = os.environ.get("MPF_GAMES_DIR", "/opt/games")
 UPLOADS = os.environ.get("MPF_UPLOAD_DIR", "/var/lib/mpf-uploads")
 GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
 GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
+PLATFORM_DIR = os.environ.get("MPF_PLATFORM_DIR", "")
 GOZEN_NEEDS = os.environ.get("MPF_GOZEN_NEEDS", "v4l2m2m zero_copy").split()
 AP_SSID, AP_PSK, AP_ADDR = "MPF-Setup", os.environ.get("MPF_AP_PSK", "mpf-setup"), "192.168.4.1"
 
@@ -238,14 +241,24 @@ def installed_game():
 
 
 def game_python():
-    venv = game_env().get("TRON_VENV")
+    env = game_env()
+    venv = env.get("MPF_GAME_VENV") or env.get("TRON_VENV")
     py = os.path.join(venv, "bin", "python") if venv else ""
     return py if py and os.path.exists(py) else "python3"
 
 
+def bundle_meta(game):
+    try:
+        with open(os.path.join(game, "bundle.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def tool(game, *args):
-    """Run the bundle's own settings tool as the game user; returns the CompletedProcess."""
-    return run("runuser", "-u", USER, "--", game_python(), os.path.join(game, "scripts/package/bundle_options.py"), *args, cwd=game)
+    """Run the bundle's own settings tool (bundle.json options.tool) as the game user; returns the CompletedProcess."""
+    t = bundle_meta(game).get("options", {}).get("tool", "scripts/package/bundle_options.py")
+    return run("runuser", "-u", USER, "--", game_python(), os.path.join(game, t), *args, cwd=game)
 
 
 def free_gb(path):
@@ -254,12 +267,16 @@ def free_gb(path):
 
 
 def first_run_defaults(game):
-    """The ROM's own DMD look, no PuP until a pack is installed, and start at power-on: only for what nobody set yet."""
+    """No PuP until a pack is installed, and start at power-on: only for what nobody set yet."""
     try:
         have = json.loads(tool(game, "get").stdout or "{}")
     except ValueError:
         have = {}
-    want = [x for x in (("dmd.mode", "classic"), ("pup.enabled", "false" if not os.path.isdir(os.path.join(game, "pup_pack/trn_174h")) else "true")) if x[0] not in have]
+    # no dmd.mode here: the DMD look is a matter of the board (the Raspberry Pi 4 cannot draw the HD one), so it comes from
+    # the bundle's board profile (board_profile below); a board without a profile keeps the bundle's default
+    pack = bundle_meta(game).get("pup", {}).get("pack_dir", "pup_pack")
+    pup = "true" if os.path.isdir(os.path.join(game, pack)) else "false"
+    want = [x for x in (("pup.enabled", pup),) if x[0] not in have]
     if want:
         job_log(tool(game, "set", *[v for kv in want for v in kv]).stderr)
     run("systemctl", "enable", "mpf-game.service")
@@ -276,6 +293,50 @@ def board_profile(game, b):
         args[0] = game_python()
     r = run("runuser", "-u", USER, "--", *args, cwd=game)
     job_log((r.stdout + r.stderr).strip() or "board profile: nothing to apply")
+
+
+def platform_addon(name):
+    """The platform's own copy of a binary add-on (addons/<name>), or None."""
+    cands = [PLATFORM_DIR, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
+    if GOZEN_SO:
+        cands.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(GOZEN_SO)))))
+    for c in cands:
+        if c and os.path.isfile(os.path.join(c, "addons", name, "gozen.gdextension" if name == "gde_gozen" else "plugin.cfg")):
+            return os.path.join(c, "addons", name)
+    return None
+
+
+def install_platform_addons(dest, b, me):
+    """Binary add-ons come from the platform, never from the game bundle: the same build for every game. Only
+    this machine's binaries are copied."""
+    for name in b.get("platform_addons", []):
+        src = platform_addon(name)
+        if not src:
+            raise JobError(f"the bundle needs the platform's {name} and this system has none (set MPF_PLATFORM_DIR)")
+        dst = os.path.join(dest, "game", "addons", name)
+        shutil.rmtree(dst, ignore_errors=True)
+        for base, _dirs, files in os.walk(src):
+            for f in files:
+                if os.path.relpath(base, src).startswith("bin") and f.startswith("libgozen") and \
+                        not re.match(r"libgozen\.linux\..*\.%s\.so$" % ("arm64" if me == "arm64" else "x86_64"), f):
+                    continue
+                if os.path.relpath(base, src).startswith("bin") and f.endswith(".dll"):
+                    continue
+                t = os.path.join(dst, os.path.relpath(os.path.join(base, f), src))
+                os.makedirs(os.path.dirname(t), exist_ok=True)
+                shutil.copy2(os.path.join(base, f), t)
+        # Godot loads an add-on's native extension only if .godot/extension_list.cfg names it (the editor writes that file;
+        # a bundle exported without the add-on's binaries does not have it)
+        lst = os.path.join(dest, "game", ".godot", "extension_list.cfg")
+        for f in sorted(os.listdir(dst)):
+            if f.endswith(".gdextension"):
+                line = f"res://addons/{name}/{f}"
+                have = open(lst).read().split() if os.path.isfile(lst) else []
+                if line not in have:
+                    os.makedirs(os.path.dirname(lst), exist_ok=True)
+                    with open(lst, "a") as fh:
+                        fh.write(line + "\n")
+        job_log(f"{name}: the platform's build ({src}) installed for {me}")
 
 
 def install_game(archive, expect_sha):
@@ -300,7 +361,8 @@ def install_game(archive, expect_sha):
     if b.get("format", 1) > 1:
         raise JobError(f"bundle format {b.get('format')} is newer than this page understands")
     tgt, me = b.get("target", {}), ARCH.get(platform.machine(), platform.machine())
-    if tgt.get("os", "linux") != "linux" or tgt.get("arch") != me:
+    # "arm64+x86_64": a bundle for several architectures (both texture formats, every native add-on)
+    if tgt.get("os", "linux") != "linux" or me not in str(tgt.get("arch")).split("+"):
         raise JobError(f"this bundle is for {tgt.get('os')}/{tgt.get('arch')}, this machine is linux/{me}")
     job_log(f"bundle {b.get('name')} {b.get('version')}")
     job_set(msg="Verifying every file (sha256sum)")
@@ -320,6 +382,7 @@ def install_game(archive, expect_sha):
     os.rename(root, dest)
     shutil.rmtree(stage, ignore_errors=True)
     shutil.rmtree(old, ignore_errors=True)
+    install_platform_addons(dest, b, me)
     if GOZEN_SO and os.path.isfile(GOZEN_SO):
         bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
         for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
@@ -393,12 +456,14 @@ def game_exec():
     os.setuid(pw.pw_uid)
     child = dict(os.environ, HOME=pw.pw_dir, USER=USER, DISPLAY=env.get("DISPLAY", ":0"),
                  XAUTHORITY=env.get("XAUTHORITY", os.path.join(pw.pw_dir, ".Xauthority")))
-    for k in ("GODOT", "TRON_VENV"):
+    meta = bundle_meta(game)
+    for k in ["GODOT"] + list(meta.get("requires", {}).get("env", {"TRON_VENV": ""})):
         if env.get(k):
             child[k] = env[k]
+    start = meta.get("run", {}).get("start", "python3 scripts/package/start.py").split()[1:]
     py = game_python()
     os.execve(py if os.path.isabs(py) else shutil.which(py),
-              [py, "scripts/package/start.py"] + env.get("MPF_GAME_ARGS", "").split(), child)
+              [py] + start + env.get("MPF_GAME_ARGS", "").split(), child)
 
 
 def game_start():
@@ -476,7 +541,7 @@ def settings_save(game, form):
 
 
 GAME_PAGE = """<h2>Game</h2><p>%(state)s</p>
-<form onsubmit="up(this,'game');return false">Bundle <code>*-linux-%(arch)s.tar.xz</code> <input type=file name=f required><br>
+<form onsubmit="up(this,'game');return false">Bundle <code>*-linux-%(arch)s.tar.xz</code> or <code>*-linux-all.tar.xz</code> <input type=file name=f required><br>
 its <code>.sha256</code> file (optional) <input type=file name=s><br><button>Upload and install</button></form>
 <h2>PuP Pack</h2><form onsubmit="up(this,'pup');return false">Pack <code>.zip</code> <input type=file name=f accept=.zip required>
 <br><button>Upload and install</button></form>
@@ -555,8 +620,8 @@ class Handler(BaseHTTPRequestHandler):
             state += "<b>running</b>" if game_running() else "stopped"
             ctl = ("<form method=post action=/game style='display:inline'><button name=do value=%s>%s</button> "
                    "<button name=do value=%s>%s</button></form>"
-                   % (("stop", "Stop the game") if game_running() else ("start", "Start the game"),
-                      ("disable", "Do not start at power-on") if game_autostart() else ("enable", "Start at power-on")))
+                   % (*(("stop", "Stop the game") if game_running() else ("start", "Start the game")),
+                      *(("disable", "Do not start at power-on") if game_autostart() else ("enable", "Start at power-on"))))
             ctl += "<h2>Game settings</h2>" + settings_html(game)
         else:
             state, ctl = "No game installed.", ""
@@ -579,7 +644,7 @@ class Handler(BaseHTTPRequestHandler):
                 me = ARCH.get(platform.machine(), platform.machine())
                 if not ok:
                     raise ValueError("expected a .tar.xz bundle" if kind == "game" else "expected a .zip pack")
-                if "linux-" in name and kind == "game" and not name.endswith(f"linux-{me}.tar.xz"):
+                if "linux-" in name and kind == "game" and not name.endswith((f"linux-{me}.tar.xz", "linux-all.tar.xz")):
                     raise ValueError(f"this machine is {me}: wrong bundle")
                 if kind == "pup" and not installed_game():
                     raise ValueError("install the game first")
