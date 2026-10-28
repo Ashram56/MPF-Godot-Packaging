@@ -1,0 +1,106 @@
+name: GoZen macOS build
+
+# Builds addons/gde_gozen/bin/libgozen.macos.template_release.universal.dylib (GDE GoZen at the same revision and
+# with the same patch as the Linux and Windows builds, build/gozen/build_gozen.sh; FFmpeg 7.1 trimmed as for them, software
+# decoding) and commits it on the branch it ran on. Runs by hand only (Actions tab, on the branch to update): CI never
+# runs on its own off main.
+on:
+  workflow_dispatch:
+
+env:
+  GOZEN_REV: f9448619324ad7d0d4e79d3bd501bde477ea4b7f
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch GoZen and apply the patch
+        run: |
+          git clone --quiet https://github.com/VoylinsGamedevJourney/gde_gozen gozen
+          cd gozen
+          git checkout --quiet "$GOZEN_REV"
+          git submodule update --init --depth 1 ffmpeg godot_cpp
+          git apply ../build/gozen/gozen.patch
+          # the SConstruct's macOS branch: lean FFmpeg (no libvpx/libaom), nothing from Homebrew, no frameworks
+          python3 - <<'PY'
+          s = open("SConstruct").read()
+          a = s.index('elif "macos" in platform:')
+          b = s.index('elif "android" in platform:')
+          new = '''elif "macos" in platform:
+              if arch == "x86_64":
+                  env.Append(CCFLAGS=["-arch", "x86_64"], LINKFLAGS=["-arch", "x86_64"])
+              elif arch == "arm64":
+                  env.Append(CCFLAGS=["-arch", "arm64"], LINKFLAGS=["-arch", "arm64"])
+              env.Append(
+                  CPPPATH=["ffmpeg/bin/include"],
+                  LIBPATH=["ffmpeg/bin/lib"],
+                  LIBS=LIBS_COMMON + ["z", "iconv", "m", "pthread"],
+                  LINKFLAGS=["-stdlib=libc++", "-framework", "CoreFoundation"],
+              )
+          '''
+          open("SConstruct", "w").write(s[:a] + new + s[b:])
+          PY
+
+      - name: Build FFmpeg and GoZen for each architecture
+        working-directory: gozen
+        run: |
+          brew install nasm >/dev/null
+          python3 -m pip install --break-system-packages scons==4.8.1 >/dev/null
+          mkdir -p ../staging
+          for arch in arm64 x86_64; do
+            cd ffmpeg
+            make distclean >/dev/null 2>&1 || true
+            rm -rf bin
+            EXTRA=()
+            [ "$arch" = x86_64 ] && EXTRA=(--enable-cross-compile --arch=x86_64 --cc="clang -arch x86_64")
+            [ "$arch" = arm64 ] && EXTRA=(--arch=arm64)
+            ./configure --prefix="$PWD/bin" "${EXTRA[@]}" --target-os=darwin --disable-shared --enable-static \
+              --enable-pic --extra-cflags=-mmacosx-version-min=11.0 --extra-ldflags=-mmacosx-version-min=11.0 \
+              --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-avfilter \
+              --disable-network --disable-autodetect --disable-iconv \
+              --enable-avcodec --enable-avformat --enable-swscale --enable-swresample \
+              --enable-protocol=file \
+              --enable-demuxer=mov,matroska,ogg,mp3,aac,wav \
+              --enable-decoder=h264,hevc,mpeg4,vp8,vp9,theora,aac,mp3,mp3float,opus,vorbis,flac,pcm_s16le \
+              --enable-parser=h264,hevc,mpeg4video,aac,vp8,vp9,opus,vorbis,mpegaudio \
+              --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb
+            make -j"$(sysctl -n hw.ncpu)" >/dev/null
+            make install >/dev/null
+            cd ..
+            scons -j"$(sysctl -n hw.ncpu)" platform=macos arch=$arch target=template_release lean=yes \
+              macos_deployment_target=11.0
+            cp test_room/addons/gde_gozen/bin/libgozen.macos.template_release.$arch.dylib ../staging/ \
+              || cp test_room/addons/gde_gozen/bin/libgozen.macos.template_release.universal.dylib ../staging/$arch.dylib
+            ls -l ../staging
+            scons -c >/dev/null 2>&1 || true
+          done
+
+      - name: One universal dylib
+        run: |
+          cd staging
+          ls
+          lipo -create libgozen.macos.template_release.arm64.dylib libgozen.macos.template_release.x86_64.dylib \
+            -output libgozen.macos.template_release.universal.dylib
+          lipo -info libgozen.macos.template_release.universal.dylib
+          otool -L libgozen.macos.template_release.universal.dylib
+          mkdir -p ../addons/gde_gozen/bin
+          cp libgozen.macos.template_release.universal.dylib ../addons/gde_gozen/bin/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gozen-macos
+          path: staging/*.dylib
+          if-no-files-found: error
+
+      - name: Commit the dylib
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add -f addons/gde_gozen/bin/libgozen.macos.template_release.universal.dylib
+          git commit -m "GoZen macOS universal dylib (built by the gozen_macos workflow, run $GITHUB_RUN_ID)"
+          git push origin "HEAD:$GITHUB_REF_NAME"

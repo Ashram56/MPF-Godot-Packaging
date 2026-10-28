@@ -35,6 +35,7 @@ Godot's log names the decoder for each video: `GoZen: hardware decoder h264_nvmp
 |---|---|
 | `bin/libgozen.linux.template_release.arm64.so` | Linux arm64 (Jetson, Raspberry Pi and others), glibc 2.31+ (JetPack 5, Ubuntu 20.04+) |
 | `bin/libgozen.linux.template_release.x86_64.so` | Linux x86_64, glibc 2.31+ |
+| `bin/libgozen.macos.template_release.universal.dylib` | macOS 11+, arm64 and Intel in one file; software decoding (no GPU path); built by `.github/workflows/gozen_macos.yml` (Actions, macos-15) from the same GoZen revision and patch; built, not yet run on a Mac |
 | `bin/libgozen.windows.template_release.x86_64.dll` | Windows 10/11 x86_64 (MinGW-w64 cross build, all static: no DLL beside it) |
 | `gozen.gdextension` | maps every entry, debug included (the editor binary), to the release builds above |
 | `video_playback.gd` | the `VideoPlayback` node, patched |
