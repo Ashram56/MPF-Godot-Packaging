@@ -18,6 +18,7 @@ Settings (environment, defaults for the Raspberry Pi image):
                       the bundle's build already has MPF_GOZEN_NEEDS, bundle.json "gozen")
   MPF_PLATFORM_DIR    this platform's checkout (its addons/gde_gozen is installed into a bundle that lists
                       "platform_addons" in bundle.json; default: found from this file or from MPF_GOZEN_SO)
+  MPF_GAME_OVERRIDE   a Godot override.cfg of this board (audio buffer, mix rate) copied to game/override.cfg at every install
   MPF_GOZEN_NEEDS     v4l2m2m zero_copy   what the bundle's GoZen must carry to be kept
 Must run as root.
 """
@@ -35,6 +36,7 @@ GAMES = os.environ.get("MPF_GAMES_DIR", "/opt/games")
 UPLOADS = os.environ.get("MPF_UPLOAD_DIR", "/var/lib/mpf-uploads")
 GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
 GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
+GAME_OVERRIDE = os.environ.get("MPF_GAME_OVERRIDE", "")
 PLATFORM_DIR = os.environ.get("MPF_PLATFORM_DIR", "")
 GOZEN_NEEDS = os.environ.get("MPF_GOZEN_NEEDS", "v4l2m2m zero_copy").split()
 AP_SSID, AP_PSK, AP_ADDR = "MPF-Setup", os.environ.get("MPF_AP_PSK", "mpf-setup"), "192.168.4.1"
@@ -372,6 +374,9 @@ def install_game(archive, expect_sha):
     shutil.rmtree(stage, ignore_errors=True)
     shutil.rmtree(old, ignore_errors=True)
     install_platform_addons(dest, b, me)
+    if GAME_OVERRIDE and os.path.isfile(GAME_OVERRIDE):
+        shutil.copy2(GAME_OVERRIDE, os.path.join(dest, "game", "override.cfg"))
+        job_log(f"board settings ({GAME_OVERRIDE}) copied to game/override.cfg")
     if GOZEN_SO and os.path.isfile(GOZEN_SO):
         bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
         for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
