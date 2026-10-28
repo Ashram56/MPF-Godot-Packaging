@@ -22,7 +22,7 @@ Options of the common cases:
   --pup-install CMD  the command that installs a pack (`ZIP_PATH_OR_URL` stands for the zip; runs in the game's folder as the game user)
   --pup-media DIR    the part of the pack that is large media (hard-linked between versions)
   --arch ARCH        `all` (default: no native binary), `arm64`, `x86_64` or `arm64+x86_64`
-  --platform-addon N take the platform's own build of a binary add-on (`gde_gozen`) instead of one from your folder
+  --platform-addon N take the platform's own copy of an add-on (`gde_gozen`, `mpf-gmc`) instead of one from your folder
   --exclude GLOB     leave out files (repeatable; `.git`, `__pycache__`, `*.pyc`, `logs` are always left out)
   --game-args        pass the board's Godot arguments (MPF_GAME_ARGS of /etc/default/mpf-game, e.g. `--rendering-driver opengl3`) to your
                      start command (default: not passed, your program would reject them)

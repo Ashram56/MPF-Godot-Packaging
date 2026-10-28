@@ -105,6 +105,25 @@ class Install(Base):
         child = G.game_environment({"requires": {"env": {"OTHER_VENV": ""}}}, env)
         self.assertEqual((child["MPF_GAME_VENV"], child["OTHER_VENV"], child["TF_VENV"], child["GODOT"]), ("/v", "/v", "/v2", "/g"))
 
+    def test_platform_gmc_replaces_the_bundles_own(self):
+        plat = os.path.join(self.t.name, "plat")
+        gmc = os.path.join(plat, "toolchain", "addons", "mpf-gmc")
+        os.makedirs(os.path.join(gmc, "scripts"))
+        open(os.path.join(gmc, "plugin.cfg"), "w").write("[plugin]\n")
+        open(os.path.join(gmc, "scripts", "bcp_server.gd"), "w").write("# mpf-godot fix bcp-partial-lines\n")
+        saved = C.PLATFORM_DIR
+        C.PLATFORM_DIR = plat
+        try:
+            state, msg = self.install(extra={"platform_addons": ["mpf-gmc"]},
+                                      files={"game/addons/mpf-gmc/scripts/bcp_server.gd": b"# the bundle's own, unpatched\n"})
+        finally:
+            C.PLATFORM_DIR = saved
+        self.assertEqual(state, "done", msg)
+        p = os.path.join(C.GAMES, "demo@1.0", "game", "addons", "mpf-gmc", "scripts", "bcp_server.gd")
+        self.assertIn("mpf-godot fix", open(p).read())
+        state, msg = self.install(version="2", extra={"platform_addons": ["mpf-gmc"]})       # no platform GMC: refused, not silently skipped
+        self.assertEqual(state, "error")
+
     def test_a_second_game_waits_to_be_chosen(self):
         self.install()
         state, msg = self.install(gid="other", name="Other", version="3")

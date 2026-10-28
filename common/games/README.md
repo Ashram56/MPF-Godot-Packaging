@@ -102,7 +102,7 @@ refused by a page that does not know it.
   "keep_on_update": ["game/data", "game/options.json"],
   "options": {"tool": "scripts/package/bundle_options.py", "schema": "scripts/package/options.json"},
   "pup": {"pack_dir": "pup_pack", "media_dir": "pup_media", "install": "python3 scripts/pup/pup_setup.py --pup-zip ZIP_PATH_OR_URL", "needs_restart": true},
-  "platform_addons": ["gde_gozen"],                // binaries taken from the platform (the same build for every game)
+  "platform_addons": ["gde_gozen", "mpf-gmc"],     // add-ons taken from the platform (the same build for every game)
   "gozen": {},                                      // what the bundle's own GoZen builds carry (v4l2m2m, zero_copy, vaapi...)
   "profiles": {"apply": "python3 scripts/package/board_profile.py install"}   // once per install: settings that suit this board
 }
@@ -115,7 +115,7 @@ refused by a page that does not know it.
 | `keep_on_update` | paths (files or folders, relative to the bundle) carried from the previous version of the same game |
 | `options.tool` | a program that answers `list` (the settings schema as JSON), `get`, `set ID VALUE...`, `unset ID...`: the page builds its form from it. No tool, no settings card. The page never writes a game's files itself |
 | `pup` | present only if the game has a PuP Pack. `install` runs in the game's folder as the game user with `ZIP_PATH_OR_URL` replaced; `pack_dir` and `media_dir` are shared between versions |
-| `platform_addons` | binary add-ons (`gde_gozen`) that the platform installs for the machine instead of shipping them in the bundle |
+| `platform_addons` | add-ons (`gde_gozen`: GoZen binaries for the machine; `mpf-gmc`: the patched GMC) that the platform installs instead of the bundle shipping them |
 | `profiles.apply` | run once after the install; sets only what nobody set (the board's limits, see [platforms/README.md](../../platforms/README.md)) |
 
 ### What the base system gives a game, and what it must leave alone
@@ -126,6 +126,12 @@ refused by a page that does not know it.
   `MPF_GAME_VENV`, the standard name.
 - **Board settings**: the platform's Godot `override.cfg` (audio buffer, mix rate, frame cap of the machine) is copied to
   `game/override.cfg` at every install: set the board's FPS and audio there, not by command-line arguments that a game may not accept.
+- **GMC is the platform's**: `platform_addons: ["gmc"]` is not a name; list **`"mpf-gmc"`** and the loader installs the platform's
+  mpf-gmc 1.0.0 (the official release, with the three fixes of [fixes/gmc](../../fixes/README.md#gmc): half BCP lines, parse errors,
+  AZERTY keys; made by `python -m mpf_godot patch-gmc` in the base system's `toolchain/addons/mpf-gmc`) into `game/addons/mpf-gmc`,
+  replacing whatever the bundle brought. A game then does not ship GMC at all. A game with **its own extra GMC changes** keeps
+  shipping its copy and does not list `mpf-gmc` (the platform's would overwrite them). The install is refused, not skipped, when
+  the platform has no GMC.
 - **GoZen is the platform's**: a bundle that lists `platform_addons: ["gde_gozen"]` gets the platform's build (VAAPI on x86, V4L2 on a Pi 4,
   NVMPI on a Jetson). Its PuP Pack install command **must not delete or replace `game/addons/gde_gozen`**; the loader puts the platform's
   copy back after the pack install anyway. Keep the pack's videos as they are (H.264 plays on the GPU decoder): do not re-encode them to
