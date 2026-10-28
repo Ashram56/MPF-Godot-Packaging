@@ -68,6 +68,16 @@ class Install(Base):
         self.assertEqual([g["folder"] for g in games], ["demo@1.0"])
         self.assertTrue(games[0]["active"])
 
+    def test_board_override_is_copied_at_every_install(self):
+        ov = os.path.join(self.t.name, "override.cfg")
+        open(ov, "w").write("[audio]\n")
+        C.GAME_OVERRIDE = ov
+        try:
+            self.assertEqual(self.install()[0], "done")
+        finally:
+            C.GAME_OVERRIDE = ""
+        self.assertEqual(open(os.path.join(C.GAMES, "demo@1.0", "game", "override.cfg")).read(), "[audio]\n")
+
     def test_a_second_game_waits_to_be_chosen(self):
         self.install()
         state, msg = self.install(gid="other", name="Other", version="3")

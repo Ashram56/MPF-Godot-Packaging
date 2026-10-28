@@ -254,11 +254,12 @@ func _update_video(new_video: GoZenVideo) -> void:
 		)
 		chapters.append(chapter)
 
-	# A blank image of the video's size gives the display texture its size. One per size is kept (and shared): filling and
-	# uploading a new 1080p one on the main thread at every open cost part of a frame
-	var blank_size: Vector2i = Vector2i(_resolution.y, _resolution.x) if abs(_rotation) == 90 else Vector2i(_resolution.x, _resolution.y)
-	image = _blank_image(blank_size)
+	if abs(_rotation) == 90:
+		image = Image.create_empty(_resolution.y, _resolution.x, false, Image.FORMAT_R8)
+	else:
+		image = Image.create_empty(_resolution.x, _resolution.y, false, Image.FORMAT_R8)
 
+	image.fill(Color.WHITE)
 	if debug:
 		_print_video_debug()
 
@@ -279,7 +280,7 @@ func _update_video(new_video: GoZenVideo) -> void:
 	y_texture.set_image(video.get_y_data())
 	u_texture.set_image(video.get_u_data())
 	v_texture.set_image(video.get_v_data())
-	a_texture.set_image(video.get_a_data() if _has_alpha else _blank_image(Vector2i(1, 1)))   # opaque: no full-size plane
+	a_texture.set_image(video.get_a_data() if _has_alpha else image)
 
 	_shader_material.set_shader_parameter("y_data", y_texture)
 	_shader_material.set_shader_parameter("u_data", u_texture)
@@ -666,17 +667,6 @@ func get_stream_language(stream: int) -> String:
 ## Checking to see if the video is open or not, trying to run functions without checking if open can crash your project.
 func is_open() -> bool:
 	return video != null and video.is_open()
-
-
-static var _blank_images: Dictionary = {}
-
-
-static func _blank_image(size: Vector2i) -> Image:
-	if not _blank_images.has(size):
-		var blank: Image = Image.create_empty(size.x, size.y, false, Image.FORMAT_R8)
-		blank.fill(Color.WHITE)
-		_blank_images[size] = blank
-	return _blank_images[size]
 
 
 func _get_img_tex(image_data: PackedByteArray, width: int, height: int, r8: bool = true) -> ImageTexture:

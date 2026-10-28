@@ -392,6 +392,10 @@ def install_game(archive, expect_sha, keep_old=True):
     shutil.rmtree(stage, ignore_errors=True)
     shutil.rmtree(old, ignore_errors=True)
     install_platform_addons(dest, b, me)
+    if C.GAME_OVERRIDE and os.path.isfile(C.GAME_OVERRIDE):
+        os.makedirs(os.path.join(dest, "game"), exist_ok=True)
+        shutil.copy2(C.GAME_OVERRIDE, os.path.join(dest, "game", "override.cfg"))
+        job_log(f"board settings ({C.GAME_OVERRIDE}) copied to game/override.cfg")
     if C.GOZEN_SO and os.path.isfile(C.GOZEN_SO):
         bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
         for n in os.listdir(bindir) if os.path.isdir(bindir) else ():

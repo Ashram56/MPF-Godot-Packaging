@@ -17,6 +17,7 @@ The three modules are installed together in /usr/local/bin. Settings (environmen
   MPF_INBOX_DIR       /var/lib/mpf-inbox  bundles (*.tar.xz) and packs (*.zip) put here are installed at the next boot
   MPF_STATE_DIR       /var/lib/mpf-netconfig  which game is active
   MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, MPF_GAME_VENV, DISPLAY, MPF_GAME_ARGS)
+  MPF_GAME_OVERRIDE   a Godot override.cfg of this board (audio buffer, mix rate) copied to game/override.cfg at every game install
   MPF_GOZEN_SO        a GoZen library built for this board, copied over the bundle's own (optional; not when
                       the bundle's build already has MPF_GOZEN_NEEDS, bundle.json "gozen")
   MPF_PLATFORM_DIR    this platform's checkout (its addons/gde_gozen is installed into a bundle that lists

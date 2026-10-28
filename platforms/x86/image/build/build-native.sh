@@ -224,6 +224,8 @@ install -m 755 "$NC"/mpf_*.py "$R/usr/local/bin/"
 install -m 644 "$NC"/mpf-netconfig-*.service "$NC/mpf-game.service" "$R/etc/systemd/system/"
 install -m 644 "$NC/mpf-network.txt.template" "$ESP/mpf-network.txt"
 install -m 644 "$KIT/../../cabinet/mpf-netconfig.env" "$R/etc/default/mpf-netconfig"
+install -d "$R/etc/mpf"
+install -m 644 "$KIT/../../cabinet/game-override.cfg" "$R/etc/mpf/game-override.cfg"
 mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"
 install -m 644 "$KIT/../../cabinet/mpf-game.env" "$R/etc/default/mpf-game"
 in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service mpf-netconfig-inbox.service mpf-game.service >/dev/null 2>&1"
@@ -280,7 +282,7 @@ if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
     # udev gives the video group /dev/dri/card0 a moment after the login: wait for it, or X fails and getty gives up
     for _ in $(seq 1 100); do [ -w /dev/dri/card0 ] && break; sleep 0.2; done
     udevadm settle --timeout=10 2>/dev/null
-    exec startx
+    exec startx -- -nocursor
 fi
 PROF
     fi
