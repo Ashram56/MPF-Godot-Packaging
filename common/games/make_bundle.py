@@ -24,6 +24,8 @@ Options of the common cases:
   --arch ARCH        `all` (default: no native binary), `arm64`, `x86_64` or `arm64+x86_64`
   --platform-addon N take the platform's own build of a binary add-on (`gde_gozen`) instead of one from your folder
   --exclude GLOB     leave out files (repeatable; `.git`, `__pycache__`, `*.pyc`, `logs` are always left out)
+  --game-args        pass the board's Godot arguments (MPF_GAME_ARGS of /etc/default/mpf-game, e.g. `--rendering-driver opengl3`) to your
+                     start command (default: not passed, your program would reject them)
   --no-hw-option     do not add the "Hardware" setting (see below)
   --hw-virtual-args=A  (write it with `=`: it may start with `-`) arguments added to the start command in virtual mode (default `-x`: MPF's virtual platform)
   --hw-proc-args=A     arguments added in P-ROC mode (default none: the hardware platform your config asks for; e.g. `-c proc` for
@@ -148,6 +150,7 @@ def main():
     ap.add_argument("--no-display", action="store_true")
     ap.add_argument("--keep", action="append", default=[])
     ap.add_argument("--pup-dir")
+    ap.add_argument("--game-args", action="store_true")
     ap.add_argument("--no-hw-option", action="store_true")
     ap.add_argument("--hw-virtual-args", default="-x")
     ap.add_argument("--hw-proc-args", default="")
@@ -176,7 +179,7 @@ def main():
         "format": 1, "id": a.id, "name": a.name or a.id, "version": a.version,
         "description": a.description,
         "target": {"os": "linux", "arch": a.arch},
-        "run": {"start": a.start, "cwd": "game", "needs_display": not a.no_display},
+        "run": {"start": a.start, "cwd": "game", "needs_display": not a.no_display, "game_args": a.game_args},
         "keep_on_update": ["game/" + k for k in a.keep],
     }
     if (a.pup_media or a.pup_install) and not a.pup_dir:

@@ -91,6 +91,20 @@ class Install(Base):
             self.assertEqual(calls, [])
         finally:
             G.game_running = lambda: False
+    def test_board_arguments_and_venv_names(self):
+        env = {"MPF_GAME_ARGS": "-- --rendering-driver opengl3", "MPF_GAME_VENV": "/v", "TF_VENV": "/v2", "GODOT": "/g"}
+        own = {"run": {"start": "python3 run.py"}}
+        self.assertEqual(G.game_command("/x", own, env)[0][1:], ["run.py"])                          # a game with its own start: no board arguments
+        packaged = {"run": {"start": "python3 scripts/package/start.py"}}
+        self.assertEqual(G.game_command("/x", packaged, env)[0][-3:], ["--", "--rendering-driver", "opengl3"])
+        self.assertEqual(G.game_command("/x", {}, env)[0][-1], "opengl3")                           # default start: the packaged launcher
+        opted = {"run": {"start": "python3 run.py", "game_args": True}}
+        self.assertEqual(G.game_command("/x", opted, env)[0][-1], "opengl3")
+        refused = {"run": {"start": "python3 scripts/package/start.py", "game_args": False}}
+        self.assertEqual(G.game_command("/x", refused, env)[0][1:], ["scripts/package/start.py"])
+        child = G.game_environment({"requires": {"env": {"OTHER_VENV": ""}}}, env)
+        self.assertEqual((child["MPF_GAME_VENV"], child["OTHER_VENV"], child["TF_VENV"], child["GODOT"]), ("/v", "/v", "/v2", "/g"))
+
     def test_a_second_game_waits_to_be_chosen(self):
         self.install()
         state, msg = self.install(gid="other", name="Other", version="3")

@@ -111,11 +111,25 @@ refused by a page that does not know it.
 | Field | Meaning |
 |---|---|
 | `run.start` | the command (default `python3 scripts/package/start.py`); `run.cwd` its folder, relative to the bundle (default the bundle); `needs_display` false: do not wait for the X session |
+| `run.game_args` | `true`: the board's Godot arguments (`MPF_GAME_ARGS` of `/etc/default/mpf-game`, for example `-- --rendering-driver opengl3`) are added to `run.start`. Default: only for a game started by `scripts/package/start.py` (which forwards them), never for another command (it would reject them). `make_bundle.py --game-args` sets it |
 | `keep_on_update` | paths (files or folders, relative to the bundle) carried from the previous version of the same game |
 | `options.tool` | a program that answers `list` (the settings schema as JSON), `get`, `set ID VALUE...`, `unset ID...`: the page builds its form from it. No tool, no settings card. The page never writes a game's files itself |
 | `pup` | present only if the game has a PuP Pack. `install` runs in the game's folder as the game user with `ZIP_PATH_OR_URL` replaced; `pack_dir` and `media_dir` are shared between versions |
 | `platform_addons` | binary add-ons (`gde_gozen`) that the platform installs for the machine instead of shipping them in the bundle |
 | `profiles.apply` | run once after the install; sets only what nobody set (the board's limits, see [platforms/README.md](../../platforms/README.md)) |
+
+### What the base system gives a game, and what it must leave alone
+
+- **Environment**: `GODOT`, `MPF_GAME_VENV` (the Python environment with MPF), `DISPLAY`, and every variable ending in `_VENV` of
+  `/etc/default/mpf-game` (a platform can add `TF_VENV=...` for a game that reads that name). Names listed under `requires.env` that
+  end in `VENV` receive the venv folder too. A game that reads another name for its Python should say so in `requires.env`, or read
+  `MPF_GAME_VENV`, the standard name.
+- **Board settings**: the platform's Godot `override.cfg` (audio buffer, mix rate, frame cap of the machine) is copied to
+  `game/override.cfg` at every install: set the board's FPS and audio there, not by command-line arguments that a game may not accept.
+- **GoZen is the platform's**: a bundle that lists `platform_addons: ["gde_gozen"]` gets the platform's build (VAAPI on x86, V4L2 on a Pi 4,
+  NVMPI on a Jetson). Its PuP Pack install command **must not delete or replace `game/addons/gde_gozen`**; the loader puts the platform's
+  copy back after the pack install anyway. Keep the pack's videos as they are (H.264 plays on the GPU decoder): do not re-encode them to
+  another codec such as Theora, that forces software decoding.
 
 Anything else in `bundle.json` is the game's own: loaders ignore unknown keys.
 

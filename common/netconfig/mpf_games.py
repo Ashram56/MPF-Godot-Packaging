@@ -445,6 +445,10 @@ def install_pup(zipfile, folder=None):
         args[0] = game_python()
     env = ["env"] + [f"{k}={v}" for k, v in game_env().items()]
     sh(*env, *args, cwd=game, user=True)
+    # a pack install that tidies the game's add-ons must not lose the platform's GoZen: put it back
+    if b.get("platform_addons"):
+        install_platform_addons(game, b, C.ARCH.get(platform.machine(), platform.machine()))
+        sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", os.path.join(game, "game", "addons"))
     os.remove(zipfile)
     if options_tool(game):
         tool(game, "set", "pup.enabled", "true")
@@ -578,12 +582,22 @@ def resolve_program(name):
     return shutil.which(name) or name
 
 
+def wants_game_args(b):
+    """MPF_GAME_ARGS (the board's Godot arguments, /etc/default/mpf-game) go only to a game that takes them: `run.game_args` true,
+    or, when the bundle does not say, a game started by the packaged launcher `scripts/package/start.py` (which forwards them)."""
+    run_ = b.get("run") or {}
+    if "game_args" in run_:
+        return bool(run_["game_args"])
+    return "scripts/package/start.py" in (run_.get("start") or DEFAULT_START)
+
+
 def game_command(game, b, env):
     """(argv, cwd) that starts a bundle: its run.start (default: the game package's start.py) plus MPF_GAME_ARGS from /etc/default/mpf-game."""
     run_ = b.get("run") or {}
     argv = shlex.split(run_.get("start") or DEFAULT_START)
     argv[0] = resolve_program(argv[0])
-    argv += shlex.split(env.get("MPF_GAME_ARGS", ""))
+    if wants_game_args(b):
+        argv += shlex.split(env.get("MPF_GAME_ARGS", ""))
     return argv, os.path.normpath(os.path.join(game, run_.get("cwd") or "."))
 
 
@@ -599,6 +613,9 @@ def game_environment(b, env):
         for k in (b.get("requires") or {}).get("env", {}):
             if k.endswith("VENV"):
                 child[k] = venv
+    for k, v in env.items():     # a variable of the base's own that a game reads under its name (TF_VENV=...)
+        if k.endswith("_VENV") and k not in child:
+            child[k] = v
     return child
 
 
