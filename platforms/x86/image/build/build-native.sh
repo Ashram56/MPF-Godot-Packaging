@@ -267,7 +267,7 @@ if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
     # udev gives the video group /dev/dri/card0 a moment after the login: wait for it, or X fails and getty gives up
     for _ in $(seq 1 100); do [ -w /dev/dri/card0 ] && break; sleep 0.2; done
     udevadm settle --timeout=10 2>/dev/null
-    exec startx
+    exec startx -- -nocursor
 fi
 PROF
     fi
