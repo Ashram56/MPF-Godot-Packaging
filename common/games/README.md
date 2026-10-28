@@ -122,6 +122,7 @@ refused by a page that does not know it.
 | `options.tool` | a program that answers `list` (the settings schema as JSON), `get`, `set ID VALUE...`, `unset ID...`: the page builds its form from it. No tool, no settings card. The page never writes a game's files itself |
 | `pup` | present only if the game has a PuP Pack. `install` runs in the game's folder as the game user with `ZIP_PATH_OR_URL` replaced; `pack_dir` and `media_dir` are shared between versions |
 | `platform_addons` | add-ons (`gde_gozen`: GoZen binaries for the machine; `mpf-gmc`: the patched GMC) that the platform installs instead of the bundle shipping them |
+| `monitor` | optional `{"layout": "game/monitor/monitor.yaml", "image": "game/monitor/playfield.jpg"}` (these are the defaults): the game's MPF Monitor layout, drawn by the page's *Switch monitor* tab (playfield, switches, lamps); without it the tab lists the switches |
 | `profiles.apply` | run once after the install; sets only what nobody set (the board's limits, see [platforms/README.md](../../platforms/README.md)) |
 
 ### What the base system gives a game, and what it must leave alone

@@ -91,13 +91,18 @@ an empty password field keeps the saved one; redirects are refused). *Check for 
 The list says *installed* or *changed on the server* (size or date differ from what was installed). The engine itself (the base
 system) is not updated this way yet.
 
-## Configuration tab: switch monitor and saved logs
+## Tabs: switch monitor and saved logs
 
-The page has three tabs (*Games*, *Install and updates*, *Configuration*; the address keeps the tab: `#config`).
+The page has four tabs (*Games*, *Install and updates*, *Configuration*, *Switch monitor*; the address keeps the tab: `#monitor`).
 
-- **Switch monitor** (*Configuration > Diagnostics*): the machine's switches live, lit when active, from MPF's own BCP server for outside
-  clients (`127.0.0.1:5051`, the one MPF Monitor uses; `MPF_BCP_HOST` / `MPF_BCP_PORT` change it). A click flips a switch or taps it
-  (a 150 ms pulse), as chosen. The game must be running; the connection exists only while the monitor is open.
-- **Save the game log**: writes one text file (machine state, journal of the game and of this page, the game's log files, latest switch
-  changes) to `/data/logs` (`/var/lib/mpf-logs` on an ordinary image, `MPF_SAVED_LOGS_DIR`), keeps the latest 20, and lists them for
-  download. In read-only mode the live logs are in RAM, so this is the way to keep them for someone who debugs the machine.
+- **Monitor** (tab, also a button in *Configuration > Diagnostics*): like MPF Monitor, in the page. The **playfield picture with the
+  switches, lamps (inserts, in their real colour), flippers, autofires, ball devices and coils** at the places the game's own layout gives,
+  or a plain list of switches when the game has none. A click on a switch flips it or taps it (a 150 ms pulse), as chosen; the filter
+  dims the others. It uses MPF's BCP server for outside clients (`127.0.0.1:5051`, the one MPF Monitor uses; `MPF_BCP_HOST` /
+  `MPF_BCP_PORT` change it), so the game must be running; the connection exists only while the tab is open.
+- **The layout is the game's**: `game/monitor/monitor.yaml` and `game/monitor/playfield.jpg` of the active game (or the paths in
+  `bundle.json`: `"monitor": {"layout": "...", "image": "..."}`). It is MPF Monitor's own file (`light: name: {x, y, size}`, x and y as
+  fractions of the picture), so the layout you already made with MPF Monitor works unchanged. Nothing about a game is in the page.
+- **Game output** opens a viewer that refreshes every 3 s. **Save the game log** writes one text file (machine state, journal of the game
+  and of this page, the game's log files, latest switch changes) to `/data/logs` (`/var/lib/mpf-logs` on an ordinary image,
+  `MPF_SAVED_LOGS_DIR`), keeps the latest 20 and lists them for download: in read-only mode the live logs are in RAM, this keeps them.

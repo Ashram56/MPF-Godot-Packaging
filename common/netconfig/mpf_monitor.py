@@ -23,6 +23,7 @@ import mpf_common as C
 
 HOST = os.environ.get("MPF_BCP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MPF_BCP_PORT", "5051"))
+SHOWN = ("light", "ball_device", "flipper", "autofire", "diverter", "drop_target", "playfield")   # devices drawn besides the switches
 IDLE = 20          # seconds without a page asking: the connection closes
 KEEP_LOGS = 20
 SAVED = os.environ.get("MPF_SAVED_LOGS_DIR") or (os.path.join(C.DATA, "logs") if C.READONLY else "/var/lib/mpf-logs")
@@ -62,12 +63,91 @@ def decode(line):
     return u.path, out
 
 
+def device_value(kind, state):
+    """What the page draws for one device, from MPF's monitorable state."""
+    if kind == "light":
+        c = state.get("color")
+        if isinstance(c, str):
+            return c if c.startswith("#") else ""
+        try:
+            r, g, b = (int(x) for x in c[:3])
+        except (TypeError, ValueError):
+            return ""
+        return "#%02x%02x%02x" % (r, g, b) if r or g or b else ""
+    if kind == "ball_device":
+        return int(state.get("balls") or 0) if isinstance(state.get("balls", 0), (int, float)) else len(state.get("balls") or [])
+    if kind == "playfield":
+        return int(state.get("balls") or 0) if isinstance(state.get("balls", 0), (int, float)) else 0
+    if kind == "drop_target":
+        return bool(state.get("down"))
+    if kind == "diverter":
+        return bool(state.get("active"))
+    return bool(state.get("enabled"))
+
+
+def parse_layout(text):
+    """MPF Monitor's monitor.yaml (two levels: kind -> device -> numbers, plus top-level numbers) without a YAML library."""
+    spots, extra, kind = {}, {}, None
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].rstrip()
+        if not line.strip() or ":" not in line:
+            continue
+        indent = len(line) - len(line.lstrip())
+        key, _, val = line.strip().partition(":")
+        key, val = key.strip().strip("'\""), val.strip().strip("'\"")
+        if indent == 0:
+            if val:
+                extra[key] = val
+                kind = None
+            else:
+                kind = key
+                spots.setdefault(kind, {})
+        elif kind and indent <= 2 and not val:
+            spots[kind][key] = {}
+            cur = key
+        elif kind and indent > 2:
+            try:
+                spots[kind][cur][key] = float(val) if re.match(r"^-?[0-9.]+$", val) else val
+            except (KeyError, NameError):
+                pass
+    return {"spots": {k: {n: d for n, d in v.items() if "x" in d and "y" in d} for k, v in spots.items()}, "extra": extra}
+
+
+def layout_files(game):
+    """(layout file, picture file) of a game's monitor: bundle.json `monitor` or the `game/monitor/` folder; None when absent."""
+    if not game:
+        return None, None
+    b = game["bundle"].get("monitor") or {}
+    root = os.path.realpath(game["path"])
+
+    def inside(rel, default):
+        p = os.path.realpath(os.path.join(root, str(rel or default)))
+        return p if p.startswith(root + os.sep) and os.path.isfile(p) else None
+    return inside(b.get("layout"), "game/monitor/monitor.yaml"), inside(b.get("image"), "game/monitor/playfield.jpg")
+
+
+def layout(game):
+    lf, img = layout_files(game)
+    if not lf or not img:
+        return None
+    try:
+        with open(lf, encoding="utf-8", errors="replace") as f:
+            out = parse_layout(f.read())
+    except OSError:
+        return None
+    ex = out["extra"]
+    out["size"] = float(ex.get("device_size", 0.045) or 0.045) if re.match(r"^[0-9.]+$", str(ex.get("device_size", "0.045"))) else 0.045
+    out["image"] = "/api/monitor/image?v=%d" % int(os.path.getmtime(img))
+    return out
+
+
 class Monitor:
     def __init__(self):
         self.lock = threading.Lock()
         self.sock = None
         self.switches = {}       # name -> {name, label, number, board, state}
         self.order = []
+        self.devices = {}        # type -> name -> value (light "#rrggbb", ball_device balls, flipper/autofire enabled)
         self.log = []            # latest changes, oldest first: [time, name, state]
         self.error = ""
         self.last_use = 0.0
@@ -86,6 +166,7 @@ class Monitor:
             self.error = ""
         try:
             self._send("monitor_start", category="switches")
+            self._send("monitor_start", category="devices")
             self._send("service", subcommand="list_switches", values="name,label,number,board,state")
             buf = b""
             while time.time() - self.last_use < IDLE:
@@ -133,6 +214,8 @@ class Monitor:
                         continue
                     self.switches[name] = {"name": name, "label": "" if label in (None, "%") else label, "number": str(number), "board": board or "", "state": int(state or 0)}
                     self.order.append(name)
+            elif cmd == "device" and kw.get("type") in SHOWN:
+                self.devices.setdefault(kw["type"], {})[kw.get("name")] = device_value(kw["type"], kw.get("state") or {})
             elif cmd == "switch" and kw.get("name") in self.switches:
                 st = 1 if int(kw.get("state") or 0) else 0
                 self.switches[kw["name"]]["state"] = st
@@ -150,7 +233,7 @@ class Monitor:
         self._touch()
         with self.lock:
             return {"connected": self.sock is not None, "error": self.error,
-                    "switches": [self.switches[n] for n in self.order], "now": round(time.time(), 2),
+                    "switches": [self.switches[n] for n in self.order], "devices": {k: dict(v) for k, v in self.devices.items()}, "now": round(time.time(), 2),
                     "log": [e for e in self.log if e[0] > since][-100:]}
 
     def set_switch(self, name, do):

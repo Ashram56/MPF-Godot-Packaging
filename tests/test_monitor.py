@@ -103,6 +103,32 @@ class MonitorTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.mon.set_switch("s_start", "explode")
 
+    def test_devices_and_layout(self):
+        self.assertEqual(M.device_value("light", {"color": [255, 0, 16]}), "#ff0010")
+        self.assertEqual(M.device_value("light", {"color": [0, 0, 0]}), "")
+        self.assertEqual(M.device_value("ball_device", {"balls": 2}), 2)
+        self.assertTrue(M.device_value("flipper", {"enabled": True}))
+        self.mon.snapshot()
+        self.assertTrue(wait(lambda: self.bcp.conn is not None and "monitor_start?category=devices" in self.bcp.got))
+        self.bcp.send("device?json=" + json.dumps({"type": "light", "name": "l_a", "changes": False, "state": {"color": [0, 255, 0]}}))
+        self.bcp.send("device?json=" + json.dumps({"type": "logic_block", "name": "x", "state": {}}))
+        self.assertTrue(wait(lambda: self.mon.snapshot()["devices"].get("light", {}).get("l_a") == "#00ff00"))
+        self.assertNotIn("logic_block", self.mon.snapshot()["devices"])
+
+    def test_layout(self):
+        g = os.path.join(self.tmp, "game")
+        os.makedirs(os.path.join(g, "game", "monitor"))
+        with open(os.path.join(g, "game", "monitor", "monitor.yaml"), "w") as f:
+            f.write("# c\nlight:\n  l_a:\n    size: 0.02\n    x: 0.5\n    y: 0.25\nswitch:\n  s_a:\n    x: 0.1\n    y: 0.2\ndevice_size: 0.05\n")
+        self.assertIsNone(M.layout({"path": g, "bundle": {}}))      # no picture yet
+        open(os.path.join(g, "game", "monitor", "playfield.jpg"), "wb").write(b"x")
+        lay = M.layout({"path": g, "bundle": {}})
+        self.assertEqual(lay["spots"]["light"]["l_a"], {"size": 0.02, "x": 0.5, "y": 0.25})
+        self.assertEqual(lay["spots"]["switch"]["s_a"]["x"], 0.1)
+        self.assertEqual(lay["size"], 0.05)
+        self.assertIsNone(M.layout({"path": g, "bundle": {"monitor": {"layout": "../../etc/passwd"}}}))
+        self.assertIsNone(M.layout(None))
+
     def test_game_not_running(self):
         M.PORT = 1
         snap = self.mon.snapshot()
