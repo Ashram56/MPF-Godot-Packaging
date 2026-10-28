@@ -23,6 +23,13 @@ The pack is installed with the bundle's own `pup.install` command. The page then
 written with `bundle_options.py`) and a Start/Stop button (transient unit `mpf-game`, `start.py`). `/etc/default/mpf-game` holds `GODOT`,
 `TRON_VENV`, `DISPLAY`, `XAUTHORITY` and `MPF_GAME_ARGS` (Pi 4: `-- --rendering-driver opengl3`). `MPF_GOZEN_SO` replaces the bundle's arm64 GoZen with the board's own, unless the bundle's build already carries `MPF_GOZEN_NEEDS` (default `v4l2m2m zero_copy`, from `bundle.json` `gozen`). After the first-run defaults, the bundle's board profile is applied (`bundle.json` `profiles.apply`: the bundle picks its profile from the device tree and sets only what nobody set, once; Tron-Legacy-MPF `docs/bundle.md`, Board profiles).
 
+## Read-only production mode
+
+On an image built with the read-only mode ([common/readonly](../readonly/README.md), `/etc/mpf-readonly.conf` exists) the page shows a *Mode*
+section (production or maintenance), uploads go to the data partition, the game's `logs/` and Godot's user folders to RAM,
+the Wi-Fi password is erased from `mpf-network.txt` in a short writable window of the boot partition, and `MODE=maintenance|production`
+in that file switches the mode at the next boot. Without that file nothing changes.
+
 ## Platform limits
 
 A board has limits a game must respect, and they live in the bundle's board profile (applied once at install by the step

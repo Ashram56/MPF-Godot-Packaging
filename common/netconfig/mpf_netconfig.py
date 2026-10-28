@@ -19,9 +19,13 @@ Settings (environment, defaults for the Raspberry Pi image):
   MPF_PLATFORM_DIR    this platform's checkout (its addons/gde_gozen is installed into a bundle that lists
                       "platform_addons" in bundle.json; default: found from this file or from MPF_GOZEN_SO)
   MPF_GOZEN_NEEDS     v4l2m2m zero_copy   what the bundle's GoZen must carry to be kept
+  MPF_READONLY_CONF   /etc/mpf-readonly.conf  read-only production mode (common/readonly): when the file exists, the page
+                      shows the mode (production/maintenance), uploads go to the data partition, the game's logs and
+                      Godot's user folders go to RAM, and the few files outside the data partition are written in short
+                      writable windows. MODE=maintenance|production in the text file switches it at boot.
 Must run as root.
 """
-import hashlib, html, json, os, platform, pwd, re, subprocess, sys, threading, time, base64, shutil
+import contextlib, hashlib, html, json, os, platform, pwd, re, subprocess, sys, threading, time, base64, shutil
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote as requests_unquote
 
@@ -32,19 +36,10 @@ PORT = int(os.environ.get("MPF_WEB_PORT", "8080"))
 WPA = f"/etc/wpa_supplicant/wpa_supplicant-{WLAN}.conf"
 SSHD_DROPIN = "/etc/ssh/sshd_config.d/10-mpf-netconfig.conf"
 GAMES = os.environ.get("MPF_GAMES_DIR", "/opt/games")
-UPLOADS = os.environ.get("MPF_UPLOAD_DIR", "/var/lib/mpf-uploads")
-GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
-GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
-PLATFORM_DIR = os.environ.get("MPF_PLATFORM_DIR", "")
-GOZEN_NEEDS = os.environ.get("MPF_GOZEN_NEEDS", "v4l2m2m zero_copy").split()
-AP_SSID, AP_PSK, AP_ADDR = "MPF-Setup", os.environ.get("MPF_AP_PSK", "mpf-setup"), "192.168.4.1"
+RO_CONF = os.environ.get("MPF_READONLY_CONF", "/etc/mpf-readonly.conf")
 
 
-def run(*cmd, **kw):
-    return subprocess.run(cmd, capture_output=True, text=True, **kw)
-
-
-def read_conf(path=CONF):
+def _read_kv(path):
     out = {}
     try:
         for line in open(path, encoding="utf-8", errors="replace"):
@@ -57,12 +52,52 @@ def read_conf(path=CONF):
     return out
 
 
+RO = _read_kv(RO_CONF)
+READONLY = bool(RO)                              # the image runs in read-only production mode
+DATA = RO.get("MPF_DATA_MOUNT", "/data")         # its one read/write partition
+BOOT_MOUNT = RO.get("MPF_BOOT_MOUNT", "")
+UPLOADS = os.environ.get("MPF_UPLOAD_DIR") or (os.path.join(DATA, "uploads") if READONLY else "/var/lib/mpf-uploads")
+VOLATILE_LOGS = "/var/log/mpf-game"              # the game's logs/ folder is a link to this folder in RAM
+XDG_RAM = "/run/mpf-xdg"                         # Godot's user:// (logs, shader caches) in RAM
+GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
+GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
+PLATFORM_DIR = os.environ.get("MPF_PLATFORM_DIR", "")
+GOZEN_NEEDS = os.environ.get("MPF_GOZEN_NEEDS", "v4l2m2m zero_copy").split()
+AP_SSID, AP_PSK, AP_ADDR = "MPF-Setup", os.environ.get("MPF_AP_PSK", "mpf-setup"), "192.168.4.1"
+
+
+def run(*cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def read_conf(path=None):
+    return _read_kv(path or CONF)
+
+
+@contextlib.contextmanager
+def writable(path):
+    """The mount that holds `path` is writable inside the block, then back as it was (read-only production mode: the boot
+    partition and the root only open for the few writes that cannot go to the data partition)."""
+    target = run("findmnt", "-n", "-o", "TARGET", "--target", path).stdout.strip() if READONLY else ""
+    was_ro = bool(target) and "ro" in run("findmnt", "-n", "-o", "OPTIONS", target).stdout.strip().split(",")
+    if was_ro and run("mount", "-o", "remount,rw", target).returncode:
+        raise OSError(f"cannot make {target} writable")
+    try:
+        yield
+    finally:
+        if was_ro:
+            os.sync()
+            if run("mount", "-o", "remount,ro", target).returncode:
+                print(f"{target} stays writable until the next reboot", file=sys.stderr)
+
+
 def blank_key(path, key):
     """Erase the value of one key in the text file, keeping everything else."""
     try:
-        lines = open(path, encoding="utf-8").read().splitlines()
-        lines = [f"{key}=" if re.match(rf"\s*{key}\s*=", l) else l for l in lines]
-        open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+        with writable(path):
+            lines = open(path, encoding="utf-8").read().splitlines()
+            lines = [f"{key}=" if re.match(rf"\s*{key}\s*=", l) else l for l in lines]
+            open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
     except OSError as e:
         print(f"cannot rewrite {path}: {e}", file=sys.stderr)
 
@@ -118,8 +153,34 @@ def set_ssh_password_login(on):
     run("systemctl", "reload", "ssh.service")
 
 
+def mode_status():
+    """('production' | 'maintenance', stays_after_reboot) of a read-only image; None on an ordinary one."""
+    if not READONLY:
+        return None
+    ro = "ro" in run("findmnt", "-n", "-o", "OPTIONS", "/").stdout.strip().split(",")
+    return ("production" if ro else "maintenance", os.path.exists(os.path.join(DATA, "mpf", "maintenance")))
+
+
+def set_mode(mode, stay=False):
+    if not READONLY:
+        raise ValueError("this image is not in read-only mode")
+    if mode not in ("maintenance", "production"):
+        raise ValueError("mode: maintenance or production")
+    r = run("mpf-mode", mode, *(["--stay"] if stay and mode == "maintenance" else []))
+    if r.returncode:
+        raise ValueError((r.stderr or r.stdout).strip() or f"mpf-mode {mode} failed")
+
+
 def apply_file():
     c = read_conf()
+    # MODE=maintenance|production: the way back to a writable system when the page cannot be reached (the file is on the
+    # FAT boot partition, editable from any computer). Used once: the key is emptied again.
+    if READONLY and c.get("MODE", "").lower() in ("maintenance", "production"):
+        try:
+            set_mode(c["MODE"].lower(), stay=True)
+        except ValueError as e:
+            print("MODE ignored:", e, file=sys.stderr)
+        blank_key(CONF, "MODE")
     if c.get("SSH_AUTHORIZED_KEY"):
         try:
             add_ssh_key(c["SSH_AUTHORIZED_KEY"])
@@ -268,7 +329,7 @@ def first_run_defaults(game):
     want = [x for x in (("pup.enabled", pup),) if x[0] not in have]
     if want:
         job_log(tool(game, "set", *[v for kv in want for v in kv]).stderr)
-    run("systemctl", "enable", "mpf-game.service")
+    set_autostart(True)
 
 
 def board_profile(game, b):
@@ -369,6 +430,7 @@ def install_game(archive, expect_sha):
                 os.rename(src, dst)
         os.rename(dest, old)
     os.rename(root, dest)
+    volatile_game_dirs(dest)
     shutil.rmtree(stage, ignore_errors=True)
     shutil.rmtree(old, ignore_errors=True)
     install_platform_addons(dest, b, me)
@@ -427,6 +489,40 @@ def game_running():
     return run("systemctl", "is-active", "--quiet", "mpf-game.service").returncode == 0
 
 
+def volatile_game_dirs(game):
+    """Read-only mode: the game's logs are written all the time, so game/logs becomes a link to a folder in RAM (the rest of the
+    game folder is on the data partition and only changes when a setting, a score or an audit does)."""
+    if not READONLY:
+        return
+    pw = pwd.getpwnam(USER)
+    os.makedirs(VOLATILE_LOGS, exist_ok=True)
+    os.chown(VOLATILE_LOGS, pw.pw_uid, pw.pw_gid)
+    logs = os.path.join(game, "game", "logs")
+    if os.path.islink(logs):
+        return
+    if os.path.isdir(logs):
+        shutil.rmtree(logs, ignore_errors=True)
+    os.makedirs(os.path.dirname(logs), exist_ok=True)
+    try:
+        os.symlink(VOLATILE_LOGS, logs)
+    except FileExistsError:
+        pass
+
+
+def ram_xdg_env():
+    """Godot writes user:// and its caches under XDG_*: data and config in RAM, the (rarely written) caches on the data partition."""
+    if not READONLY:
+        return {}
+    pw = pwd.getpwnam(USER)
+    for d in (XDG_RAM, XDG_RAM + "/data", XDG_RAM + "/config"):
+        os.makedirs(d, exist_ok=True)
+        os.chown(d, pw.pw_uid, pw.pw_gid)
+    cache = os.path.join(DATA, "cache")
+    os.makedirs(cache, exist_ok=True)
+    os.chown(cache, pw.pw_uid, pw.pw_gid)
+    return {"XDG_DATA_HOME": XDG_RAM + "/data", "XDG_CONFIG_HOME": XDG_RAM + "/config", "XDG_CACHE_HOME": cache}
+
+
 def game_exec():
     """Entry of mpf-game.service: wait for the X session, drop to the game user, become start.py."""
     game = installed_game()
@@ -441,12 +537,16 @@ def game_exec():
     else:
         sys.exit("no X session after 180 s")      # the service restarts and waits again
     time.sleep(3)           # let the window manager settle
+    volatile_game_dirs(game)
+    xdg = ram_xdg_env()
     os.chdir(game)
     os.setgroups(os.getgrouplist(USER, pw.pw_gid))
     os.setgid(pw.pw_gid)
     os.setuid(pw.pw_uid)
+    # the X cookie: where /etc/profile.d/mpf-readonly.sh puts it in read-only mode, else in the home folder
+    xauth = f"/tmp/.Xauthority-{USER}" if READONLY else os.path.join(pw.pw_dir, ".Xauthority")
     child = dict(os.environ, HOME=pw.pw_dir, USER=USER, DISPLAY=env.get("DISPLAY", ":0"),
-                 XAUTHORITY=env.get("XAUTHORITY", os.path.join(pw.pw_dir, ".Xauthority")))
+                 XAUTHORITY=env.get("XAUTHORITY", xauth), **xdg)
     for k in ("GODOT", "TRON_VENV"):
         if env.get(k):
             child[k] = env[k]
@@ -469,6 +569,16 @@ def game_stop():
 
 def game_autostart():
     return run("systemctl", "is-enabled", "--quiet", "mpf-game.service").returncode == 0
+
+
+def set_autostart(on):
+    """enable/disable writes a link under /etc/systemd: in read-only mode the root opens for that moment only."""
+    if on and game_autostart() or not on and not game_autostart():
+        return
+    with writable("/etc/systemd/system"):
+        r = run("systemctl", "enable" if on else "disable", "mpf-game.service")
+    if r.returncode:
+        raise ValueError((r.stderr or r.stdout).strip() or "systemctl failed")
 
 
 def settings_schema(game):
@@ -571,6 +681,7 @@ poll();
 PAGE = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>MPF setup</title><body style="font-family:sans-serif;max-width:34em;margin:1em auto;padding:0 1em">
 <h1>MPF setup</h1>%(msg)s
+%(mode)s
 %(game)s
 <h2>Wi-Fi</h2><form method=post action=/wifi>
 SSID <input name=ssid list=nets required><datalist id=nets>%(nets)s</datalist><br>
@@ -600,6 +711,29 @@ class Handler(BaseHTTPRequestHandler):
         self._send(401, "Authentication required", "text/plain", [("WWW-Authenticate", 'Basic realm="MPF setup"')])
         return False
 
+    def _mode_html(self):
+        st = mode_status()
+        if not st:
+            return ""
+        mode, stay = st
+        free = shutil.disk_usage(DATA).free / 1e9 if os.path.isdir(DATA) else 0
+        degraded = os.path.exists("/run/mpf-persist.degraded")
+        out = "<h2>Mode</h2>"
+        if degraded:
+            out += "<p><b>No data partition: settings and scores are kept in RAM and are lost at power-off.</b></p>"
+        if mode == "production":
+            out += ("<p>Production: the system is read-only (the flash is not worn); the game, its settings and scores, Wi-Fi and SSH "
+                    "are stored on the data partition (%.1f GB free). Updating the game from this page works in this mode. "
+                    "The operating system itself (packages, services) can only be changed in maintenance mode.</p>"
+                    "<form method=post action=/mode><button name=do value=maintenance>Maintenance mode until the next reboot</button> "
+                    "<button name=do value=maintenance-stay>Maintenance mode, also after reboots</button></form>" % free)
+        else:
+            out += ("<p><b>Maintenance: the system is writable%s.</b> Go back to production when you are done "
+                    "(%.1f GB free on the data partition).</p>"
+                    "<form method=post action=/mode><button name=do value=production>Back to production (read-only)</button></form>"
+                    % (", also after reboots" if stay else ", until the next reboot", free))
+        return out
+
     def _page(self, msg=""):
         nets = "".join(f"<option value='{html.escape(n, quote=True)}'>" for n in scan())
         game = installed_game()
@@ -616,7 +750,7 @@ class Handler(BaseHTTPRequestHandler):
             state, ctl = "No game installed.", ""
         g = GAME_PAGE % {"state": state, "arch": ARCH.get(platform.machine(), platform.machine()), "ctl": ctl}
         self._send(200, PAGE % {"msg": f"<p><b>{html.escape(msg)}</b></p>" if msg else "", "nets": nets,
-                                "status": html.escape(status()), "game": g})
+                                "status": html.escape(status()), "game": g, "mode": self._mode_html()})
 
     def _upload(self, kind, q):
         """One chunk of an upload, appended at `offset` (the browser sends 4 MB at a time and resumes after a cut).
@@ -701,12 +835,16 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/settings":
                 settings_save(installed_game(), form)
                 msg = "Game settings saved (restart the game to apply)."
+            elif self.path == "/mode":
+                do = form.get("do", "")
+                set_mode(do.split("-")[0], stay=do == "maintenance-stay")
+                msg = {"production": "Production mode: the system is read-only again."}.get(do, "Maintenance mode: the system is writable.")
             elif self.path == "/game":
                 do = form.get("do")
                 if do == "start":
                     game_start()
                 elif do in ("enable", "disable"):
-                    run("systemctl", do, "mpf-game.service")
+                    set_autostart(do == "enable")
                 else:
                     game_stop()
                 msg = {"start": "Game starting.", "enable": "The game now starts at power-on.",

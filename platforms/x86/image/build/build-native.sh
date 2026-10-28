@@ -18,7 +18,12 @@
 #       mpf    : MPF + Godot + GMC installed by install/install_linux.sh from this repository into
 #                /home/mpf/MPF-Godot; automatic login on tty1 and startx (needs video and x11, added when missing)
 #   KEYMAP=fr                  keyboard layout of GRUB, the console and X (xkb name; default fr = AZERTY; us for QWERTY)
-#   ROOT_PAD_MB=1024           free space left in the root filesystem of the image (grown at first boot anyway)
+#   ROOT_PAD_MB=1024           free space left in the root filesystem of the image (grown at first boot anyway; with READONLY=1 it
+#                              is only the room for a maintenance session: apt upgrade, a kernel)
+#   READONLY=1                 production mode (default): root and ESP read-only, logs in RAM, one small read/write partition
+#                              "mpfdata" (settings, scores, games, Wi-Fi, SSH keys) made at the first boot in the free space at
+#                              the end of the disk. READONLY=0: an ordinary writable image whose root grows at first boot.
+#                              common/readonly/README.md; the page on port 8080 or `sudo mpf-mode maintenance` makes it writable
 # Output: $WORK/out/x86-debian13-uefi.img.xz and .sha256
 
 set -euo pipefail
@@ -31,6 +36,8 @@ IMG_NAME="x86-debian13-uefi.img"
 MPF_PASSWORD="${MPF_PASSWORD:-mpf}"
 EXTRAS="${EXTRAS-video x11 mpf}"
 ROOT_PAD_MB="${ROOT_PAD_MB:-1024}"
+READONLY="${READONLY:-1}"
+RO_CMDLINE=""; [ "$READONLY" = 1 ] && RO_CMDLINE=" ro"
 KEYMAP="${KEYMAP:-fr}"
 ESP_MB=256
 REPO_ROOT="$(cd "$KIT/../../../.." && pwd)"
@@ -157,7 +164,7 @@ make_loader() {   # make_loader ROOT_LABEL OUTPUT
     cat > "$WORK/grub-embedded.cfg" <<CFG
 set timeout=0
 ${KEYMAP_CMDS}search --no-floppy --label $1 --set=root
-linux /vmlinuz root=LABEL=$1 rootfstype=ext4 rootwait net.ifnames=0 fsck.repair=yes quiet loglevel=3
+linux /vmlinuz root=LABEL=$1 rootfstype=ext4 rootwait net.ifnames=0 fsck.repair=yes quiet loglevel=3${RO_CMDLINE}
 initrd /initrd.img
 boot
 CFG
@@ -169,8 +176,11 @@ CFG
 make_loader rootfs "$ESP/EFI/BOOT/BOOTX64.EFI"
 make_loader mpfroot "$ESP/EFI/BOOT/mpf-disk.efi"
 
-install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
-install -m 644 "$KIT/../../../raspberrypi/image/build/files/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
+if [ "$READONLY" != 1 ]; then   # a read-only image keeps its root as built: mpf-persist makes the data partition in the free space instead
+    install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
+    install -m 644 "$KIT/../../../raspberrypi/image/build/files/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
+    in_chroot "systemctl enable resizerootfs.service >/dev/null 2>&1"
+fi
 install -m 755 "$KIT/files/mpf-install-to-disk.sh" "$R/usr/local/sbin/mpf-install-to-disk"
 install -m 755 "$KIT/files/mpf-installer.sh" "$R/usr/local/sbin/mpf-installer"
 # the stick's console menu runs without a password, nothing else does
@@ -202,7 +212,7 @@ mkdir -p "$R/etc/wpa_supplicant"
 chmod 600 "$WPA"
 mkdir -p "$R/etc/systemd/system/wpa_supplicant@wlan0.service.d"
 printf '[Service]\nExecStartPost=-/usr/sbin/iw dev wlan0 set power_save off\n' > "$R/etc/systemd/system/wpa_supplicant@wlan0.service.d/power-save-off.conf"
-in_chroot "systemctl enable resizerootfs.service systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
+in_chroot "systemctl enable systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
 in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 
 # Wi-Fi / SSH setup shared with the other images (common/netconfig): text file on the ESP (visible from Windows after
@@ -219,6 +229,11 @@ install -m 644 "$KIT/../../cabinet/mpf-game.env" "$R/etc/default/mpf-game"
 in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service mpf-game.service >/dev/null 2>&1"
 
 in_chroot "id mpf >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$MPF_PASSWORD')\" -s /bin/bash mpf"
+if [ "$READONLY" = 1 ]; then
+    . "$REPO_ROOT/common/readonly/install-readonly.sh"
+    # console-setup (the AZERTY console of the installer menu) rewrites its cache in /etc/console-setup at every boot: in RAM
+    mpf_readonly_install "$R" mpf /boot/efi "" "/etc/console-setup:2m"
+fi
 
 ##############################################################################
 log "3/6 Optional feature groups: ${EXTRAS:-none}"

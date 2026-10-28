@@ -16,6 +16,11 @@
 #       mpf    : MPF + Godot + GMC + hardware video decoder (libnvmpi), installed by install/install_linux.sh from
 #                this repository into /home/jetson/MPF-Godot; needs video and x11 (they are added when missing)
 #       x11    : Xorg with NVIDIA driver, xinit/startx, openbox window manager, xrandr, xterm, Vulkan loader
+#   READONLY=1                 production mode (default): root read-only (kernel command line "ro"), logs in RAM, one small
+#                              read/write partition "mpfdata" (settings, scores, games, Wi-Fi, SSH keys, Docker) made at the
+#                              first boot in the free space after the root partition. READONLY=0: an ordinary writable image whose
+#                              root grows at first boot. common/readonly/README.md; the page on port 8080 or `sudo mpf-mode
+#                              maintenance` makes it writable. NOT YET RUN ON A BOARD.
 # Output: $WORK/out/jetson-xavier-nx-l4t35.6.4-sd.img.xz and .sha256
 
 set -euo pipefail
@@ -28,6 +33,7 @@ BOARD="jetson-xavier-nx-devkit"   # flash config name for the Xavier NX devkit (
 SOC="t194"
 IMG_NAME="jetson-xavier-nx-l4t35.6.4-sd.img"
 JETSON_PASSWORD="${JETSON_PASSWORD:-jetson}"
+READONLY="${READONLY:-1}"
 EXTRAS="${EXTRAS-video docker x11 mpf}"
 REPO_ROOT="$(cd "$KIT/../../../.." && pwd)"   # this clone, copied into the image by the mpf group
 
@@ -157,8 +163,10 @@ curl -fsSL https://github.com/pythops/tegratop/releases/latest/download/tegratop
     && chmod +x "$R/usr/local/bin/tegratop" || echo "warning: tegratop download failed, skipping"
 
 # Grow the root partition to fill the SD card on boot
-install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
-install -m 644 "$KIT/files/resizerootfs.service" "$R/lib/systemd/system/resizerootfs.service"
+if [ "$READONLY" != 1 ]; then   # a read-only image keeps its root as built: mpf-persist makes the data partition in the free space instead
+    install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
+    install -m 644 "$KIT/files/resizerootfs.service" "$R/lib/systemd/system/resizerootfs.service"
+fi
 
 # Hostname, locale
 echo jetson > "$R/etc/hostname"
@@ -187,7 +195,8 @@ mkdir -p "$R/etc/wpa_supplicant"
 } > "$WPA"
 chmod 600 "$WPA"
 
-in_chroot "systemctl enable resizerootfs.service systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
+[ "$READONLY" != 1 ] && in_chroot "systemctl enable resizerootfs.service >/dev/null 2>&1"
+in_chroot "systemctl enable systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
 # The generic D-Bus wpa_supplicant.service is not needed (wpa_supplicant@wlan0 runs it directly)
 in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 
@@ -345,6 +354,22 @@ PROF
     in_chroot "apt-get clean"
     rm -rf "$R"/var/lib/apt/lists/* "$R"/home/jetson/.cache/uv 2>/dev/null || true
     umount_chroot
+fi
+
+# Read-only production mode (common/readonly): everything above is installed, now the root is closed. Docker's and containerd's
+# images, NVIDIA's power-model state and the network file are the writes of this board that must survive a reboot.
+if [ "$READONLY" = 1 ]; then
+    mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"   # where the page installs a game bundle (the data partition is bound here)
+    . "$REPO_ROOT/common/readonly/install-readonly.sh"
+    mpf_readonly_install "$R" jetson "" "docker:/var/lib/docker containerd:/var/lib/containerd nvpmodel:/var/lib/nvpmodel net:/etc/mpf-network.txt"
+    # the kernel command line comes from NVIDIA's extlinux.conf (the template flash.sh copies, and the rootfs copy when there is one):
+    # "rw" becomes "ro"
+    ro_done=0
+    for f in "$L4T/bootloader/extlinux.conf" "$R/boot/extlinux/extlinux.conf"; do
+        [ -f "$f" ] || continue
+        if grep -qE '^\s*APPEND .*\brw\b' "$f"; then sed -i -E '/^\s*APPEND /s/\brw\b/ro/' "$f"; ro_done=1; fi
+    done
+    [ "$ro_done" = 1 ] || echo "WARNING: no 'rw' found in an extlinux.conf APPEND line: add ro to the kernel command line by hand (cat /proc/cmdline on the board)"
 fi
 
 # Unique SSH host keys per card: drop the build-time keys, regenerate on first boot
