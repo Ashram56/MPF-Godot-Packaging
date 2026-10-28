@@ -7,7 +7,7 @@
 | Kind | packaging |
 | Affected versions | MPF 0.80.1 (`mpf/platforms/pinproc/windows/pinproc.cp38..cp314-*.pyd`); and later until fixed upstream |
 | Platforms | Windows x86_64 and x86; Windows on ARM (no build at all) |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-03 |
+| Found on | a Stern SAM recreation, 2026-10-03 |
 | Fact | code (the import table of `pinproc.cp311-win_amd64.pyd`); not run on a Windows PC with a board |
 | Our fix | [`install/install_windows.ps1`](../../install/install_windows.ps1) `-Proc`: installs the Visual C++ 2015-2022 runtime (winget `Microsoft.VCRedist.2015+.<arch>`, else Microsoft's installer), checks for `ftd2xx.dll`, warns on ARM |
 | Applied by | `install/install_windows.ps1 -Proc` (the D2XX driver stays a manual step: FTDI's download page) |

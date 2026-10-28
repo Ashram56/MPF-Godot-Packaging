@@ -44,6 +44,15 @@ rsync -aHAX --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/
     --exclude='/mnt/*' --exclude='/media/*' --exclude='/boot/efi/*' --exclude='/lost+found' --exclude='/data/*' "$SRC/" "$T/"
 umount "$SRC"; rmdir "$SRC"
 rsync -rt /boot/efi/ "$T/boot/efi/"        # bootloaders, mpf-network.txt
+if [ "$READONLY" = 1 ] && [ -d /data ]; then
+    # Games put on the stick (common/games/inject_image.py, or installed from the page): bundles still in the inbox and the installed
+    # games go along; they are installed or seen by the first boot of the disk.
+    D="$(mktemp -d)"; mount "$(p 3)" "$D"
+    if [ -d /data/inbox ]; then mkdir -p "$D/inbox"; rsync -a /data/inbox/ "$D/inbox/"; fi
+    if [ -d /data/persist/games ]; then mkdir -p "$D/persist/games"; rsync -a /data/persist/games/ "$D/persist/games/"; fi
+    [ -d /data/mpf ] && { mkdir -p "$D/mpf"; rsync -a --exclude='maintenance' /data/mpf/ "$D/mpf/"; }
+    sync; umount "$D"; rmdir "$D"
+fi
 mkdir -p "$T"/{proc,sys,dev,run,tmp,mnt,media}; chmod 1777 "$T/tmp"
 # the copy boots from its own label (its loader is mpf-disk.efi, which looks for mpfroot), and grows its root partition
 sed -i -e 's/^LABEL=rootfs /LABEL=mpfroot /' -e 's/^LABEL=firmware /LABEL=mpfesp /' "$T/etc/fstab"

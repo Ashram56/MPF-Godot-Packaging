@@ -4,9 +4,9 @@
 > repository). Method for the display itself: Stern-SAM-Decryption `agents/improvement.md`, section 2a.
 A Jetson Xavier NX cabinet (4 cores at 1.9 GHz, CPU and GPU sharing 6.8 GB) runs the DMD, three PuP videos and the
 light cycles in one Godot process: every window freezes together when Godot's main thread stalls. Measured on
-Tron (full game, 2026-10-12); method and figures in [agents/improvement.md](https://github.com/Ashram56/Stern-SAM-Decryption/blob/main/agents/improvement.md) section 2a.
+A full game (2026-10-12); method and figures in [agents/improvement.md](https://github.com/Ashram56/Stern-SAM-Decryption/blob/main/agents/improvement.md) section 2a.
 
-| Practice | Why (Tron's measurement) |
+| Practice | Why (measured on a full game) |
 |---|---|
 | Measure before guessing: frame times from a probe, MPF's log, and per-slide timing (`node_added` / `ready` / next frame / `frame_post_draw`) against a baseline frame | 67 of 68 hitches were slide shows; the guessed causes (light cycles, videos, power mode) were not |
 | Never block the main thread on a worker (`wait_for_task_completion`, a `load()` of something still loading); hand the object to the worker or poll `is_task_completed()` | A video switch waiting for a loop restart froze every screen 0.3-0.6 s |
@@ -17,11 +17,11 @@ Tron (full game, 2026-10-12); method and figures in [agents/improvement.md](http
 | Text: shape once (`TextLine`) and draw it; avoid a `Label` plus helper nodes per line | Fewer nodes per slide, no Label layout per update |
 | A separate process per screen group (game + DMD; PuP videos) isolates freezes but costs a second Vulkan context and 300-500 MB; fix the stalls at their source first | - |
 | Power mode: per-core clock beats core count on the main thread (Xavier NX mode 5, 4 x 1.91 GHz, over mode 8, 6 x 1.42 GHz) | Mode 8: same FPS, more hitches |
-| Memory: budget the whole board (OS + MPF + Godot + video memory, shared on a Jetson) and soak-test a full hour | Tron: Godot 1.46 GB at start, about 2.0 GB after the first game, then flat for 6 games (2.02 GB peak); board 3.7 GB peak. Owner's target: under 4 GB where it costs no stutter |
+| Memory: budget the whole board (OS + MPF + Godot + video memory, shared on a Jetson) and soak-test a full hour | Godot 1.46 GB at start, about 2.0 GB after the first game, then flat for 6 games (2.02 GB peak); board 3.7 GB peak. Owner's target: under 4 GB where it costs no stutter |
 
-## A display drawn from data (Tron, 2026-10-12)
+## A display drawn from data (2026-10-12)
 
- Tron's display effects went from node scenes to data in two steps,
+ A game's display effects went from node scenes to data in two steps,
 each switchable for A/B runs; what worked:
 
 - **Pool the slides first** (cheap, safe): override `MPFSlide.remove()` to park the slide out of the tree instead of
@@ -37,11 +37,11 @@ each switchable for A/B runs; what worked:
   no render when nothing changed: on x86 software rendering the median frame fell from 29.9 to 5.8 ms; on the Xavier
   NX (full game, mode 5) frames over 2 vblanks fell from 139 to 14, over 100 ms from 6 to 1, GPU 60% to 43%, 8.8 to 7.2 W.
 - **Keep the content open**: the data names pictures by path (HD twins swap in by path), and a hand-made scene
-  at a known path (Tron: `game/dmd_custom/<deff>.tscn`) replaces an effect's data, so videos or redrawn effects
+  at a known path (for example `game/dmd_custom/<effect>.tscn`) replaces an effect's data, so videos or redrawn effects
   need no code change. Keep the node scenes generated as the reference: a test renders every effect both ways and
-  compares (Tron: all 145 classic effects dot for dot).
+  compares (all 145 classic effects of one game, dot for dot).
 - **Memory comes with it**: preload only the pictures the data names (in HD, not the classic ones as well) and point
-  identical frames of different effects at one file (Tron: 417 of 4123 frame entries). Godot resident 980 to 890 MB,
+  identical frames of different effects at one file (417 of 4123 frame entries in one game). Godot resident 980 to 890 MB,
   video memory 710 to 609 MB, effects preload 9.5 to 5.3 s on x86; on the Xavier NX video memory 627 to 545 MB,
   board peak 3.61 to 3.50 GB.
 - Godot traps met: JSON numbers load as floats (`&` on them fails; convert whole numbers back to `int`); a

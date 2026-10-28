@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | jetson-ffmpeg at `8d70c17efeee57f4d956df500fec78a73f8c27d4` (v3.10.0), libnvmpi; later revisions not checked |
 | Platforms | Jetson AGX Orin, L4T R36.4.3 (JetPack 6.2): crashes; Jetson Xavier NX, L4T R35.6.4 (JetPack 5.1.4): not seen in 100 runs |
-| Found on | Tron Legacy MPF, 2026-10-05 (Tron-Legacy-MPF commit f269df7); JetPack 5 checked 2026-10-09 |
+| Found on | a Stern SAM recreation, 2026-10-05; JetPack 5 checked 2026-10-09 |
 | Fact | observed (9 of 100 repro runs crashed on the Orin, 0 with the patch); cause inferred from where it crashes |
 | Our fix | [`../../build/gozen/nvmpi_flush.patch`](../../build/gozen/nvmpi_flush.patch), `src/` part (`nvmpi_decoder_close()`, `deinitDecoderCapturePlane()`, the capture loop's frame drop while `closing`) |
 | Applied by | [`../../platforms/jetson/install_jetson_hwdec.sh`](../../platforms/jetson/install_jetson_hwdec.sh); checked by [`../../platforms/jetson/jetson_selftest.sh`](../../platforms/jetson/jetson_selftest.sh) |

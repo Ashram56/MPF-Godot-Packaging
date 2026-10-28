@@ -7,9 +7,9 @@
 | Kind | bug |
 | Affected versions | Godot 4.6.3-stable and 4.5.2-stable (test project on both); later versions not checked |
 | Platforms | all (MSDF generation is CPU work); measured on Linux arm64 (Jetson Xavier NX, nvpmodel mode 5) and Linux x86_64 |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF PR #35, commit 15ca54a) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (timings); code for the cause (glyphs rendered on first use by the drawing thread) |
-| Our fix | fonts baked at setup (a game-side script, e.g. Tron-Legacy-MPF `game/tools/bake_fonts.gd`); test project [`../repro/godot_msdf_main_thread.zip`](../repro/godot_msdf_main_thread.zip) |
+| Our fix | fonts baked at setup (a game-side script); test project [`../repro/godot_msdf_main_thread.zip`](../repro/godot_msdf_main_thread.zip) |
 | Applied by | the game's setup step (a headless Godot script run once after install) |
 | Upstream | Godot, https://github.com/godotengine/godot/issues; status: **draft, not filed** |
 

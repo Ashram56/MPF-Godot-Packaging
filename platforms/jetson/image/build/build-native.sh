@@ -210,12 +210,12 @@ printf 'if [ -d "/usr/local/cuda/bin" ] ; then\n  PATH="/usr/local/cuda/bin:$PAT
 in_chroot "apt-get install -y -qq python3 hostapd dnsmasq-base"
 in_chroot "systemctl disable hostapd >/dev/null 2>&1 || true; systemctl mask hostapd >/dev/null 2>&1 || true"
 NC="$KIT/../../../../common/netconfig"
-install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
+install -m 755 "$NC"/mpf_*.py "$R/usr/local/bin/"
 install -m 644 "$NC"/mpf-netconfig-*.service "$R/etc/systemd/system/"
 install -m 600 "$NC/mpf-network.txt.template" "$R/etc/mpf-network.txt"
 printf 'MPF_NETCONFIG_FILE=/etc/mpf-network.txt\nMPF_USER=jetson\nMPF_WLAN=wlan0\n' > "$R/etc/default/mpf-netconfig"
 [ -n "${WIFI_SSID:-}" ] && printf 'WIFI_SSID=%s\nWIFI_PSK=%s\nWIFI_COUNTRY=%s\n' "$WIFI_SSID" "${WIFI_PSK:-}" "${WIFI_COUNTRY:-}" > "$R/etc/mpf-network.txt"
-in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service >/dev/null 2>&1"
+in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service mpf-netconfig-inbox.service >/dev/null 2>&1"
 
 in_chroot "apt-get clean"
 rm -rf "$R"/var/lib/apt/lists/* "$R"/root/.bash_history

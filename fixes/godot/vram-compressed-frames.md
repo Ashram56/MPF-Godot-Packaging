@@ -7,10 +7,10 @@
 | Kind | improvement |
 | Affected versions | Godot 4.6.3-stable (measured) |
 | Platforms | all (an import setting); measured on Jetson Xavier NX, L4T R35.6.4 (ETC2 on ARM; S3TC/BPTC on PCs) |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit 90e663a) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (clip suite, Xavier NX nvpmodel mode 5) |
 | Our fix | each animation frame imported with `compress/mode=2` (VRAM compressed) in its `.import` file |
-| Applied by | the game's media generator or import presets (Tron-Legacy-MPF: `scripts/gen_media.py` writes the `.import` files) |
+| Applied by | the game's media generator or import presets (for example a `gen_media.py` that writes the `.import` files) |
 | Upstream | Godot, https://github.com/godotengine/godot/issues; status: none needed (a project setting) |
 
 ## Problem

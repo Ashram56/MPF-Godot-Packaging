@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Network setup for the MPF images: Wi-Fi, SSH keys and a tiny web page, standard library only.
+"""Network setup for the MPF images: Wi-Fi, SSH keys, the access point; the setup page and the games are in mpf_web / mpf_games.
 
   mpf_netconfig.py apply   read the text file, configure Wi-Fi/SSH, erase the Wi-Fi password from the file
   mpf_netconfig.py web     serve the setup page on port 8080 (HTTP basic auth)
-  mpf_netconfig.py game    run the installed game (mpf-game.service: waits for X, runs start.py as MPF_USER)
+  mpf_netconfig.py game    run the active game (mpf-game.service: waits for X, runs the bundle's start command as MPF_USER)
+  mpf_netconfig.py inbox   install the bundles and PuP Packs found in the inbox folder (mpf-netconfig-inbox.service, at boot)
   mpf_netconfig.py ap      if there is no network after a delay, start the "MPF-Setup" access point
 
-Settings (environment, defaults for the Raspberry Pi image):
+The three modules are installed together in /usr/local/bin. Settings (environment, defaults for the Raspberry Pi image):
   MPF_NETCONFIG_FILE  /boot/firmware/mpf-network.txt
-  MPF_USER            pi      user whose authorized_keys is edited and whose password protects the page
+  MPF_USER            pi      user whose authorized_keys is edited, whose password protects the page and who runs the game
   MPF_WLAN            wlan0
   MPF_WEB_PORT        8080
-  MPF_GAMES_DIR       /opt/games          where an uploaded game bundle is installed (<dir>/<bundle id>)
+  MPF_GAMES_DIR       /opt/games          where uploaded game bundles are installed (<dir>/<id>@<version>)
   MPF_UPLOAD_DIR      /var/lib/mpf-uploads  uploads are written here, then unpacked
-  MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, TRON_VENV, DISPLAY, MPF_GAME_ARGS)
+  MPF_INBOX_DIR       /var/lib/mpf-inbox  bundles (*.tar.xz) and packs (*.zip) put here are installed at the next boot
+  MPF_STATE_DIR       /var/lib/mpf-netconfig  which game is active
+  MPF_GAME_ENV        /etc/default/mpf-game  KEY=VALUE lines for the game (GODOT, MPF_GAME_VENV, DISPLAY, MPF_GAME_ARGS)
   MPF_GOZEN_SO        a GoZen library built for this board, copied over the bundle's own (optional; not when
                       the bundle's build already has MPF_GOZEN_NEEDS, bundle.json "gozen")
   MPF_PLATFORM_DIR    this platform's checkout (its addons/gde_gozen is installed into a bundle that lists
@@ -25,76 +28,28 @@ Settings (environment, defaults for the Raspberry Pi image):
                       writable windows. MODE=maintenance|production in the text file switches it at boot.
 Must run as root.
 """
-import contextlib, hashlib, html, json, os, platform, pwd, re, subprocess, sys, threading, time, base64, shutil
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote as requests_unquote
+import base64
+import hashlib
+import os
+import pwd
+import re
+import subprocess
+import sys
+import time
 
-CONF = os.environ.get("MPF_NETCONFIG_FILE", "/boot/firmware/mpf-network.txt")
-USER = os.environ.get("MPF_USER", "pi")
-WLAN = os.environ.get("MPF_WLAN", "wlan0")
-PORT = int(os.environ.get("MPF_WEB_PORT", "8080"))
-WPA = f"/etc/wpa_supplicant/wpa_supplicant-{WLAN}.conf"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mpf_common as C  # noqa: E402
+from mpf_common import run, read_conf, set_mode, mode_status  # noqa: E402,F401
+
+WPA = f"/etc/wpa_supplicant/wpa_supplicant-{C.WLAN}.conf"
 SSHD_DROPIN = "/etc/ssh/sshd_config.d/10-mpf-netconfig.conf"
-GAMES = os.environ.get("MPF_GAMES_DIR", "/opt/games")
-RO_CONF = os.environ.get("MPF_READONLY_CONF", "/etc/mpf-readonly.conf")
-
-
-def _read_kv(path):
-    out = {}
-    try:
-        for line in open(path, encoding="utf-8", errors="replace"):
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                out[k.strip()] = v.strip().strip('"')
-    except OSError:
-        pass
-    return out
-
-
-RO = _read_kv(RO_CONF)
-READONLY = bool(RO)                              # the image runs in read-only production mode
-DATA = RO.get("MPF_DATA_MOUNT", "/data")         # its one read/write partition
-BOOT_MOUNT = RO.get("MPF_BOOT_MOUNT", "")
-UPLOADS = os.environ.get("MPF_UPLOAD_DIR") or (os.path.join(DATA, "uploads") if READONLY else "/var/lib/mpf-uploads")
-VOLATILE_LOGS = "/var/log/mpf-game"              # the game's logs/ folder is a link to this folder in RAM
-XDG_RAM = "/run/mpf-xdg"                         # Godot's user:// (logs, shader caches) in RAM
-GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
-GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
-PLATFORM_DIR = os.environ.get("MPF_PLATFORM_DIR", "")
-GOZEN_NEEDS = os.environ.get("MPF_GOZEN_NEEDS", "v4l2m2m zero_copy").split()
 AP_SSID, AP_PSK, AP_ADDR = "MPF-Setup", os.environ.get("MPF_AP_PSK", "mpf-setup"), "192.168.4.1"
-
-
-def run(*cmd, **kw):
-    return subprocess.run(cmd, capture_output=True, text=True, **kw)
-
-
-def read_conf(path=None):
-    return _read_kv(path or CONF)
-
-
-@contextlib.contextmanager
-def writable(path):
-    """The mount that holds `path` is writable inside the block, then back as it was (read-only production mode: the boot
-    partition and the root only open for the few writes that cannot go to the data partition)."""
-    target = run("findmnt", "-n", "-o", "TARGET", "--target", path).stdout.strip() if READONLY else ""
-    was_ro = bool(target) and "ro" in run("findmnt", "-n", "-o", "OPTIONS", target).stdout.strip().split(",")
-    if was_ro and run("mount", "-o", "remount,rw", target).returncode:
-        raise OSError(f"cannot make {target} writable")
-    try:
-        yield
-    finally:
-        if was_ro:
-            os.sync()
-            if run("mount", "-o", "remount,ro", target).returncode:
-                print(f"{target} stays writable until the next reboot", file=sys.stderr)
 
 
 def blank_key(path, key):
     """Erase the value of one key in the text file, keeping everything else."""
     try:
-        with writable(path):
+        with C.writable(path):
             lines = open(path, encoding="utf-8").read().splitlines()
             lines = [f"{key}=" if re.match(rf"\s*{key}\s*=", l) else l for l in lines]
             open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
@@ -129,13 +84,13 @@ def add_wifi(ssid, passphrase, country=""):
     open(WPA, "w").write(text)
     os.chmod(WPA, 0o600)
     wifi_up()
-    run("systemctl", "restart", f"wpa_supplicant@{WLAN}.service")
+    run("systemctl", "restart", f"wpa_supplicant@{C.WLAN}.service")
 
 
 def add_ssh_key(key):
     if not re.match(r"^(ssh-(ed25519|rsa)|ecdsa-sha2-\S+|sk-\S+) \S+( .*)?$", key) or "\n" in key:
         raise ValueError("not a valid single-line SSH public key")
-    pw = pwd.getpwnam(USER)
+    pw = pwd.getpwnam(C.USER)
     d = os.path.join(pw.pw_dir, ".ssh")
     os.makedirs(d, mode=0o700, exist_ok=True)
     f = os.path.join(d, "authorized_keys")
@@ -153,34 +108,16 @@ def set_ssh_password_login(on):
     run("systemctl", "reload", "ssh.service")
 
 
-def mode_status():
-    """('production' | 'maintenance', stays_after_reboot) of a read-only image; None on an ordinary one."""
-    if not READONLY:
-        return None
-    ro = "ro" in run("findmnt", "-n", "-o", "OPTIONS", "/").stdout.strip().split(",")
-    return ("production" if ro else "maintenance", os.path.exists(os.path.join(DATA, "mpf", "maintenance")))
-
-
-def set_mode(mode, stay=False):
-    if not READONLY:
-        raise ValueError("this image is not in read-only mode")
-    if mode not in ("maintenance", "production"):
-        raise ValueError("mode: maintenance or production")
-    r = run("mpf-mode", mode, *(["--stay"] if stay and mode == "maintenance" else []))
-    if r.returncode:
-        raise ValueError((r.stderr or r.stdout).strip() or f"mpf-mode {mode} failed")
-
-
 def apply_file():
     c = read_conf()
     # MODE=maintenance|production: the way back to a writable system when the page cannot be reached (the file is on the
     # FAT boot partition, editable from any computer). Used once: the key is emptied again.
-    if READONLY and c.get("MODE", "").lower() in ("maintenance", "production"):
+    if C.READONLY and c.get("MODE", "").lower() in ("maintenance", "production"):
         try:
             set_mode(c["MODE"].lower(), stay=True)
         except ValueError as e:
             print("MODE ignored:", e, file=sys.stderr)
-        blank_key(CONF, "MODE")
+        blank_key(C.CONF, "MODE")
     if c.get("SSH_AUTHORIZED_KEY"):
         try:
             add_ssh_key(c["SSH_AUTHORIZED_KEY"])
@@ -191,7 +128,7 @@ def apply_file():
     if c.get("WIFI_SSID"):
         try:
             add_wifi(c["WIFI_SSID"], c.get("WIFI_PSK", ""), c.get("WIFI_COUNTRY", ""))
-            blank_key(CONF, "WIFI_PSK")
+            blank_key(C.CONF, "WIFI_PSK")
         except ValueError as e:
             print("Wi-Fi settings ignored:", e, file=sys.stderr)
     elif c.get("WIFI_COUNTRY"):
@@ -207,7 +144,7 @@ def check_user_password(password):
     try:
         for line in open("/etc/shadow"):
             f = line.split(":")
-            if f[0] == USER and f[1].startswith("$"):
+            if f[0] == C.USER and f[1].startswith("$"):
                 _, algo, salt, _h = f[1].split("$", 3)
                 flag = {"6": "-6", "5": "-5", "1": "-1"}.get(algo)
                 if not flag:
@@ -233,630 +170,42 @@ def authorized(header):
 def wifi_up():
     """Make the radio usable even when the board is on Ethernet (the Pi keeps Wi-Fi blocked until a country is set)."""
     run("rfkill", "unblock", "wifi")
-    run("ip", "link", "set", WLAN, "up")
+    run("ip", "link", "set", C.WLAN, "up")
 
 
 def scan():
+    """[{ssid, signal (dBm), secure}] of the networks in range, strongest first, one entry per name."""
     wifi_up()
-    r = run("iw", "dev", WLAN, "scan")
-    names = sorted({m for m in re.findall(r"SSID: (.+)", r.stdout) if m.strip()})
-    return names
+    out = run("iw", "dev", C.WLAN, "scan").stdout
+    nets = {}
+    for block in re.split(r"(?m)^BSS ", out)[1:]:
+        m = re.search(r"SSID: (.+)", block)
+        if not m or not m.group(1).strip() or "\\x00" in m.group(1):
+            continue
+        sig = re.search(r"signal: (-?[\d.]+)", block)
+        sec = bool(re.search(r"RSN:|WPA:", block)) or "Privacy" in block
+        n = {"ssid": m.group(1).strip(), "signal": float(sig.group(1)) if sig else -100.0, "secure": sec}
+        if n["ssid"] not in nets or n["signal"] > nets[n["ssid"]]["signal"]:
+            nets[n["ssid"]] = n
+    return sorted(nets.values(), key=lambda n: -n["signal"])
 
 
 def status():
-    return run("ip", "-br", "addr").stdout + "\n" + run("iw", "dev", WLAN, "link").stdout
-
-
-# ---------------------------------------------------------------- game bundle and PuP Pack (docs/bundle.md of the game)
-JOB = {"state": "idle", "msg": "", "log": ""}      # one install at a time; the page polls /job
-JOB_LOCK = threading.Lock()
-ARCH = {"aarch64": "arm64", "arm64": "arm64", "x86_64": "x86_64", "amd64": "x86_64"}
-
-
-class JobError(Exception):
-    pass
-
-
-def job_set(**kw):
-    JOB.update(kw)
-
-
-def job_log(text):
-    JOB["log"] = (JOB["log"] + text.rstrip("\n") + "\n")[-6000:]
-
-
-def sh(*cmd, cwd=None, user=False):
-    """Run a command for the job, log its output, fail the job when it fails."""
-    if user:
-        cmd = ("runuser", "-u", USER, "--") + cmd
-    job_log("$ " + " ".join(cmd))
-    r = run(*cmd, cwd=cwd)
-    job_log((r.stdout + r.stderr)[-2000:])
-    if r.returncode:
-        raise JobError(f"{cmd[0]} failed ({r.returncode})")
-    return r
-
-
-def game_env():
-    out = {}
-    try:
-        for line in open(GAME_ENV, encoding="utf-8"):
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                out[k.strip()] = v.strip().strip('"')
-    except OSError:
-        pass
-    return out
-
-
-def installed_game():
-    """Folder of the installed bundle, or None (the first folder of GAMES that holds a bundle.json)."""
-    try:
-        for n in sorted(os.listdir(GAMES)):
-            if not n.startswith(".") and os.path.isfile(os.path.join(GAMES, n, "bundle.json")):
-                return os.path.join(GAMES, n)
-    except OSError:
-        pass
-    return None
-
-
-def game_python():
-    venv = game_env().get("TRON_VENV")
-    py = os.path.join(venv, "bin", "python") if venv else ""
-    return py if py and os.path.exists(py) else "python3"
-
-
-def tool(game, *args):
-    """Run the bundle's own settings tool as the game user; returns the CompletedProcess."""
-    return run("runuser", "-u", USER, "--", game_python(), os.path.join(game, "scripts/package/bundle_options.py"), *args, cwd=game)
-
-
-def free_gb(path):
-    os.makedirs(path, exist_ok=True)
-    return shutil.disk_usage(path).free / 1e9
-
-
-def first_run_defaults(game):
-    """No PuP until a pack is installed, and start at power-on: only for what nobody set yet."""
-    try:
-        have = json.loads(tool(game, "get").stdout or "{}")
-    except ValueError:
-        have = {}
-    # no dmd.mode here: the DMD look is a matter of the board (the Raspberry Pi 4 cannot draw the HD one), so it comes from
-    # the bundle's board profile (board_profile below); a board without a profile keeps the bundle's default
-    pup = "true" if os.path.isdir(os.path.join(game, "pup_pack/trn_174h")) else "false"
-    want = [x for x in (("pup.enabled", pup),) if x[0] not in have]
-    if want:
-        job_log(tool(game, "set", *[v for kv in want for v in kv]).stderr)
-    set_autostart(True)
-
-
-def board_profile(game, b):
-    """The bundle's settings for this board (bundle.json "profiles", picked from the device tree by the bundle's own
-    tool): applied once, only to what nobody set; the tool's lines go to the job log."""
-    cmd = b.get("profiles", {}).get("apply")
-    if not cmd:
-        return
-    args = cmd.split()
-    if args[0] == "python3":
-        args[0] = game_python()
-    r = run("runuser", "-u", USER, "--", *args, cwd=game)
-    job_log((r.stdout + r.stderr).strip() or "board profile: nothing to apply")
-
-
-def platform_addon(name):
-    """The platform's own copy of a binary add-on (addons/<name>), or None."""
-    cands = [PLATFORM_DIR, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
-    if GOZEN_SO:
-        cands.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(GOZEN_SO)))))
-    for c in cands:
-        if c and os.path.isfile(os.path.join(c, "addons", name, "gozen.gdextension" if name == "gde_gozen" else "plugin.cfg")):
-            return os.path.join(c, "addons", name)
-    return None
-
-
-def install_platform_addons(dest, b, me):
-    """Binary add-ons come from the platform, never from the game bundle: the same build for every game. Only
-    this machine's binaries are copied."""
-    for name in b.get("platform_addons", []):
-        src = platform_addon(name)
-        if not src:
-            raise JobError(f"the bundle needs the platform's {name} and this system has none (set MPF_PLATFORM_DIR)")
-        dst = os.path.join(dest, "game", "addons", name)
-        shutil.rmtree(dst, ignore_errors=True)
-        for base, _dirs, files in os.walk(src):
-            for f in files:
-                if os.path.relpath(base, src).startswith("bin") and f.startswith("libgozen") and \
-                        not re.match(r"libgozen\.linux\..*\.%s\.so$" % ("arm64" if me == "arm64" else "x86_64"), f):
-                    continue
-                if os.path.relpath(base, src).startswith("bin") and f.endswith(".dll"):
-                    continue
-                t = os.path.join(dst, os.path.relpath(os.path.join(base, f), src))
-                os.makedirs(os.path.dirname(t), exist_ok=True)
-                shutil.copy2(os.path.join(base, f), t)
-        # Godot loads an add-on's native extension only if .godot/extension_list.cfg names it (the editor writes that file;
-        # a bundle exported without the add-on's binaries does not have it)
-        lst = os.path.join(dest, "game", ".godot", "extension_list.cfg")
-        for f in sorted(os.listdir(dst)):
-            if f.endswith(".gdextension"):
-                line = f"res://addons/{name}/{f}"
-                have = open(lst).read().split() if os.path.isfile(lst) else []
-                if line not in have:
-                    os.makedirs(os.path.dirname(lst), exist_ok=True)
-                    with open(lst, "a") as fh:
-                        fh.write(line + "\n")
-        job_log(f"{name}: the platform's build ({src}) installed for {me}")
-
-
-def install_game(archive, expect_sha):
-    job_set(state="running", msg="Checking the archive")
-    h = hashlib.sha256()
-    with open(archive, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    if expect_sha and h.hexdigest() != expect_sha.lower():
-        raise JobError("the archive's sha256 does not match the .sha256 file: upload it again")
-    os.makedirs(GAMES, exist_ok=True)
-    stage = os.path.join(GAMES, ".stage")
-    shutil.rmtree(stage, ignore_errors=True)
-    os.makedirs(stage)
-    job_set(msg="Unpacking (a few minutes)")
-    sh("tar", "-xJf", archive, "-C", stage, "--no-same-owner")
-    dirs = [d for d in os.listdir(stage) if os.path.isdir(os.path.join(stage, d))]
-    if len(dirs) != 1 or not os.path.isfile(os.path.join(stage, dirs[0], "bundle.json")):
-        raise JobError("not a game bundle: no bundle.json in the archive")
-    root = os.path.join(stage, dirs[0])
-    b = json.load(open(os.path.join(root, "bundle.json")))
-    if b.get("format", 1) > 1:
-        raise JobError(f"bundle format {b.get('format')} is newer than this page understands")
-    tgt, me = b.get("target", {}), ARCH.get(platform.machine(), platform.machine())
-    # "arm64+x86_64": a bundle for several architectures (both texture formats, every native add-on)
-    if tgt.get("os", "linux") != "linux" or me not in str(tgt.get("arch")).split("+"):
-        raise JobError(f"this bundle is for {tgt.get('os')}/{tgt.get('arch')}, this machine is linux/{me}")
-    job_log(f"bundle {b.get('name')} {b.get('version')}")
-    job_set(msg="Verifying every file (sha256sum)")
-    sh("sha256sum", "-c", "SHA256SUMS", "--quiet", cwd=root)
-    dest = os.path.join(GAMES, b["id"])
-    old = dest + ".old"
-    shutil.rmtree(old, ignore_errors=True)
-    if os.path.isdir(dest):
-        job_set(msg="Keeping settings, scores and PuP Pack")
-        for rel in b.get("keep_on_update", []):
-            src, dst = os.path.join(dest, rel), os.path.join(root, rel)
-            if os.path.exists(src):
-                shutil.rmtree(dst, ignore_errors=True) if os.path.isdir(dst) else None
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                os.rename(src, dst)
-        os.rename(dest, old)
-    os.rename(root, dest)
-    volatile_game_dirs(dest)
-    shutil.rmtree(stage, ignore_errors=True)
-    shutil.rmtree(old, ignore_errors=True)
-    install_platform_addons(dest, b, me)
-    if GOZEN_SO and os.path.isfile(GOZEN_SO):
-        bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
-        for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
-            if n in b.get("gozen", {}) and all(f in b["gozen"][n] for f in GOZEN_NEEDS):
-                job_log(f"{n}: the bundle's own build has {' '.join(GOZEN_NEEDS)}, kept")
-            elif re.match(r"libgozen\.linux\..*%s\.so$" % me, n):
-                shutil.copy(GOZEN_SO, os.path.join(bindir, n))
-                job_log(f"{n}: replaced by this board's GoZen")
-    pw = pwd.getpwnam(USER)
-    sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", dest)
-    os.remove(archive)
-    first_run_defaults(dest)
-    board_profile(dest, b)
-    job_set(state="done", msg=f"Game {b.get('version')} installed in {dest}")
-
-
-def install_pup(zipfile):
-    game = installed_game()
-    if not game:
-        raise JobError("install the game first")
-    job_set(state="running", msg="Installing the PuP Pack (videos are checked, a few minutes)")
-    b = json.load(open(os.path.join(game, "bundle.json")))
-    cmd = b.get("pup", {}).get("install", "python3 scripts/pup/pup_setup.py --pup-zip ZIP_PATH_OR_URL")
-    args = [zipfile if a == "ZIP_PATH_OR_URL" else a for a in cmd.split()]
-    if args[0] == "python3":
-        args[0] = game_python()
-    env = ["env"] + [f"{k}={v}" for k, v in game_env().items()]
-    sh(*env, *args, cwd=game, user=True)
-    os.remove(zipfile)
-    tool(game, "set", "pup.enabled", "true")
-    job_set(state="done", msg="PuP Pack installed and enabled" + (" (restart the game)" if b.get("pup", {}).get("needs_restart") else ""))
-
-
-def run_job(fn, *args):
-    try:
-        fn(*args)
-    except JobError as e:
-        job_set(state="error", msg=str(e))
-    except Exception as e:   # keep the page alive whatever happens
-        job_set(state="error", msg=f"{type(e).__name__}: {e}")
-    finally:
-        if JOB["state"] != "done":      # a failed install leaves nothing behind (up to 1 GB)
-            for f in ("game.tar.xz", "pup.zip"):
-                try:
-                    os.remove(os.path.join(UPLOADS, f))
-                except OSError:
-                    pass
-            shutil.rmtree(os.path.join(GAMES, ".stage"), ignore_errors=True)
-        JOB_LOCK.release()
-
-
-def game_running():
-    return run("systemctl", "is-active", "--quiet", "mpf-game.service").returncode == 0
-
-
-def volatile_game_dirs(game):
-    """Read-only mode: the game's logs are written all the time, so game/logs becomes a link to a folder in RAM (the rest of the
-    game folder is on the data partition and only changes when a setting, a score or an audit does)."""
-    if not READONLY:
-        return
-    pw = pwd.getpwnam(USER)
-    os.makedirs(VOLATILE_LOGS, exist_ok=True)
-    os.chown(VOLATILE_LOGS, pw.pw_uid, pw.pw_gid)
-    logs = os.path.join(game, "game", "logs")
-    if os.path.islink(logs):
-        return
-    if os.path.isdir(logs):
-        shutil.rmtree(logs, ignore_errors=True)
-    os.makedirs(os.path.dirname(logs), exist_ok=True)
-    try:
-        os.symlink(VOLATILE_LOGS, logs)
-    except FileExistsError:
-        pass
-
-
-def ram_xdg_env():
-    """Godot writes user:// and its caches under XDG_*: data and config in RAM, the (rarely written) caches on the data partition."""
-    if not READONLY:
-        return {}
-    pw = pwd.getpwnam(USER)
-    for d in (XDG_RAM, XDG_RAM + "/data", XDG_RAM + "/config"):
-        os.makedirs(d, exist_ok=True)
-        os.chown(d, pw.pw_uid, pw.pw_gid)
-    cache = os.path.join(DATA, "cache")
-    os.makedirs(cache, exist_ok=True)
-    os.chown(cache, pw.pw_uid, pw.pw_gid)
-    return {"XDG_DATA_HOME": XDG_RAM + "/data", "XDG_CONFIG_HOME": XDG_RAM + "/config", "XDG_CACHE_HOME": cache}
-
-
-def game_exec():
-    """Entry of mpf-game.service: wait for the X session, drop to the game user, become start.py."""
-    game = installed_game()
-    if not game:
-        sys.exit("no game installed")
-    env = game_env()
-    pw = pwd.getpwnam(USER)
-    for _ in range(180):
-        if os.path.exists("/tmp/.X11-unix/X0"):
-            break
-        time.sleep(1)
-    else:
-        sys.exit("no X session after 180 s")      # the service restarts and waits again
-    time.sleep(3)           # let the window manager settle
-    volatile_game_dirs(game)
-    xdg = ram_xdg_env()
-    os.chdir(game)
-    os.setgroups(os.getgrouplist(USER, pw.pw_gid))
-    os.setgid(pw.pw_gid)
-    os.setuid(pw.pw_uid)
-    # the X cookie: where /etc/profile.d/mpf-readonly.sh puts it in read-only mode, else in the home folder
-    xauth = f"/tmp/.Xauthority-{USER}" if READONLY else os.path.join(pw.pw_dir, ".Xauthority")
-    child = dict(os.environ, HOME=pw.pw_dir, USER=USER, DISPLAY=env.get("DISPLAY", ":0"),
-                 XAUTHORITY=env.get("XAUTHORITY", xauth), **xdg)
-    for k in ("GODOT", "TRON_VENV"):
-        if env.get(k):
-            child[k] = env[k]
-    py = game_python()
-    os.execve(py if os.path.isabs(py) else shutil.which(py),
-              [py, "scripts/package/start.py"] + env.get("MPF_GAME_ARGS", "").split(), child)
-
-
-def game_start():
-    if not installed_game():
-        raise ValueError("no game installed")
-    r = run("systemctl", "start", "--no-block", "mpf-game.service")
-    if r.returncode:
-        raise ValueError((r.stderr or r.stdout).strip() or "could not start the game")
-
-
-def game_stop():
-    run("systemctl", "stop", "mpf-game.service")
-
-
-def game_autostart():
-    return run("systemctl", "is-enabled", "--quiet", "mpf-game.service").returncode == 0
-
-
-def set_autostart(on):
-    """enable/disable writes a link under /etc/systemd: in read-only mode the root opens for that moment only."""
-    if on and game_autostart() or not on and not game_autostart():
-        return
-    with writable("/etc/systemd/system"):
-        r = run("systemctl", "enable" if on else "disable", "mpf-game.service")
-    if r.returncode:
-        raise ValueError((r.stderr or r.stdout).strip() or "systemctl failed")
-
-
-def settings_schema(game):
-    """The bundle's settings schema as this board sees it: its tool narrows the choices the board's profile limits
-    (platforms/README.md, Platform limits); the file itself if the tool cannot run."""
-    try:
-        return json.loads(tool(game, "list").stdout)
-    except ValueError:
-        return json.load(open(os.path.join(game, "scripts/package/options.json")))
-
-
-def settings_html(game):
-    try:
-        schema = settings_schema(game)
-        cur = json.loads(tool(game, "get").stdout or "{}")
-    except (OSError, ValueError):
-        return "<p>Settings unavailable.</p>"
-    out = ["<form method=post action=/settings>"]
-    for g in schema["groups"]:
-        out.append(f"<h3>{html.escape(g['label'])}</h3>")
-        for o in (o for o in schema["options"] if o["group"] == g["id"]):
-            name, v = "o." + o["id"], cur.get(o["id"])
-            hint = f" (default {o['default']})" if "default" in o else ""
-            if o["type"] == "bool":
-                sel = {True: "true", False: "false"}.get(v, "")
-                field = f"<select name='{name}'>" + "".join(
-                    f"<option value='{x}'{' selected' if x == sel else ''}>{x or 'default'}" for x in ("", "true", "false")) + "</select>"
-            elif o["type"] == "choice":
-                field = f"<select name='{name}'><option value=''>default" + "".join(
-                    f"<option{' selected' if c == v else ''}>{html.escape(c)}" for c in o["choices"]) + "</select>"
-            elif o.get("secret"):
-                field = f"<input name='{name}' type=password placeholder='{'set' if v else 'not set'} (empty: unchanged)'>"
-            else:
-                val = "" if v is None else html.escape(str(v), quote=True)
-                field = f"<input name='{name}' value='{val}' size=14 placeholder='default'>"
-            note = f" <small>(this board: {html.escape(o['limited'])})</small>" if o.get("limited") else ""
-            out.append(f"<div title='{html.escape(o.get('help', ''), quote=True)}'>{html.escape(o['label'])}{hint}: {field}"
-                       f" {html.escape(o.get('unit', ''))}{note}</div>")
-    out.append("<button>Save settings</button> (restart the game to apply)</form>")
-    return "".join(out)
-
-
-def settings_save(game, form):
-    schema = settings_schema(game)
-    cur = json.loads(tool(game, "get").stdout or "{}")
-    sets, unsets = [], []
-    for o in schema["options"]:
-        v = form.get("o." + o["id"], "").strip()
-        if v:
-            sets += [o["id"], v]
-        elif o["id"] in cur and not o.get("secret"):
-            unsets.append(o["id"])
-    if sets:
-        r = tool(game, "set", *sets)
-        if r.returncode:
-            raise ValueError((r.stderr or r.stdout).strip()[-300:])
-    if unsets:
-        tool(game, "unset", *unsets)
-
-
-GAME_PAGE = """<h2>Game</h2><p>%(state)s</p>
-<form onsubmit="up(this,'game');return false">Bundle <code>*-linux-%(arch)s.tar.xz</code> or <code>*-linux-all.tar.xz</code> <input type=file name=f required><br>
-its <code>.sha256</code> file (optional) <input type=file name=s><br><button>Upload and install</button></form>
-<h2>PuP Pack</h2><form onsubmit="up(this,'pup');return false">Pack <code>.zip</code> <input type=file name=f accept=.zip required>
-<br><button>Upload and install</button></form>
-<p id=job><b></b></p><pre id=log></pre>
-%(ctl)s
-<script>
-async function up(form,kind){
- const f=form.f.files[0], s=form.s&&form.s.files[0], B=document.querySelector('#job b'), C=4*1048576;
- let sha=''; if(s){sha=(await s.text()).trim().split(/\\s+/)[0];}
- const base='/upload/'+kind+'?total='+f.size+'&name='+encodeURIComponent(f.name)+'&sha='+sha;
- let off=0, tries=0;
- while(off<f.size){
-  const end=Math.min(off+C,f.size);
-  try{
-   const ac=new AbortController(), to=setTimeout(()=>ac.abort(),20000);
-   const r=await fetch(base+'&offset='+off,{method:'POST',body:f.slice(off,end),signal:ac.signal}); clearTimeout(to);
-   const t=await r.text();
-   if(r.status==409&&/^\\d+$/.test(t)){off=+t;continue;}
-   if(r.status>=400){B.textContent='Error: '+t;return false;}
-   off=end; tries=0;
-   B.textContent='Uploading '+Math.round(off/1048576)+' / '+Math.round(f.size/1048576)+' MB';
-  }catch(e){
-   if(++tries>40){B.textContent='Upload failed: connection lost';return false;}
-   B.textContent='Connection lost, retrying ('+tries+')...'; await new Promise(r=>setTimeout(r,3000));
-   try{off=+(await (await fetch('/upload/size/'+kind)).text());}catch(e2){}
-  }
- }
- poll(true); return false;}
-async function poll(r){
- const j=await (await fetch('/job')).json(); const b=document.querySelector('#job b');
- if(j.state=='running'||j.state=='done'||j.state=='error')b.textContent=j.msg;
- document.getElementById('log').textContent=j.log;
- if(j.state=='running')setTimeout(()=>poll(r),2000); else if(j.state=='done'&&r)setTimeout(()=>location.reload(),1500);}
-poll();
-</script>"""
-
-
-PAGE = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>MPF setup</title><body style="font-family:sans-serif;max-width:34em;margin:1em auto;padding:0 1em">
-<h1>MPF setup</h1>%(msg)s
-%(mode)s
-%(game)s
-<h2>Wi-Fi</h2><form method=post action=/wifi>
-SSID <input name=ssid list=nets required><datalist id=nets>%(nets)s</datalist><br>
-Password <input name=psk type=password><br>Country (FR, US...) <input name=country size=3 maxlength=2><br>
-<button>Save and connect</button></form>
-<h2>SSH</h2><form method=post action=/ssh>
-Public key <input name=key size=40><br>
-Password login <select name=pwlogin><option value="">unchanged<option>yes<option>no</select><br>
-<button>Save</button></form>
-<h2>Status</h2><pre>%(status)s</pre></body>"""
-
-
-class Handler(BaseHTTPRequestHandler):
-    def _send(self, code, body, ctype="text/html; charset=utf-8", extra=()):
-        data = body.encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        for k, v in extra:
-            self.send_header(k, v)
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _auth(self):
-        if authorized(self.headers.get("Authorization")):
-            return True
-        self._send(401, "Authentication required", "text/plain", [("WWW-Authenticate", 'Basic realm="MPF setup"')])
-        return False
-
-    def _mode_html(self):
-        st = mode_status()
-        if not st:
-            return ""
-        mode, stay = st
-        free = shutil.disk_usage(DATA).free / 1e9 if os.path.isdir(DATA) else 0
-        degraded = os.path.exists("/run/mpf-persist.degraded")
-        out = "<h2>Mode</h2>"
-        if degraded:
-            out += "<p><b>No data partition: settings and scores are kept in RAM and are lost at power-off.</b></p>"
-        if mode == "production":
-            out += ("<p>Production: the system is read-only (the flash is not worn); the game, its settings and scores, Wi-Fi and SSH "
-                    "are stored on the data partition (%.1f GB free). Updating the game from this page works in this mode. "
-                    "The operating system itself (packages, services) can only be changed in maintenance mode.</p>"
-                    "<form method=post action=/mode><button name=do value=maintenance>Maintenance mode until the next reboot</button> "
-                    "<button name=do value=maintenance-stay>Maintenance mode, also after reboots</button></form>" % free)
-        else:
-            out += ("<p><b>Maintenance: the system is writable%s.</b> Go back to production when you are done "
-                    "(%.1f GB free on the data partition).</p>"
-                    "<form method=post action=/mode><button name=do value=production>Back to production (read-only)</button></form>"
-                    % (", also after reboots" if stay else ", until the next reboot", free))
-        return out
-
-    def _page(self, msg=""):
-        nets = "".join(f"<option value='{html.escape(n, quote=True)}'>" for n in scan())
-        game = installed_game()
-        if game:
-            b = json.load(open(os.path.join(game, "bundle.json")))
-            state = f"Installed: <b>{html.escape(b.get('name', ''))} {html.escape(b.get('version', ''))}</b>, game "
-            state += "<b>running</b>" if game_running() else "stopped"
-            ctl = ("<form method=post action=/game style='display:inline'><button name=do value=%s>%s</button> "
-                   "<button name=do value=%s>%s</button></form>"
-                   % (*(("stop", "Stop the game") if game_running() else ("start", "Start the game")),
-                      *(("disable", "Do not start at power-on") if game_autostart() else ("enable", "Start at power-on"))))
-            ctl += "<h2>Game settings</h2>" + settings_html(game)
-        else:
-            state, ctl = "No game installed.", ""
-        g = GAME_PAGE % {"state": state, "arch": ARCH.get(platform.machine(), platform.machine()), "ctl": ctl}
-        self._send(200, PAGE % {"msg": f"<p><b>{html.escape(msg)}</b></p>" if msg else "", "nets": nets,
-                                "status": html.escape(status()), "game": g, "mode": self._mode_html()})
-
-    def _upload(self, kind, q):
-        """One chunk of an upload, appended at `offset` (the browser sends 4 MB at a time and resumes after a cut).
-        When the file is complete it is unpacked and installed in a thread."""
-        n = int(self.headers.get("Content-Length", 0))
-        off, total = int(q.get("offset", ["0"])[0]), int(q.get("total", ["0"])[0])
-        name = os.path.basename(q.get("name", [""])[0]) or kind
-        path = os.path.join(UPLOADS, "game.tar.xz" if kind == "game" else "pup.zip")
-        try:
-            if JOB["state"] == "running" or JOB_LOCK.locked():
-                raise ValueError("an install is already running")
-            if off == 0:
-                ok = name.endswith(".tar.xz") if kind == "game" else name.lower().endswith(".zip")
-                me = ARCH.get(platform.machine(), platform.machine())
-                if not ok:
-                    raise ValueError("expected a .tar.xz bundle" if kind == "game" else "expected a .zip pack")
-                if "linux-" in name and kind == "game" and not name.endswith((f"linux-{me}.tar.xz", "linux-all.tar.xz")):
-                    raise ValueError(f"this machine is {me}: wrong bundle")
-                if kind == "pup" and not installed_game():
-                    raise ValueError("install the game first")
-                if free_gb(UPLOADS) * 1e9 < total * (4 if kind == "game" else 2) + 5e8:
-                    raise ValueError("not enough free disk space for this file")
-                open(path, "wb").close()
-                JOB.update(state="uploading", msg="Receiving " + name, log="")
-            have = os.path.getsize(path) if os.path.exists(path) else 0
-            if have != off:     # the client lost track: tell it where to resume
-                self.rfile.read(n)
-                return self._send(409, str(have), "text/plain")
-            with open(path, "ab") as f:
-                left = n
-                while left:
-                    chunk = self.rfile.read(min(1 << 20, left))
-                    if not chunk:
-                        raise OSError("upload interrupted")
-                    f.write(chunk)
-                    left -= len(chunk)
-        except ValueError as e:
-            job_set(state="error", msg=str(e))
-            left = n
-            while left > 0:     # read the chunk so the browser can see the error instead of a broken pipe
-                left -= len(self.rfile.read(min(1 << 20, left)) or b"x" * left)
-            return self._send(400, str(e), "text/plain")
-        except OSError:
-            return          # the browser went away: it resumes from the file's size
-        if off + n < total:
-            return self._send(200, str(off + n), "text/plain")
-        if not JOB_LOCK.acquire(blocking=False):
-            return self._send(409, "busy", "text/plain")
-        fn, args = (install_game, (path, q.get("sha", [""])[0])) if kind == "game" else (install_pup, (path,))
-        job_set(state="running", msg="Received, installing")
-        threading.Thread(target=run_job, args=(fn,) + args, daemon=True).start()
-        self._send(202, "installing", "text/plain")
-
-    def do_GET(self):
-        if not self._auth():
-            return
-        if self.path == "/job":
-            return self._send(200, json.dumps(JOB), "application/json")
-        if self.path.startswith("/upload/size/"):
-            f = os.path.join(UPLOADS, "game.tar.xz" if self.path.endswith("game") else "pup.zip")
-            return self._send(200, str(os.path.getsize(f) if os.path.exists(f) else 0), "text/plain")
-        self._page()
-
-    def do_POST(self):
-        if not self._auth():
-            return
-        if self.path.startswith(("/upload/game?", "/upload/pup?")):
-            path, _, qs = self.path.partition("?")
-            return self._upload(path.rsplit("/", 1)[1], parse_qs(qs))
-        n = int(self.headers.get("Content-Length", 0))
-        form = {k: v[0] for k, v in parse_qs(self.rfile.read(min(n, 262144)).decode()).items()}
-        try:
-            if self.path == "/wifi":
-                add_wifi(form.get("ssid", ""), form.get("psk", ""), form.get("country", "").upper())
-                msg = "Wi-Fi saved, connecting (the address may change)."
-            elif self.path == "/ssh":
-                if form.get("key"):
-                    add_ssh_key(form["key"].strip())
-                if form.get("pwlogin") in ("yes", "no"):
-                    set_ssh_password_login(form["pwlogin"] == "yes")
-                msg = "SSH settings saved."
-            elif self.path == "/settings":
-                settings_save(installed_game(), form)
-                msg = "Game settings saved (restart the game to apply)."
-            elif self.path == "/mode":
-                do = form.get("do", "")
-                set_mode(do.split("-")[0], stay=do == "maintenance-stay")
-                msg = {"production": "Production mode: the system is read-only again."}.get(do, "Maintenance mode: the system is writable.")
-            elif self.path == "/game":
-                do = form.get("do")
-                if do == "start":
-                    game_start()
-                elif do in ("enable", "disable"):
-                    set_autostart(do == "enable")
-                else:
-                    game_stop()
-                msg = {"start": "Game starting.", "enable": "The game now starts at power-on.",
-                       "disable": "The game no longer starts at power-on."}.get(do, "Game stopped.")
-            else:
-                return self._send(404, "not found", "text/plain")
-        except (ValueError, TypeError) as e:
-            msg = f"Error: {e}"
-        self._page(msg)
-
-    def log_message(self, *a):
-        pass
+    return run("ip", "-br", "addr").stdout + "\n" + run("iw", "dev", C.WLAN, "link").stdout
+
+
+def network_info():
+    """{addresses: [(interface, address)], wifi: {ssid, signal} or None} for the page's header."""
+    addrs = []
+    for line in run("ip", "-4", "-o", "addr", "show", "scope", "global").stdout.splitlines():
+        f = line.split()
+        if len(f) > 3:
+            addrs.append((f[1], f[3].split("/")[0]))
+    link = run("iw", "dev", C.WLAN, "link").stdout
+    ssid = re.search(r"SSID: (.+)", link)
+    sig = re.search(r"signal: (-?\d+)", link)
+    wifi = {"ssid": ssid.group(1).strip(), "signal": int(sig.group(1)) if sig else None} if ssid else None
+    return {"addresses": addrs, "wifi": wifi}
 
 
 def have_network():
@@ -869,14 +218,14 @@ def access_point():
     if have_network():
         return
     print("no network: starting access point", AP_SSID, file=sys.stderr)
-    run("systemctl", "stop", f"wpa_supplicant@{WLAN}.service")
-    run("ip", "addr", "flush", "dev", WLAN)
-    run("ip", "addr", "add", f"{AP_ADDR}/24", "dev", WLAN)
+    run("systemctl", "stop", f"wpa_supplicant@{C.WLAN}.service")
+    run("ip", "addr", "flush", "dev", C.WLAN)
+    run("ip", "addr", "add", f"{AP_ADDR}/24", "dev", C.WLAN)
     open("/run/mpf-hostapd.conf", "w").write(
-        f"interface={WLAN}\nssid={AP_SSID}\nhw_mode=g\nchannel=6\nwpa=2\nwpa_key_mgmt=WPA-PSK\n"
+        f"interface={C.WLAN}\nssid={AP_SSID}\nhw_mode=g\nchannel=6\nwpa=2\nwpa_key_mgmt=WPA-PSK\n"
         f"rsn_pairwise=CCMP\nwpa_passphrase={AP_PSK}\n")
     open("/run/mpf-dnsmasq.conf", "w").write(
-        f"interface={WLAN}\nbind-interfaces\ndhcp-range=192.168.4.10,192.168.4.50,12h\naddress=/#/{AP_ADDR}\n")
+        f"interface={C.WLAN}\nbind-interfaces\ndhcp-range=192.168.4.10,192.168.4.50,12h\naddress=/#/{AP_ADDR}\n")
     h = subprocess.Popen(["hostapd", "/run/mpf-hostapd.conf"])
     d = subprocess.Popen(["dnsmasq", "-k", "-C", "/run/mpf-dnsmasq.conf"])
     h.wait()
@@ -890,11 +239,16 @@ def main():
     if cmd == "apply":
         apply_file()
     elif cmd == "web":
-        ThreadingHTTPServer(("", PORT), Handler).serve_forever()
+        import mpf_web
+        mpf_web.serve()
     elif cmd == "ap":
         access_point()
     elif cmd == "game":
-        game_exec()
+        import mpf_games
+        mpf_games.game_exec()
+    elif cmd == "inbox":
+        import mpf_games
+        mpf_games.process_inbox()
     else:
         sys.exit(__doc__)
 

@@ -1,6 +1,6 @@
 # Contributing: what belongs in this repository
 
-Two repositories share the learnings of the Tron Legacy MPF project. Route each one to the right place, in the same
+Two repositories share the learnings of the Stern SAM recreations. Route each one to the right place, in the same
 session you find it (open a pull request; without write access, open an issue directly).
 
 | The finding is about | It goes to |

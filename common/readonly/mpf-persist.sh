@@ -3,6 +3,8 @@
 # the folders that must keep their content on it. Everything else stays read-only. Steps:
 #   1. find the partition labelled MPF_DATA_LABEL; if there is none (first boot), create it in the free space at the end
 #      of the disk the root lives on, and format it (ext4 with its journal: a cabinet loses power without warning)
+#      an image made with common/games/inject_image.py already carries the partition (with games in its inbox): it is grown to the end
+#      of the disk when it is the last partition and free space follows it
 #   2. fsck -p, mount it on MPF_DATA_MOUNT (noatime); if that fails, a tmpfs takes its place so the system still boots
 #   3. for each "name:target" of MPF_PERSIST, seed <data>/persist/<name> from the image's target once, bind-mount it over the target
 #   4. if the maintenance flag (<data>/mpf/maintenance) is there, switch the root (and boot) partition to writable
@@ -39,6 +41,31 @@ create_partition() {
     mkfs.ext4 -q -F -L "$LABEL" -m 0 "$new" || return 1
 }
 
+# The image carries a small data partition (common/games/inject_image.py) and the card is bigger: take the free space after it.
+grow_partition() {
+    local dev="$1" name disk num start size pend free_sectors
+    name="$(basename "$(readlink -f "$dev")")"
+    [ -r "/sys/class/block/$name/partition" ] || return 0
+    num="$(cat "/sys/class/block/$name/partition")"
+    disk="${MPF_ROOT_DISK:-/dev/$(lsblk -no pkname "$dev" 2>/dev/null | head -1)}"
+    [ -b "$disk" ] || return 0
+    if [ "$(blkid -p -o value -s PTTYPE "$disk" 2>/dev/null)" = gpt ]; then
+        sfdisk --relocate gpt-bak-std "$disk" >/dev/null 2>&1
+        partx -a "$disk" >/dev/null 2>&1      # the kernel may have dropped the partitions when the table was rewritten
+    fi
+    start="$(cat "/sys/class/block/$name/start")"; size="$(cat "/sys/class/block/$name/size")"
+    pend=$((start + size))
+    # a free region that begins right after this partition (sfdisk reports sectors of 512 bytes here)
+    free_sectors="$(sfdisk --list-free "$disk" 2>/dev/null | awk -v s="$pend" '$1 == s {print $3}' | head -1)"
+    [ "${free_sectors:-0}" -ge 32768 ] || return 0       # nothing after it, or under 16 MB
+    log "growing $dev by $((free_sectors / 2048)) MB"
+    echo ', +' | sfdisk -N "$num" --no-reread -q "$disk" >/dev/null 2>&1 || { log "cannot grow the partition table of $disk"; return 0; }
+    partx -u --nr "$num" "$disk" >/dev/null 2>&1 || partprobe "$disk" >/dev/null 2>&1
+    udevadm settle --timeout=30
+    e2fsck -fp "$dev" >/dev/null 2>&1
+    resize2fs "$dev" >/dev/null 2>&1 || log "resize2fs failed on $dev"
+}
+
 dev="$(blkid -L "$LABEL" 2>/dev/null)"
 if [ -z "$dev" ]; then
     udevadm settle --timeout=30
@@ -47,6 +74,7 @@ fi
 if [ -z "$dev" ] && create_partition; then dev="$(blkid -L "$LABEL" 2>/dev/null)"; fi
 
 mkdir -p "$DATA"
+if [ -n "$dev" ] && [ -z "${MPF_NO_GROW:-}" ]; then grow_partition "$dev"; fi
 if [ -n "$dev" ]; then
     e2fsck -p "$dev" >/dev/null 2>&1; rc=$?
     [ "$rc" -ge 4 ] && log "e2fsck found errors it could not fix on $dev (rc $rc)"

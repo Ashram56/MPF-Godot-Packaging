@@ -7,10 +7,10 @@
 | Kind | improvement |
 | Affected versions | Godot 4.6.3 (any) |
 | Platforms | all; it matters on boards that cannot hold 60 FPS (measured on a Raspberry Pi 4) |
-| Found on | Tron Legacy MPF on a Raspberry Pi 4, 2026-10-25 |
+| Found on | a Stern SAM recreation on a Raspberry Pi 4, 2026-10-25 |
 | Fact | observed: 44-46 FPS uneven (vsync rounding) without a cap, 29.5 FPS steady with it, CPU 170 % instead of 195 % |
 | Our fix | `application/run/max_fps=30` in the game's `project.godot`, or `--max-fps 30` on Godot's command line |
-| Applied by | a project setting a game sets in its `project.godot` (Tron-Legacy-MPF does it on every platform) |
+| Applied by | a project setting a game sets in its `project.godot` |
 | Upstream | none needed |
 
 ## Problem

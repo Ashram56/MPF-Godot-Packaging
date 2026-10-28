@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | Godot 4.6.3 (Compatibility renderer, EGL on X11), and later until fixed upstream |
 | Platforms | Linux with EGL (seen on a Raspberry Pi 4, Mesa V3D, Debian 13) |
-| Found on | Tron Legacy MPF on a Raspberry Pi 4, 2026-10-25 |
+| Found on | a Stern SAM recreation on a Raspberry Pi 4, 2026-10-25 |
 | Fact | code (`drivers/egl/egl_manager.cpp`) and observed (the crash, then 29.5 FPS steady with the fix) |
 | Our fix | [`../../build/godot/egl_release_current.patch`](../../build/godot/egl_release_current.patch): one line, a Godot rebuilt with it |
 | Applied by | a Godot build with the patch (no LTO needed: same speed); the launcher keeps `--render-thread safe` without it |

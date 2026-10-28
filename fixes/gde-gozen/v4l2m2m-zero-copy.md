@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | GDE GoZen at `f9448619324ad7d0d4e79d3bd501bde477ea4b7f` with FFmpeg 7.1 (`h264_v4l2m2m`), Godot 4.6.3 Compatibility renderer, Mesa 25.0.7 |
 | Platforms | Raspberry Pi 4 (bcm2835-codec, `/dev/video10`), Linux arm64, Godot on EGL / OpenGL ES |
-| Found on | Tron Legacy MPF, 2026-10-24 (Pi 4B, Debian 13 trixie, kernel 6.18 rpt) |
+| Found on | a Stern SAM recreation, 2026-10-24 (Pi 4B, Debian 13 trixie, kernel 6.18 rpt) |
 | Fact | observed (60 s game scenario, 3 runs; C prototype 54 fps and 1.1 ms CPU a frame) |
 | Our fix | [`../../build/gozen/gozen_zerocopy.patch`](../../build/gozen/gozen_zerocopy.patch) (new `src/gozen_zerocopy.cpp/.hpp`, `src/gozen_v4l2.c/.h`, `next_frame_held()`, `show_held()`, `drop_held()`, `is_zero_copy()`, an in-place decoder restart on seek, `SConstruct`); the player side is in [`../../addons/gde_gozen/video_playback.gd`](../../addons/gde_gozen/video_playback.gd) with the fast YUV shaders; NV12 and 12 capture buffers in [`gozen_v4l2_buffers_nv12.patch`](../../build/gozen/gozen_v4l2_buffers_nv12.patch); the kernel's `bcm2835-codec` needs the completion fix ([platforms/raspberrypi.md](../../platforms/raspberrypi.md)) or it oopses when a decoder closes |
 | Applied by | the build script applies the patch after `gozen_v4l2m2m*.patch`; the player uses it when `is_zero_copy()` is true; `GOZEN_ZEROCOPY=0` turns it off, `GOZEN_V4L2_RESTART=0` goes back to recreating the decoder |

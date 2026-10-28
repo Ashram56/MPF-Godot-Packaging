@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | Godot 4.6.3-stable (measured) |
 | Platforms | Linux with 4+ cores and a real display; measured on Jetson Xavier NX, L4T R35.6.4 |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit 34cd6ce) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (clip suite, two runs each way, Xavier NX nvpmodel mode 5) |
 | Our fix | `mpf_godot/launcher.py` `core_pinning()` / `start_core_pinning()`; `MPF_GODOT_PIN=0` turns it off |
 | Applied by | the launcher (`python -m mpf_godot run`), on Linux with 4+ cores, not under Xvfb |

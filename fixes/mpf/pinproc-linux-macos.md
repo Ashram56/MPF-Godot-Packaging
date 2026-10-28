@@ -7,7 +7,7 @@
 | Kind | packaging |
 | Affected versions | MPF 0.80.1; pypinproc and libpinproc (no wheels or binary releases known to us); and later until fixed upstream |
 | Platforms | Linux x86_64 and arm64 (Jetson included); macOS (Apple silicon: none; Intel: an old build) |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-03 |
+| Found on | a Stern SAM recreation, 2026-10-03 |
 | Fact | code (MPF 0.80.1 wheel: `mpf/platforms/pinproc/`, `p_roc_common.py`); the build tested as dry-run plans only, no run on a real board reported |
 | Our fix | [`install/build_pinproc.sh`](../../install/build_pinproc.sh) (libpinproc `286c566`, pypinproc `71ad50c`, pinned), [`install/99-pinproc.rules`](../../install/99-pinproc.rules) (udev) |
 | Applied by | `install/install_linux.sh --proc`, `install/install_macos.sh --proc`, `python -m mpf_godot setup --proc` |
