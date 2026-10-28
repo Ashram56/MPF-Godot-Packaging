@@ -131,6 +131,7 @@ SYSTEM_PKGS="systemd systemd-sysv systemd-timesyncd systemd-resolved dbus udev k
   wireless-regdb initramfs-tools pciutils usbutils"
 in_chroot "apt-get install -y -qq $(echo $SYSTEM_PKGS)"   # one line: in_chroot runs bash -c, a newline would split the command
 echo 'MODULES=most' > "$R/etc/initramfs-tools/conf.d/modules"
+grep -qx i915 "$R/etc/initramfs-tools/modules" || printf 'i915\n' >> "$R/etc/initramfs-tools/modules"   # the GPU comes up with the initramfs: a picture early, /dev/dri ready before the login
 # Debian's kernel, firmware for the common mini-PC chips (Wi-Fi: Intel, Realtek, MediaTek, Atheros; Ethernet: Realtek;
 # Intel graphics GuC/HuC; Bluetooth shares the Wi-Fi packages), the Intel and AMD VAAPI drivers
 in_chroot "apt-get install -y -qq linux-image-amd64 firmware-iwlwifi firmware-realtek firmware-mediatek firmware-atheros firmware-intel-graphics firmware-intel-misc \
@@ -255,12 +256,16 @@ if [ -n "$EXTRAS" ]; then
         in_chroot "su - mpf -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
         proxy_out
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
-        printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin mpf --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+        printf '[Unit]\nStartLimitIntervalSec=0\n\n[Service]\nRestartSec=2\nExecStart=\nExecStart=-/sbin/agetty --autologin mpf --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
         cat >> "$R/home/mpf/.profile" <<'PROF'
 # First console (automatic login): from the USB stick (root label "rootfs") the installer menu, from an installed disk X.
 # Remove this to get a plain shell.
 if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
-    if [ "$(findmnt -no LABEL /)" = rootfs ]; then exec sudo /usr/local/sbin/mpf-installer; else exec startx; fi
+    if [ "$(findmnt -no LABEL /)" = rootfs ]; then exec sudo /usr/local/sbin/mpf-installer; fi
+    # udev gives the video group /dev/dri/card0 a moment after the login: wait for it, or X fails and getty gives up
+    for _ in $(seq 1 100); do [ -w /dev/dri/card0 ] && break; sleep 0.2; done
+    udevadm settle --timeout=10 2>/dev/null
+    exec startx
 fi
 PROF
     fi

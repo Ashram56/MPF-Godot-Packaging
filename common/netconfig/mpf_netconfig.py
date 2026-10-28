@@ -424,6 +424,8 @@ def game_exec():
         if os.path.exists("/tmp/.X11-unix/X0"):
             break
         time.sleep(1)
+    else:
+        sys.exit("no X session after 180 s")      # the service restarts and waits again
     time.sleep(3)           # let the window manager settle
     os.chdir(game)
     os.setgroups(os.getgrouplist(USER, pw.pw_gid))
