@@ -40,7 +40,7 @@ class Base(unittest.TestCase):
         C.USER, C.READONLY = pwd.getpwuid(os.getuid()).pw_name, False
         for d in (C.GAMES, C.INBOX, C.UPLOADS):
             os.makedirs(d)
-        self.saved_fn = {k: getattr(G, k) for k in ("set_autostart", "board_profile", "game_running")}
+        self.saved_fn = {k: getattr(G, k) for k in ("set_autostart", "board_profile", "game_running", "game_restart")}
         G.set_autostart = lambda on: None
         G.board_profile = lambda game, b: None
         G.game_running = lambda: False
@@ -78,6 +78,19 @@ class Install(Base):
             C.GAME_OVERRIDE = ""
         self.assertEqual(open(os.path.join(C.GAMES, "demo@1.0", "game", "override.cfg")).read(), "[audio]\n")
 
+    def test_update_of_the_running_active_game_restarts_it(self):
+        self.install()
+        calls = []
+        G.game_running = lambda: True
+        G.game_restart = lambda: calls.append("restart")
+        try:
+            self.assertEqual(self.install(version="1.1")[0], "done")
+            self.assertEqual(calls, ["restart"])
+            calls.clear()
+            self.install(gid="other", name="Other", version="3")     # a different game waits: no restart
+            self.assertEqual(calls, [])
+        finally:
+            G.game_running = lambda: False
     def test_a_second_game_waits_to_be_chosen(self):
         self.install()
         state, msg = self.install(gid="other", name="Other", version="3")

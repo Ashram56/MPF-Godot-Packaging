@@ -413,8 +413,15 @@ def install_game(archive, expect_sha, keep_old=True):
     cur = {g["folder"]: g for g in installed_games()}
     act = active_folder([f for f in cur if f != folder])
     if act is None or cur.get(act, {}).get("id") == b["id"]:
+        was_running = act is not None and game_running()
         set_active(folder)
         note = " and is now the active game"
+        if was_running:         # the running process is the old version: restart so that state and process agree
+            try:
+                game_restart()
+                note += " (the game is restarting)"
+            except ValueError:
+                pass
     else:
         note = "; choose it on the page to play it"
     if not keep_old:
