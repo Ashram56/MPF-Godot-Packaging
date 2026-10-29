@@ -267,20 +267,23 @@ def verify(archive, recipe, target):
     return meta, digest
 
 
-def publish(url, archive, folder):
+MANIFEST = "mpf-games.json"
+
+
+def publish(url, archive, folder, meta=None, digest=""):
     user, pw = os.environ.get("WEBDAV_USER", ""), os.environ.get("WEBDAV_PASS", "")
     if not user or not pw:
         die("--publish needs WEBDAV_USER and WEBDAV_PASS in the environment")
     auth = "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
     base = url.rstrip("/") + "/" + (folder + "/" if folder else "")
 
-    def req(method, target, data=None):
+    def req(method, target, data=None, want_body=False):
         r = urllib.request.Request(target, data=data, method=method, headers={"Authorization": auth})
         try:
             with urllib.request.urlopen(r, timeout=600) as resp:
-                return resp.status
+                return (resp.status, resp.read()) if want_body else resp.status
         except urllib.error.HTTPError as e:
-            return e.code
+            return (e.code, b"") if want_body else e.code
 
     if folder:
         code = req("MKCOL", base)
@@ -293,6 +296,30 @@ def publish(url, archive, folder):
         if code not in (200, 201, 204):
             die(f"upload of {name} failed: HTTP {code}")
         say(f"uploaded {base}{name}")
+    if meta:
+        write_manifest(req, url.rstrip("/") + "/", (folder + "/" if folder else "") + urllib.parse.quote(os.path.basename(archive)),
+                       archive, meta, digest)
+
+
+def write_manifest(req, root, rel, archive, meta, digest):
+    """`mpf-games.json` at the root of the updates folder: what the page's Updates card reads to offer only the updates that fit the
+    installed games. An entry per (game id, version, architecture); publishing the same one again replaces it."""
+    code, body = req("GET", root + MANIFEST, want_body=True)
+    try:
+        doc = json.loads(body) if code == 200 else {}
+    except ValueError:
+        doc = {}
+    arch = (meta.get("target") or {}).get("arch", "all")
+    entry = {"id": meta["id"], "name": meta.get("name", meta["id"]), "version": str(meta["version"]), "arch": arch,
+             "file": urllib.parse.unquote(rel), "size": os.path.getsize(archive), "sha256": digest,
+             "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    items = [i for i in doc.get("items", []) if (i.get("id"), i.get("version"), i.get("arch")) != (entry["id"], entry["version"], arch)]
+    items.append(entry)
+    out = json.dumps({"format": 1, "items": sorted(items, key=lambda i: (i["id"], i["published"]))}, indent=1).encode()
+    code = req("PUT", root + MANIFEST, out)
+    if code not in (200, 201, 204):
+        die(f"upload of {MANIFEST} failed: HTTP {code}")
+    say(f"updated {root}{MANIFEST} ({entry['id']} {entry['version']})")
 
 
 def main():
@@ -380,7 +407,7 @@ def main():
     meta, digest = verify(archive, dict(recipe, id=meta_id(archive, recipe)), target)
     say(f"\n{archive}\n  {os.path.getsize(archive) >> 20} MB, sha256 {digest}")
     if a.publish:
-        publish(a.publish, archive, recipe.get("publish_folder", recipe["id"]))
+        publish(a.publish, archive, recipe.get("publish_folder", meta.get("id", recipe["id"])), meta, digest)
     say(f"\nPut it on a machine (common/games/README.md):\n"
         f"  - the setup page, Install tab: drop {os.path.basename(archive)} (and its .sha256)\n"
         f"  - before flashing: python3 common/games/inject_image.py IMAGE --bundle {archive}\n"

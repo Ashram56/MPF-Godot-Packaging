@@ -124,6 +124,40 @@ def propfind(cfg, url):
     return out
 
 
+MANIFEST = "mpf-games.json"
+
+
+def read_manifest(cfg):
+    """The `mpf-games.json` build_game_package.py --publish keeps at the root of the folder, or None when there is none.
+    {"format": 1, "items": [{id, name, version, arch, file, size, sha256}]}"""
+    try:
+        with _open(cfg, base(cfg) + MANIFEST) as r:
+            doc = json.loads(r.read(1 << 20))
+    except ValueError:
+        return None          # no such file (404) or not JSON: the folder is listed as it is
+    items = doc.get("items") if isinstance(doc, dict) and doc.get("format") == 1 else None
+    return [i for i in items if isinstance(i, dict) and i.get("file") and i.get("id")] if isinstance(items, list) else None
+
+
+def manifest_items(cfg, entries, installed, me):
+    """Game items from the manifest: only the ones for this machine, each saying what it does to the installed games."""
+    out = []
+    for e in entries:
+        arch = e.get("arch", "all")
+        if arch not in ("all", me):
+            continue
+        have = [g for g in installed if g["id"] == e["id"]]
+        names = {g["version"] for g in have}
+        key = e["file"]
+        newer = bool(have) and str(e.get("version", "")) not in names
+        out.append({"key": key, "name": e["file"].rsplit("/", 1)[-1], "group": "", "kind": "game", "size": int(e.get("size") or 0), "mtime": e.get("published", ""),
+                    "url": base(cfg) + "/".join(urllib.parse.quote(x) for x in e["file"].split("/")), "sha_url": "", "sha": e.get("sha256", ""),
+                    "compatible": True, "installed": bool(have) and not newer,
+                    "changed": False, "version": str(e.get("version", "")), "label": e.get("name", e["id"]),
+                    "for": (have[0]["name"] + " " + ", ".join(sorted(names))) if have else "", "update": newer})
+    return out
+
+
 def list_remote(cfg=None):
     """Bundles and packs on the server (the folder and its sub-folders), each with what the page needs to show and install it."""
     cfg = cfg or load()
@@ -137,12 +171,15 @@ def list_remote(cfg=None):
         else:
             entries.append(dict(e, group=""))
     names = {(e["group"], e["name"]) for e in entries}
+    manifest = read_manifest(cfg)
     done = cfg.get("installed", {})
     installed = G.installed_games()
     items = []
     for e in sorted(entries, key=lambda e: (e["group"], e["name"])):
         n = e["name"]
         if n.endswith(".tar.xz"):
+            if manifest is not None:
+                continue          # a manifest says which bundles are offered
             kind = "game"
         elif n.lower().endswith(".zip"):
             kind = "pup"
@@ -157,6 +194,8 @@ def list_remote(cfg=None):
                       "sha_url": e["url"] + ".sha256" if (e["group"], n + ".sha256") in names else "",
                       "compatible": compatible, "installed": key in done,
                       "changed": key in done and done[key] != stamp})
+    if manifest is not None:
+        items = manifest_items(cfg, manifest, installed, me) + items
     return items
 
 
@@ -187,8 +226,8 @@ def install_item(item):
     os.makedirs(C.UPLOADS, exist_ok=True)
     if item["kind"] == "game":
         dest = os.path.join(C.UPLOADS, "game.tar.xz")
-        sha = ""
-        if item.get("sha_url"):
+        sha = item.get("sha") or ""
+        if not sha and item.get("sha_url"):
             with _open(cfg, item["sha_url"]) as r:
                 sha = (r.read(4096).decode(errors="replace").split() or [""])[0]
         _download(cfg, item["url"], dest, name)

@@ -1,6 +1,7 @@
 """Updates from a WebDAV folder (common/netconfig/mpf_ota.py), against a small local server."""
 import hashlib
 import http.server
+import json
 import os
 import threading
 import unittest
@@ -143,6 +144,33 @@ class Ota(TG.Base):
         G.run_job(O.install_item, by["demo.pup.zip"])
         self.assertEqual(G.JOB["state"], "done", G.JOB["msg"] + G.JOB["log"])
         self.assertEqual([p["name"] for p in G.pup_library()], ["demo.pup.zip"])
+
+    def test_manifest_offers_only_what_fits(self):
+        path = self.put_bundle()                                                    # demo 1.0 under demo/
+        import hashlib
+        digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+        O.save(self.url, "claude", "secret", "")
+        file = "demo/" + os.path.basename(path)
+        doc = {"format": 1, "items": [
+            {"id": "demo", "name": "Demo", "version": "1.0", "arch": "all", "file": file, "size": os.path.getsize(path), "sha256": digest},
+            {"id": "demo", "name": "Demo", "version": "9.9", "arch": "other-arch", "file": file, "size": 1, "sha256": "0" * 64}]}
+        json.dump(doc, open(os.path.join(self.remote, "mpf-games.json"), "w"))
+        items = O.list_remote()
+        self.assertEqual([(i["version"], i["for"], i["update"]) for i in items if i["kind"] == "game"], [("1.0", "", False)])   # wrong arch dropped; nothing installed: new game
+        G.JOB_LOCK.acquire()
+        G.run_job(O.install_item, items[0])
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"] + G.JOB["log"])          # the manifest's hash was checked on the way
+        again = [i for i in O.list_remote() if i["kind"] == "game"][0]
+        self.assertTrue(again["installed"] and not again["update"] and again["for"].startswith("Demo"))
+        doc["items"][0]["version"] = "1.1"
+        json.dump(doc, open(os.path.join(self.remote, "mpf-games.json"), "w"))
+        newer = [i for i in O.list_remote() if i["kind"] == "game"][0]
+        self.assertTrue(newer["update"] and not newer["installed"])
+        doc["items"][0]["sha256"] = "0" * 64
+        json.dump(doc, open(os.path.join(self.remote, "mpf-games.json"), "w"))
+        G.JOB_LOCK.acquire()
+        G.run_job(O.install_item, [i for i in O.list_remote() if i["kind"] == "game"][0])
+        self.assertEqual(G.JOB["state"], "error")                                      # a wrong hash in the manifest is refused
 
     def test_folder_field(self):
         O.save(self.url, "claude", "secret")                                     # default folder

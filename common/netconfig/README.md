@@ -104,7 +104,15 @@ password field keeps the saved one; redirects are refused). The fields keep what
 the bundles (`*.tar.xz`, with a `.sha256` beside) and `.zip` PuP Packs in the folder and its sub-folders. Each bundle says which
 installed game it **updates** (its file name or sub-folder starts with the game's id) or *new game*; *Install* downloads it and installs
 it exactly like an upload, and a pack is downloaded **into the library** (then given to a game in the grid).
-The list says *installed* or *changed on the server* (size or date differ from what was installed). The engine itself (the base
+The list says *installed* or *changed on the server* (size or date differ from what was installed).
+
+**The manifest `mpf-games.json`.** When the folder holds this file (written by `build_game_package.py --publish`, you never edit it),
+the page lists the bundles it names instead of every `.tar.xz` it finds: only the ones for this machine's architecture, each as
+*game name + version*, with the sha256 taken from the manifest (no `.sha256` file needed), marked *updates <game and installed
+versions>* when a newer version of an installed game is offered, *new game* otherwise, and *installed* when that version is already here.
+Format: `{"format": 1, "items": [{"id", "name", "version", "arch", "file", "size", "sha256", "published"}]}`, `file` relative to the
+folder. Without the file the folder is listed as before, so a hand-made folder still works. PuP Pack `.zip` files are always listed
+from the folder itself. The engine itself (the base
 system) is not updated this way yet.
 
 ## Tabs: switch monitor and saved logs

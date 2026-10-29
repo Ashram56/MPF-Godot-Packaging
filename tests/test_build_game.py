@@ -30,6 +30,18 @@ class Put(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def do_GET(self):
+        path = os.path.join(Put.root, self.path.strip("/").replace("%20", " "))
+        if not os.path.isfile(path):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            return self.end_headers()
+        data = open(path, "rb").read()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_PUT(self):
         data = self.rfile.read(int(self.headers["Content-Length"]))
         with open(os.path.join(Put.root, self.path.strip("/")), "wb") as f:
@@ -95,8 +107,17 @@ class BuildTest(unittest.TestCase):
         self.addCleanup(srv.shutdown)
         with mock.patch.dict(os.environ, {"WEBDAV_USER": "u", "WEBDAV_PASS": "p"}):
             self.run_tool(self.recipe(), "--repo", self.repo, "--version", "2.0", "--out", self.out, "--publish", f"http://127.0.0.1:{srv.server_address[1]}/games")
+        with mock.patch.dict(os.environ, {"WEBDAV_USER": "u", "WEBDAV_PASS": "p"}):      # a second version: the manifest keeps both
+            self.run_tool(self.recipe(), "--repo", self.repo, "--version", "2.1", "--out", self.out, "--publish", f"http://127.0.0.1:{srv.server_address[1]}/games")
+            self.run_tool(self.recipe(), "--repo", self.repo, "--version", "2.1", "--out", self.out, "--publish", f"http://127.0.0.1:{srv.server_address[1]}/games")
+        doc = json.load(open(os.path.join(Put.root, "games", "mpf-games.json")))
+        self.assertEqual(doc["format"], 1)
+        self.assertEqual(sorted(i["version"] for i in doc["items"]), ["2.0", "2.1"])         # 2.1 published twice: one entry
+        first = doc["items"][0]
+        self.assertTrue(first["file"].startswith("fake/") and first["file"].endswith(".tar.xz"))
+        self.assertEqual(len(first["sha256"]), 64)
         got = sorted(os.listdir(os.path.join(Put.root, "games", "fake")))
-        self.assertEqual(len(got), 2)
+        self.assertEqual(len(got), 4)
         self.assertTrue(got[1].endswith(".tar.xz.sha256") or got[0].endswith(".tar.xz.sha256"))
 
     def test_dry_run_changes_nothing(self):
