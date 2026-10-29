@@ -29,7 +29,10 @@ MPF_MONITOR_VERSION = "1.0.0"
 # ruamel.yaml.clib 0.2.15 names its metadata ruamel_yaml_clib, which MPF's pkg_resources (setuptools 72) cannot
 # match to ruamel.yaml's requirement: `mpf` fails to start once mpf-monitor is installed. Python 3.13+ does not
 # use the C library. fixes/mpf/ruamel-yaml-clib-0.2.15.md
-REQUIREMENTS = ["mpf==" + MPF_VERSION, 'ruamel.yaml.clib==0.2.14; python_version < "3.13"']
+# numpy: the tools games run to make their media on the machine (a PuP Pack's clips and letters, HD DMD art); a clean
+# `pip install mpf` has none. A bundle names what else it needs in bundle.json requires.python_packages, which the page's
+# installer pip-installs into the game's venv. platforms/game-bundles.md rule 12
+REQUIREMENTS = ["mpf==" + MPF_VERSION, 'ruamel.yaml.clib==0.2.14; python_version < "3.13"', "numpy>=1.24"]
 # PyQt6 6.8+ ships Linux arm64 wheels for glibc 2.39+ only; 6.7's need glibc 2.28 (JetPack 5: 2.31, JetPack 6:
 # 2.35). Without a wheel pip builds the sdist, which needs qmake and fails. fixes/mpf-monitor/pyqt6-arm64-glibc.md
 MONITOR_REQUIREMENTS = ["mpf-monitor==" + MPF_MONITOR_VERSION,

@@ -67,6 +67,7 @@ They are the same for every game, each one comes from a bundle that installed fi
 | 9 | **Give the game a `run.check`** when its start needs more than imports (a file read at start, a config): a command that exits 0 when the game can start, in a few seconds, with no display. | The import check cannot see a missing table or a bad config; the game's own check can. |
 | 10 | **Deliver a bundle only from a commit that is on the remote default branch.** The tool refuses a commit that is not (`--allow-branch` makes a test package that is not delivered). | A bundle built from an unpushed commit cannot be rebuilt or fixed by anyone else (observed 2026-10-29). |
 | 11 | **Install the archive on a machine and watch it run** before calling it done: `common/games/check_installed.sh 60` (the service stays active, no restart). A build that "checks" has not been run. | Every item above was invisible to the build's own checks. |
+| 12 | **A tool the game runs on the machine (to make media from the PuP Pack, to build art) declares its Python packages** in `bundle.json` `requires.python_packages`; the platform installs them: numpy is in the toolchain's `REQUIREMENTS` (every platform's venv) and the page's installer pip-installs the bundle's list into `MPF_GAME_VENV` (best effort, logged). A game must not pip-install into its own folder. | A PC with a clean venv (`pip install mpf` has no numpy) failed to make the HD letters and clips: the game fell back to the dot animations (Tron, 2026-10-29). |
 
 ## Known failures (symptom, cause, rule)
 
@@ -80,6 +81,7 @@ A new game's session reads this table before it builds. Each row comes from a re
 | Fixes present in the repository are missing from the bundle | Built from a work branch, or from a commit that was never pushed | Rules 1 and 10 (the builder refuses) |
 | `could not read Username ... Failed to clone 'pup_pack'` during setup | The PuP Pack submodule is private | Expected: the pack is never in the bundle (rule 7), installed from the author's zip |
 | A bundle "checks" but does not run | Only the build's own checks were looked at | Rule 11: install it and run `check_installed.sh 60` |
+| HD DMD shows the dot animations and ROM letters on a machine, the PuP clips on the builder (2026-10-29) | The art made from the PuP Pack (clips, letters) needs numpy and lived inside the pack-install folder that a library pack reuse replaced; a clean venv has no numpy | Rule 12; the game keeps the made art beside the pack and remakes it at start |
 
 What a bundle that cannot start does on a machine: the page's installer unpacks it, runs `mpf_bundlecheck.py` and the game's
 `run.check`, and **refuses it before touching anything**: the installed game stays the active one, the message says what is missing.
