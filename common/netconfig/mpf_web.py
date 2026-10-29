@@ -69,7 +69,7 @@ def state():
         games.append({
             "folder": g["folder"], "id": g["id"], "name": g["name"], "version": g["version"], "active": g["active"],
             "description": str(b.get("description", ""))[:300], "icon": game_icon(g),
-            "pup": {"supported": bool(b.get("pup")), "installed": G.pup_installed(g["path"], b)},
+            "pup": {"supported": bool(b.get("pup")), "installed": G.pup_installed(g["path"], b), "assigned": G.pup_assigned(g["path"], b)},
             "settings": bool(G.options_tool(g["path"])),
             "installed": int(g["mtime"]),
         })
@@ -80,6 +80,7 @@ def state():
         "network": N.network_info(),
         "game": {"running": G.game_running(), "autostart": G.game_autostart()},
         "games": games,
+        "pups": G.pup_library(),
         "storage": {"games": disk(C.GAMES if os.path.isdir(C.GAMES) else "/"), "readonly": C.READONLY,
                     "degraded": os.path.exists("/run/mpf-persist.degraded")},
         "mode": {"mode": mode[0], "stay": mode[1]} if mode else None,
@@ -172,8 +173,6 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("expected a .tar.xz bundle" if kind == "game" else "expected a .zip pack")
                 if "linux-" in name and kind == "game" and not name.endswith((f"linux-{me}.tar.xz", "linux-all.tar.xz")):
                     raise ValueError(f"this machine is {me}: wrong bundle")
-                if kind == "pup" and not G.installed_game(folder):
-                    raise ValueError("install the game first")
                 if G.free_gb(C.UPLOADS) * 1e9 < total * (4 if kind == "game" else 2) + 5e8:
                     raise ValueError("not enough free disk space for this file")
                 open(path, "wb").close()
@@ -203,8 +202,8 @@ class Handler(BaseHTTPRequestHandler):
         if kind == "game":
             fn, args = G.install_game, (path, q.get("sha", [""])[0], q.get("keep", ["1"])[0] != "0")
         else:
-            fn, args = G.install_pup, (path, folder)
-        G.job_set(state="running", msg="Received, installing")
+            fn, args = G.store_pup, (path, name)
+        G.job_set(state="running", msg="Received, installing" if kind == "game" else "Received, checking the pack")
         threading.Thread(target=G.run_job, args=(fn,) + args, daemon=True).start()
         self._send(202, "installing", "text/plain")
 
@@ -281,7 +280,7 @@ class Handler(BaseHTTPRequestHandler):
             N.add_wifi(form.get("ssid", ""), form.get("psk", ""), form.get("country", "").upper())
             return "Wi-Fi saved, connecting (the address may change)."
         if path == "/api/ota/config":
-            O.save(form.get("url", ""), form.get("user", ""), form.get("password", ""))
+            O.save(form.get("url", ""), form.get("user", ""), form.get("password", ""), form.get("folder", ""))
             return "Update server saved."
         if path == "/api/ota/install":
             # the item comes from the server's own listing, never from the browser's address: the saved password must not be
@@ -294,6 +293,18 @@ class Handler(BaseHTTPRequestHandler):
             G.job_set(state="running", msg="Starting the download", log="")
             threading.Thread(target=G.run_job, args=(O.install_item, item), daemon=True).start()
             return "Installing " + item["name"]
+        if path in ("/api/pup/assign", "/api/pup/unassign", "/api/pup/delete"):
+            if not G.JOB_LOCK.acquire(blocking=False):
+                raise ValueError("an install is already running")
+            G.job_set(state="running", msg="Working on the PuP Pack", log="")
+            if path == "/api/pup/assign":
+                fn, args = G.assign_pup, (form.get("folder", ""), form.get("pack", ""))
+            elif path == "/api/pup/unassign":
+                fn, args = G.unassign_pup, (form.get("folder", ""),)
+            else:
+                fn, args = G.delete_pup_job, (form.get("pack", ""),)
+            threading.Thread(target=G.run_job, args=(fn,) + args, daemon=True).start()
+            return "Working on it"
         if path == "/api/logs/save":
             name = MON.save_log(next((g for g in G.installed_games() if g["active"]), None))
             return f"Saved as {name} in {MON.SAVED}"
@@ -445,17 +456,23 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
 <div class="card"><div class="two">
  <div><div class="drop" id="dropGame"><svg><use href="#i-up"/></svg><b data-t="dropGame"></b><span data-t="dropGameHint"></span></div>
   <input type="file" id="fGame" accept=".xz" class="hide"><label class="row mt muted"><input type="checkbox" id="keepOld" checked style="width:auto"> <span data-t="keepOld"></span></label>
-  <label class="muted mt" style="display:block"><span data-t="sha"></span> <input type="file" id="fSha" accept=".sha256,.txt"></label></div>
+  <label class="muted mt" style="display:block"><span data-t="sha"></span> <input type="file" id="fSha" accept=".sha256,.txt"></label>
+  <div class="row mt"><button class="pri" id="goGame" disabled><svg><use href="#i-up"/></svg><span data-t="goGame"></span></button></div></div>
  <div><div class="drop" id="dropPup"><svg><use href="#i-up"/></svg><b data-t="dropPup"></b><span data-t="dropPupHint"></span></div>
-  <input type="file" id="fPup" accept=".zip" class="hide"><label class="muted mt" style="display:block"><span data-t="packFor"></span> <select id="pupFor"></select></label></div>
+  <input type="file" id="fPup" accept=".zip" class="hide"><div class="row mt"><button class="pri" id="goPup" disabled><svg><use href="#i-up"/></svg><span data-t="goPup"></span></button></div></div>
 </div>
 <div class="mt hide" id="jobBox"><div class="row"><b id="jobMsg" class="grow"></b><span class="badge" id="jobBadge"></span></div><div class="bar mt" id="jobBar"><i></i></div><pre id="jobLog" class="mt hide"></pre></div>
 <p class="muted mt" id="inboxNote"></p></div></section>
 
+<section data-tab="install"><h2><svg stroke="currentColor"><use href="#i-play"/></svg><span data-t="packs"></span></h2><div class="card">
+ <div class="nets" id="packList"></div><p class="muted" id="packNone"></p>
+ <h3 class="mt" data-t="assign"></h3><div class="nets" id="packGrid"></div><p class="muted mt" data-t="assignHint"></p></div></section>
+
 <section data-tab="install"><h2><svg stroke="currentColor"><use href="#i-redo"/></svg><span data-t="ota"></span></h2><div class="card">
- <form class="form" id="otaForm"><div class="two"><label><span data-t="otaUrl"></span><input name="url" id="otaUrl" placeholder="https://…/games/" autocomplete="off"></label>
+ <form class="form" id="otaForm"><div class="two"><label><span data-t="otaUrl"></span><input name="url" id="otaUrl" placeholder="https://server.example" autocomplete="off"></label>
+ <label><span data-t="otaFolder"></span><input name="folder" id="otaFolder" placeholder="MPF Games" autocomplete="off"></label></div><div class="two">
  <label><span data-t="otaUser"></span><input name="user" id="otaUser" autocomplete="off"></label></div>
- <label><span data-t="otaPw"></span><input name="password" id="otaPw" type="password" autocomplete="new-password"></label>
+ <label><span data-t="otaPw"></span><input name="password" id="otaPw" type="password" autocomplete="new-password"></label></div>
  <div class="row"><button type="submit"><span data-t="otaSave"></span></button><button type="button" id="otaCheck" class="pri"><span data-t="otaCheck"></span></button><span class="muted" data-t="otaHint"></span></div></form>
  <div class="nets mt" id="otaList"></div></div></section>
 
@@ -487,23 +504,23 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
 
 <script>
 const T={en:{tabGames:"Games",tabInstall:"Install and updates",tabConfig:"Configuration",diag:"Diagnostics",saveLog:"Save the game log",saveLogHint:"Writes the game output, the machine state and the latest switch changes to one file on the data partition (the live logs are in RAM), to hand it over for debugging.",savedLogs:"Saved logs",monitor:"Switch monitor",monFilter:"Filter…",monToggle:"Click flips the switch",monTap:"Click taps the switch",monHint:"Live view through MPF's BCP connection (the game must be running). Short press = the switch closes and opens, long press = it stays closed while you hold, right click = flips it. Ctrl + wheel zooms.",monLog:"Latest changes",monNone:"No switch yet",monZoom:"Zoom",monSize:"Size",monViewPf:"Playfield",monViewList:"List",monOn:"on",monOff:"off",monConn:"Connected",monDisc:"Not connected",games:"Games",add:"Add a game or a PuP Pack",dropGame:"Game bundle",dropGameHint:"Drop a .tar.xz here or click",dropPup:"PuP Pack",dropPupHint:"Drop the pack's .zip here or click",
-keepOld:"Keep the older versions of this game",sha:"Its .sha256 file (optional)",packFor:"Install the pack for",network:"Network",system:"System",scan:"Scan",ssid:"Network name",psk:"Password",country:"Country code",connect:"Save and connect",
+goGame:"Upload and install",goPup:"Add to the library",packs:"PuP Packs",assign:"Pack of each game",assignHint:"A pack is added to the library once, then given to a game here. Switching it costs no new upload (the game keeps a link to the pack).",noPack:"No pack",ownPack:"installed with the game",packNone:"No pack in the library yet.",del:"Delete",confirmDelPack:"Remove this pack from the library?",otaFolder:"Folder on the server",otaUpdates:"updates",otaNew:"new game",keepOld:"Keep the older versions of this game",sha:"Its .sha256 file (optional)",packFor:"Install the pack for",network:"Network",system:"System",scan:"Scan",ssid:"Network name",psk:"Password",country:"Country code",connect:"Save and connect",
 sshKey:"SSH public key",sshPw:"SSH password login",unchanged:"unchanged",save:"Save",logs:"Game output",active:"Active",activate:"Activate at startup",start:"Start",stop:"Stop",restart:"Restart",settings:"Settings",delete:"Remove",
 running:"Running",stopped:"Stopped",noGames:"No game installed yet. Add a bundle below.",pupYes:"PuP Pack installed",pupNo:"no PuP Pack",version:"Version",confirmDel:"Remove this game with its settings and scores?",
 game:"Game",storage:"Storage",free:"free",uptime:"Up",online:"Online",offline:"Offline",autostart:"Starts at power-on",noAuto:"Does not start at power-on",enableAuto:"Start at power-on",disableAuto:"Do not start at power-on",
 mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"The system is read-only: the flash is not worn. Games, settings, scores, Wi-Fi and SSH keys are stored on the data partition and can be changed.",
 maintTxt:"The system is writable (for updates of the operating system). Go back to production when you are done.",toMaint:"Maintenance until reboot",toMaintStay:"Maintenance, also after reboots",toProd:"Back to production",
 degraded:"No data partition: settings and scores are kept in RAM and are lost at power-off.",inbox:"Waiting in the inbox (installed at the next boot): ",inboxHelp:"Files copied to the inbox folder are installed at boot.",
-uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none",ota:"Updates (WebDAV)",otaUrl:"Server address",otaUser:"User",otaPw:"Password",otaPwKept:"unchanged",otaSave:"Save",otaCheck:"Check for updates",otaInstall:"Install",otaDone:"Installed",otaChanged:"Changed on the server",otaNone:"Nothing found in this folder",otaGame:"Game",otaPack:"PuP Pack",otaHint:"Folders of the server: bundles (.tar.xz, with a .sha256) and packs named <game>.pup.zip."},
+uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none",ota:"Updates (WebDAV)",otaUrl:"Server address",otaUser:"User",otaPw:"Password",otaPwKept:"unchanged",otaSave:"Save",otaCheck:"Check for updates",otaInstall:"Install",otaDone:"Installed",otaChanged:"Changed on the server",otaNone:"Nothing found in this folder",otaGame:"Game",otaPack:"PuP Pack",otaHint:"The address is the server only; the folder (default MPF Games) holds bundles (.tar.xz, with a .sha256), in sub-folders per game if you like, and PuP Pack .zip files (they go to the library)."},
 fr:{tabGames:"Jeux",tabInstall:"Installation et mises à jour",tabConfig:"Configuration",diag:"Diagnostic",saveLog:"Enregistrer le jeu (log)",saveLogHint:"Écrit la sortie du jeu, l'état de la machine et les derniers changements de switches dans un fichier sur la partition de données (les logs en cours sont en RAM), à fournir pour le débogage.",savedLogs:"Logs enregistrés",monitor:"Moniteur de switches",monFilter:"Filtrer…",monToggle:"Un clic inverse le switch",monTap:"Un clic fait une impulsion",monHint:"Vue en direct par la connexion BCP de MPF (le jeu doit être démarré). Appui court = le switch se ferme puis s'ouvre, appui long = il reste fermé tant que vous maintenez, clic droit = bascule. Ctrl + molette = zoom.",monLog:"Derniers changements",monNone:"Aucun switch",monZoom:"Zoom",monSize:"Taille",monViewPf:"Plateau",monViewList:"Liste",monOn:"actif",monOff:"inactif",monConn:"Connecté",monDisc:"Non connecté",games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
-keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
+goGame:"Envoyer et installer",goPup:"Ajouter à la bibliothèque",packs:"PuP Packs",assign:"Pack de chaque jeu",assignHint:"Un pack est ajouté une fois à la bibliothèque, puis affecté à un jeu ici. Le changer ne demande pas de nouvel envoi (le jeu garde un lien vers le pack).",noPack:"Aucun pack",ownPack:"installé avec le jeu",packNone:"Aucun pack dans la bibliothèque.",del:"Supprimer",confirmDelPack:"Retirer ce pack de la bibliothèque ?",otaFolder:"Dossier sur le serveur",otaUpdates:"met à jour",otaNew:"nouveau jeu",keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
 sshKey:"Clé publique SSH",sshPw:"Connexion SSH par mot de passe",unchanged:"inchangé",save:"Enregistrer",logs:"Sortie du jeu",active:"Actif",activate:"Activer au démarrage",start:"Démarrer",stop:"Arrêter",restart:"Redémarrer",settings:"Réglages",delete:"Supprimer",
 running:"En marche",stopped:"Arrêté",noGames:"Aucun jeu installé. Ajoutez un bundle ci-dessous.",pupYes:"PuP Pack installé",pupNo:"pas de PuP Pack",version:"Version",confirmDel:"Supprimer ce jeu avec ses réglages et ses scores ?",
 game:"Jeu",storage:"Stockage",free:"libres",uptime:"Démarré depuis",online:"En ligne",offline:"Hors ligne",autostart:"Démarre à la mise sous tension",noAuto:"Ne démarre pas à la mise sous tension",enableAuto:"Démarrer à la mise sous tension",disableAuto:"Ne pas démarrer à la mise sous tension",
 mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"Le système est en lecture seule : la flash ne s'use pas. Jeux, réglages, scores, Wi-Fi et clés SSH sont sur la partition de données et restent modifiables.",
 maintTxt:"Le système est modifiable (mises à jour du système). Revenez en production quand vous avez fini.",toMaint:"Maintenance jusqu'au redémarrage",toMaintStay:"Maintenance, même après redémarrage",toProd:"Retour en production",
 degraded:"Pas de partition de données : réglages et scores sont en RAM et perdus à l'extinction.",inbox:"En attente dans la boîte d'arrivée (installés au prochain démarrage) : ",inboxHelp:"Les fichiers copiés dans le dossier inbox sont installés au démarrage.",
-uploading:"Envoi",installing:"Installation",done:"Terminé",error:"Erreur",hostPrefix:"Adresse",signal:"signal",openNet:"ouvert",selectGame:"Choisir un jeu",saved:"Enregistré",close:"Fermer",cancel:"Annuler",saveSettings:"Enregistrer les réglages",none:"aucun",ota:"Mises à jour (WebDAV)",otaUrl:"Adresse du serveur",otaUser:"Utilisateur",otaPw:"Mot de passe",otaPwKept:"inchangé",otaSave:"Enregistrer",otaCheck:"Chercher les mises à jour",otaInstall:"Installer",otaDone:"Installé",otaChanged:"Modifié sur le serveur",otaNone:"Rien dans ce dossier",otaGame:"Jeu",otaPack:"PuP Pack",otaHint:"Dossiers du serveur : bundles (.tar.xz, avec un .sha256) et packs nommés <jeu>.pup.zip."}};
+uploading:"Envoi",installing:"Installation",done:"Terminé",error:"Erreur",hostPrefix:"Adresse",signal:"signal",openNet:"ouvert",selectGame:"Choisir un jeu",saved:"Enregistré",close:"Fermer",cancel:"Annuler",saveSettings:"Enregistrer les réglages",none:"aucun",ota:"Mises à jour (WebDAV)",otaUrl:"Adresse du serveur",otaUser:"Utilisateur",otaPw:"Mot de passe",otaPwKept:"inchangé",otaSave:"Enregistrer",otaCheck:"Chercher les mises à jour",otaInstall:"Installer",otaDone:"Installé",otaChanged:"Modifié sur le serveur",otaNone:"Rien dans ce dossier",otaGame:"Jeu",otaPack:"PuP Pack",otaHint:"L'adresse est celle du serveur seul ; le dossier (MPF Games par défaut) contient les bundles (.tar.xz, avec un .sha256), éventuellement un sous-dossier par jeu, et les PuP Packs .zip (ils vont dans la bibliothèque)."}};
 let L=(localStorage.getItem('mpfLang')||navigator.language||'en').slice(0,2);if(!T[L])L='en';
 const t=k=>(T[L]&&T[L][k])||T.en[k]||k, $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ico=(n,c='')=>`<svg class="${c}" stroke="currentColor"><use href="#i-${n}"/></svg>`;
@@ -560,8 +577,8 @@ async function openSettings(folder,name){
  $('#dCancel').onclick=()=>d.close();$('#dSave').onclick=async()=>{const r=await post('/api/settings/'+encodeURIComponent(folder),Object.fromEntries(new FormData($('#sForm'))));if(r.ok)d.close()}}
 $('#dlgClose').onclick=()=>$('#dlg').close();
 // uploads: 4 MB chunks, resumed after a cut
-function pick(drop,input){drop.onclick=()=>input.click();['dragenter','dragover'].forEach(v=>drop.addEventListener(v,e=>{e.preventDefault();drop.classList.add('over')}));
- ['dragleave','drop'].forEach(v=>drop.addEventListener(v,e=>{e.preventDefault();drop.classList.remove('over')}));drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])input._go(e.dataTransfer.files[0])});input.onchange=()=>{if(input.files[0])input._go(input.files[0])}}
+function pick(drop,input){const take=f=>{input._f=f;drop.querySelector('b').textContent=f.name;input._go(f)};drop.onclick=()=>input.click();['dragenter','dragover'].forEach(v=>drop.addEventListener(v,e=>{e.preventDefault();drop.classList.add('over')}));
+ ['dragleave','drop'].forEach(v=>drop.addEventListener(v,e=>{e.preventDefault();drop.classList.remove('over')}));drop.addEventListener('drop',e=>{if(e.dataTransfer.files[0])take(e.dataTransfer.files[0])});input.onchange=()=>{if(input.files[0])take(input.files[0])}}
 async function upload(kind,f,extra){
  const sf=$('#fSha').files[0];let sha='';if(kind==='game'&&sf){sha=(await sf.text()).trim().split(/\s+/)[0]}
  const base='/upload/'+kind+'?total='+f.size+'&name='+encodeURIComponent(f.name)+'&sha='+sha+(extra||''),C=4*1048576;let off=0,tries=0;const box=$('#jobBox');box.classList.remove('hide');
@@ -575,8 +592,20 @@ function setJob(msg,pct,cls,badge){$('#jobBox').classList.remove('hide');$('#job
 function renderJob(j){if(!j||j.state==='idle')return;const bd=$('#jobBadge');bd.className='badge '+(j.state==='done'?'ok':j.state==='error'?'bad':'acc');bd.textContent=t(j.state==='running'?'installing':j.state==='uploading'?'uploading':j.state);
  setJob(j.msg,j.state==='running'?null:100,j.state==='running'?'run':'');const l=$('#jobLog');if(j.log){l.textContent=j.log;l.classList.remove('hide')}}
 let pt;async function poll(){clearTimeout(pt);try{const j=await (await fetch('/job')).json();renderJob(j);if(j.state==='running'||j.state==='uploading')pt=setTimeout(poll,2000);else if(j.state==='done'){refresh()}}catch(e){pt=setTimeout(poll,3000)}}
-$('#fGame')._go=f=>upload('game',f,'&keep='+($('#keepOld').checked?1:0));$('#fPup')._go=f=>{const v=$('#pupFor').value;if(!v){toast(t('selectGame'),true);return}upload('pup',f,'&folder='+encodeURIComponent(v))};
+// choosing or dropping a file only selects it: the hash file can still be added, and nothing is sent until the button
+$('#fGame')._go=f=>{$('#goGame').disabled=false};$('#fPup')._go=f=>{$('#goPup').disabled=false};
 pick($('#dropGame'),$('#fGame'));pick($('#dropPup'),$('#fPup'));
+function resetPick(drop,input,btn,key){input._f=null;input.value='';drop.querySelector('b').textContent=t(key);btn.disabled=true}
+$('#goGame').onclick=async()=>{const f=$('#fGame')._f;if(!f)return;$('#goGame').disabled=true;await upload('game',f,'&keep='+($('#keepOld').checked?1:0));$('#fSha').value='';resetPick($('#dropGame'),$('#fGame'),$('#goGame'),'dropGame')};
+$('#goPup').onclick=async()=>{const f=$('#fPup')._f;if(!f)return;$('#goPup').disabled=true;await upload('pup',f,'');resetPick($('#dropPup'),$('#fPup'),$('#goPup'),'dropPup')};
+let packBusy=false;
+function packs(s){const lib=s.pups||[],gs=s.games.filter(g=>g.pup.supported);
+ $('#packList').innerHTML=lib.map(p=>`<div class="net"><b class="grow">${esc(p.name)}</b><span class="muted">${fmtB(p.size)}</span><button data-pdel="${esc(p.name)}" title="${t('del')}">${ico('trash')}</button></div>`).join('');
+ $('#packNone').textContent=lib.length?'':t('packNone');
+ if(packBusy||document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#packGrid'))return;
+ $('#packGrid').innerHTML=gs.map(g=>`<div class="net"><b class="grow">${esc(g.name)} ${esc(g.version)}</b><select data-pg="${esc(g.folder)}"><option value="">${t('noPack')}</option>${lib.map(p=>`<option value="${esc(p.name)}"${g.pup.assigned===p.name?' selected':''}>${esc(p.name)}</option>`).join('')}${g.pup.installed&&!g.pup.assigned?`<option value="" selected hidden>${t('ownPack')}</option>`:''}</select></div>`).join('')||'<span class="muted">—</span>'}
+$('#packGrid').onchange=async e=>{const sel=e.target.closest('select[data-pg]');if(!sel)return;sel.blur();packBusy=true;const r=sel.value?await post('/api/pup/assign',{folder:sel.dataset.pg,pack:sel.value}):await post('/api/pup/unassign',{folder:sel.dataset.pg});packBusy=false;poll()};
+$('#packList').onclick=async e=>{const b=e.target.closest('button[data-pdel]');if(!b)return;if(!confirm(t('confirmDelPack')))return;await post('/api/pup/delete',{pack:b.dataset.pdel});poll()};
 // network
 async function scan(){const b=$('#scanBtn');b.disabled=true;$('#nets').innerHTML='<span class="muted">…</span>';
  try{const n=await (await fetch('/api/scan')).json();$('#nets').innerHTML=n.map(x=>`<div class="net" data-s="${esc(x.ssid)}">${sig(x.signal)}<b class="grow">${esc(x.ssid)}</b><span class="muted">${x.secure?ico('lock'):t('openNet')}</span></div>`).join('')||'<span class="muted">—</span>'}catch(e){$('#nets').innerHTML=''}b.disabled=false}
@@ -587,13 +616,15 @@ let logT=null;$('#dlg').addEventListener('close',()=>clearInterval(logT));
 $('#logsBtn').onclick=()=>{const d=$('#dlg');$('#dlgTitle').textContent=t('logs');$('#dlgBody').innerHTML='<pre id="logView" style="max-height:60vh">…</pre>';$('#dlgFoot').innerHTML='';d.showModal();
  const load=async()=>{const p=$('#logView');if(!p||!d.open)return;try{const r=await (await fetch('/api/logs')).text();const end=p.scrollTop+p.clientHeight>=p.scrollHeight-30;if(p.textContent!==r){p.textContent=r;if(end||p.textContent==='…')p.scrollTop=p.scrollHeight}}catch(e){}};
  load();clearInterval(logT);logT=setInterval(load,3000)};
-function otaFill(o){if(!o)return;if(document.activeElement!==$('#otaUrl'))$('#otaUrl').value=o.url||'';if(document.activeElement!==$('#otaUser'))$('#otaUser').value=o.user||'';$('#otaPw').placeholder=o.has_password?t('otaPwKept'):''}
-$('#otaForm').onsubmit=e=>{e.preventDefault();post('/api/ota/config',Object.fromEntries(new FormData(e.target)))};
+let otaDirty=false,otaFilled=false;
+function otaFill(o){if(!o)return;if(!otaDirty&&(!otaFilled||!$('#otaForm').contains(document.activeElement))){$('#otaUrl').value=o.url||'';$('#otaFolder').value=o.folder==null?'MPF Games':o.folder;$('#otaUser').value=o.user||'';otaFilled=true}$('#otaPw').placeholder=o.has_password?t('otaPwKept'):''}
+$('#otaForm').addEventListener('input',()=>{otaDirty=true});
+$('#otaForm').onsubmit=async e=>{e.preventDefault();const r=await post('/api/ota/config',Object.fromEntries(new FormData(e.target)));if(r&&r.ok)otaDirty=false};
 $('#otaCheck').onclick=async()=>{const b=$('#otaCheck');b.disabled=true;$('#otaList').innerHTML='<span class="muted">…</span>';
  try{const r=await fetch('/api/ota/list');const j=await r.json();if(!r.ok){toast(j.msg||'?',true);$('#otaList').innerHTML='';b.disabled=false;return}
- $('#otaList').innerHTML=j.map(i=>`<div class="net"><b class="grow">${esc((i.group?i.group+' / ':'')+i.name)}</b><span class="muted">${i.kind==='game'?t('otaGame'):t('otaPack')} · ${fmtB(i.size)}</span>${i.changed?`<span class="badge">${t('otaChanged')}</span>`:i.installed?`<span class="badge">${t('otaDone')}</span>`:''}${i.compatible?`<button data-k="${esc(i.key)}">${t('otaInstall')}</button>`:''}</div>`).join('')||'<span class="muted">'+t('otaNone')+'</span>'}catch(e){toast('?',true)}b.disabled=false};
+ $('#otaList').innerHTML=j.map(i=>`<div class="net"><b class="grow">${esc((i.group?i.group+' / ':'')+i.name)}</b>${i.kind==='game'?`<span class="badge">${i.for?t('otaUpdates')+' '+esc(i.for):t('otaNew')}</span>`:''}<span class="muted">${i.kind==='game'?t('otaGame'):t('otaPack')} · ${fmtB(i.size)}</span>${i.changed?`<span class="badge">${t('otaChanged')}</span>`:i.installed?`<span class="badge">${t('otaDone')}</span>`:''}${i.compatible?`<button data-k="${esc(i.key)}">${t('otaInstall')}</button>`:''}</div>`).join('')||'<span class="muted">'+t('otaNone')+'</span>'}catch(e){toast('?',true)}b.disabled=false};
 $('#otaList').onclick=async e=>{const b=e.target.closest('button[data-k]');if(!b)return;b.disabled=true;await post('/api/ota/install',{key:b.dataset.k});poll()};
-async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);otaFill(S.ota)}catch(e){}}
+async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);packs(S);otaFill(S.ota)}catch(e){}}
 const TABS=['games','install','config','monitor'];let TAB=(location.hash||'').slice(1);if(!TABS.includes(TAB))TAB='games';
 function showTab(){if(TAB==='monitor')monStart();else monStop();document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('hide',e.dataset.tab!==TAB));document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.go===TAB))}
 $('#tabs').onclick=e=>{const b=e.target.closest('button[data-go]');if(!b)return;TAB=b.dataset.go;history.replaceState(null,'','#'+TAB);showTab();if(TAB==='config')savedList()};

@@ -91,8 +91,8 @@ class Ota(TG.Base):
 
     def test_config_never_exposes_the_password_and_keeps_it(self):
         O.save(self.url, "claude", "secret")
-        self.assertEqual(O.public(), {"url": self.url, "user": "claude", "has_password": True})
-        O.save(self.url, "claude", "")                       # an empty field keeps the saved password
+        self.assertEqual(O.public(), {"url": self.url, "folder": "MPF Games", "user": "claude", "has_password": True})
+        O.save(self.url, "claude", "", "")                       # an empty field keeps the saved password
         self.assertEqual(O.load()["password"], "secret")
         self.assertEqual(os.stat(O.conf_path()).st_mode & 0o777, 0o600)
         with self.assertRaises(ValueError):
@@ -100,7 +100,7 @@ class Ota(TG.Base):
 
     def test_list_and_install_a_bundle_then_changed(self):
         self.put_bundle()
-        O.save(self.url, "claude", "secret")
+        O.save(self.url, "claude", "secret", "")
         items = O.list_remote()
         self.assertEqual([(i["group"], i["name"], i["kind"], i["installed"]) for i in items], [("demo", "demo-1.0-linux-all.tar.xz", "game", False)])
         self.assertTrue(items[0]["sha_url"])
@@ -116,30 +116,41 @@ class Ota(TG.Base):
     def test_bad_sha_and_wrong_password(self):
         path = self.put_bundle()
         open(path + ".sha256", "w").write("0" * 64 + "\n")
-        O.save(self.url, "claude", "secret")
+        O.save(self.url, "claude", "secret", "")
         G.JOB_LOCK.acquire()
         G.run_job(O.install_item, O.list_remote()[0])
         self.assertEqual(G.JOB["state"], "error")
         self.assertEqual(G.installed_games(), [])
-        O.save(self.url, "claude", "wrong")
+        O.save(self.url, "claude", "wrong", "")
         with self.assertRaises(ValueError):
             O.list_remote()
 
-    def test_pack_needs_a_game_it_names(self):
+    def test_pack_goes_to_the_library(self):
         self.put_bundle(extra={"pup": {"pack_dir": "pup_pack/p", "install": "true"}})
-        open(os.path.join(self.remote, "demo", "other.pup.zip"), "wb").write(b"PK")
-        open(os.path.join(self.remote, "demo", "demo.pup.zip"), "wb").write(b"PK")
-        O.save(self.url, "claude", "secret")
+        import io
+        import zipfile
+        buf = io.BytesIO()
+        zipfile.ZipFile(buf, "w").writestr("a.txt", "x")
+        open(os.path.join(self.remote, "demo", "demo.pup.zip"), "wb").write(buf.getvalue())
+        O.save(self.url, "claude", "secret", "")
         by = {i["name"]: i for i in O.list_remote()}
+        self.assertEqual(by["demo-1.0-linux-all.tar.xz"]["for"], "")              # nothing installed yet: a new game
         G.JOB_LOCK.acquire()
         G.run_job(O.install_item, by["demo-1.0-linux-all.tar.xz"])
         self.assertEqual(G.JOB["state"], "done", G.JOB["msg"])
-        G.JOB_LOCK.acquire()
-        G.run_job(O.install_item, by["other.pup.zip"])                    # names no installed game
-        self.assertEqual(G.JOB["state"], "error")
+        self.assertTrue(O.list_remote()[0]["for"].startswith("Demo"))             # now it names the game it updates
         G.JOB_LOCK.acquire()
         G.run_job(O.install_item, by["demo.pup.zip"])
         self.assertEqual(G.JOB["state"], "done", G.JOB["msg"] + G.JOB["log"])
+        self.assertEqual([p["name"] for p in G.pup_library()], ["demo.pup.zip"])
+
+    def test_folder_field(self):
+        O.save(self.url, "claude", "secret")                                     # default folder
+        self.assertEqual(O.base(O.load()), self.url + "MPF%20Games/")
+        O.save(self.url, "claude", "", "A/b c/")
+        self.assertEqual(O.base(O.load()), self.url + "A/b%20c/")
+        with self.assertRaises(ValueError):
+            O.save(self.url, "claude", "", "../x")
 
     def test_redirect_is_refused(self):
         class Redir(http.server.BaseHTTPRequestHandler):
@@ -153,7 +164,7 @@ class Ota(TG.Base):
         srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Redir)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
-            O.save(f"http://127.0.0.1:{srv.server_address[1]}/", "u", "p")
+            O.save(f"http://127.0.0.1:{srv.server_address[1]}/", "u", "p", "")
             with self.assertRaises(ValueError):
                 O.list_remote()
         finally:

@@ -33,8 +33,9 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.t = tempfile.TemporaryDirectory()
         t = self.t.name
-        self.saved = {k: getattr(C, k) for k in ("GAMES", "STATE_DIR", "UPLOADS", "INBOX", "USER", "JOB_FILE", "GAME_ENV", "READONLY")}
+        self.saved = {k: getattr(C, k) for k in ("GAMES", "STATE_DIR", "UPLOADS", "INBOX", "PUPS", "USER", "JOB_FILE", "GAME_ENV", "READONLY")}
         C.GAMES, C.STATE_DIR, C.UPLOADS, C.INBOX = (os.path.join(t, n) for n in ("games", "state", "up", "inbox"))
+        C.PUPS = os.path.join(t, "pups")
         C.JOB_FILE = os.path.join(t, "job.json")
         C.GAME_ENV = os.path.join(t, "mpf-game")
         C.USER, C.READONLY = pwd.getpwuid(os.getuid()).pw_name, False
@@ -229,6 +230,55 @@ class Inbox(Base):
         self.assertEqual(G.inbox_pup_target("a@1.pup.zip", games), "a@1")
         self.assertEqual(G.inbox_pup_target("b.pup.zip", games), "b@1")
         self.assertIsNone(G.inbox_pup_target("c.pup.zip", games))
+
+
+class PupLibrary(Base):
+    PACK = {"pup": {"pack_dir": "pup_pack/p", "media_dir": "pup_media/p",
+                    "install": "sh -c 'mkdir -p pup_pack/p pup_media/p && echo v > pup_pack/p/a.mp4 && echo m > pup_media/p/a.webm'"}}
+
+    def upload(self, name="pack.zip"):
+        import zipfile
+        p = os.path.join(C.UPLOADS, "pup.zip")
+        zipfile.ZipFile(p, "w").writestr("a.txt", "x")
+        return G.pup_store(p, name)
+
+    def test_store_and_refuse_a_non_zip(self):
+        self.assertEqual(self.upload("my pack.zip"), "my_pack.zip")
+        self.assertEqual([p["name"] for p in G.pup_library()], ["my_pack.zip"])
+        bad = os.path.join(C.UPLOADS, "pup.zip")
+        open(bad, "wb").write(b"nope")
+        with self.assertRaises(G.JobError):
+            G.pup_store(bad, "x.zip")
+
+    def test_assign_links_and_is_shared_by_versions(self):
+        self.install(extra=self.PACK)
+        name = self.upload()
+        G.assign_pup("demo@1.0", name)
+        game = os.path.join(C.GAMES, "demo@1.0")
+        self.assertTrue(os.path.islink(os.path.join(game, "pup_pack/p")))
+        self.assertEqual(open(os.path.join(game, "pup_pack/p/a.mp4")).read().strip(), "v")
+        self.assertEqual(G.pup_assigned(game), name)
+        self.assertTrue(G.pup_installed(game))
+        self.install(version="2.0", extra=self.PACK)                          # a new version inherits the link
+        self.assertEqual(G.pup_assigned(os.path.join(C.GAMES, "demo@2.0")), name)
+        with self.assertRaises(G.JobError):                                   # in use: cannot be deleted
+            G.delete_pup(name)
+        G.unassign_pup("demo@1.0")
+        G.unassign_pup("demo@2.0")
+        self.assertIsNone(G.pup_assigned(game))
+        self.assertFalse(G.pup_installed(game))
+        G.assign_pup("demo@1.0", name)                                        # again: no second install (the installer would add a marker)
+        G.unassign_pup("demo@1.0")
+        G.delete_pup(name)
+        self.assertEqual(G.pup_library(), [])
+
+    def test_assign_needs_a_pack_and_pack_support(self):
+        self.install(extra=self.PACK)
+        with self.assertRaises(G.JobError):
+            G.assign_pup("demo@1.0", "missing.zip")
+        self.install(gid="plain", extra={"pup": None})
+        with self.assertRaises(G.JobError):
+            G.assign_pup("plain@1.0", self.upload())
 
 
 if __name__ == "__main__":

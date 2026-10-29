@@ -1,5 +1,6 @@
 """Over-the-air updates of games and PuP Packs from a WebDAV folder (standard library only).
 
+The server address is the server only (https://host/…); the *folder* on it is a second field, "MPF Games" by default.
 The server holds bundles (`*.tar.xz`, with an optional `*.tar.xz.sha256` beside) and PuP Packs (`<id>.pup.zip` or
 `<id>@<version>.pup.zip`: the name says which game a pack is for) either in the configured folder or in sub-folders of it (one per
 game). The page lists them (PROPFIND), installs the chosen one exactly like an upload (same checks, same new-version rules, see
@@ -23,6 +24,7 @@ import mpf_games as G
 
 DAV = "{DAV:}"
 TIMEOUT = 30
+DEFAULT_FOLDER = "MPF Games"
 
 
 def conf_path():
@@ -53,16 +55,26 @@ def load():
 def public():
     """What the page may see: never the password."""
     c = load()
-    return {"url": c.get("url", ""), "user": c.get("user", ""), "has_password": bool(c.get("password"))}
+    return {"url": c.get("url", ""), "folder": c.get("folder", DEFAULT_FOLDER), "user": c.get("user", ""),
+            "has_password": bool(c.get("password"))}
 
 
-def save(url, user, password):
+def base(cfg):
+    """Address of the folder the page lists: the server address, then the folder (every segment percent-encoded)."""
+    segs = [urllib.parse.quote(x) for x in (cfg.get("folder", DEFAULT_FOLDER) or "").strip("/").split("/") if x]
+    return cfg["url"].rstrip("/") + "/" + "".join(x + "/" for x in segs)
+
+
+def save(url, user, password, folder=DEFAULT_FOLDER):
     url = url.strip()
     if url and not re.match(r"^https?://[^/\s]+", url):
         raise ValueError("the address must start with https:// (or http:// on a trusted network)")
     old = load()
-    cfg = {"url": url.rstrip("/") + "/" if url else "", "user": user.strip(), "password": password or old.get("password", "")}
-    if old.get("url") != cfg["url"] or old.get("user") != cfg["user"]:
+    folder = (folder or "").strip().strip("/")
+    if ".." in folder.split("/"):
+        raise ValueError("the folder must not contain ..")
+    cfg = {"url": url.rstrip("/") + "/" if url else "", "folder": folder, "user": user.strip(), "password": password or old.get("password", "")}
+    if (old.get("url"), old.get("folder"), old.get("user")) != (cfg["url"], cfg["folder"], cfg["user"]):
         cfg["installed"] = {}
     else:
         cfg["installed"] = old.get("installed", {})
@@ -119,13 +131,14 @@ def list_remote(cfg=None):
         raise ValueError("set the server address first")
     me = C.ARCH.get(platform.machine(), platform.machine())
     entries = []
-    for e in propfind(cfg, cfg["url"]):
+    for e in propfind(cfg, base(cfg)):
         if e["dir"]:
             entries += [dict(x, group=e["name"]) for x in propfind(cfg, e["url"] + ("" if e["url"].endswith("/") else "/")) if not x["dir"]]
         else:
             entries.append(dict(e, group=""))
     names = {(e["group"], e["name"]) for e in entries}
     done = cfg.get("installed", {})
+    installed = G.installed_games()
     items = []
     for e in sorted(entries, key=lambda e: (e["group"], e["name"])):
         n = e["name"]
@@ -138,7 +151,9 @@ def list_remote(cfg=None):
         compatible = not ("linux-" in n and kind == "game" and not n.endswith((f"linux-{me}.tar.xz", "linux-all.tar.xz")))
         key = (e["group"] + "/" if e["group"] else "") + n
         stamp = f"{e['size']}|{e['mtime']}"
-        items.append({"key": key, "name": n, "group": e["group"], "kind": kind, "size": e["size"], "mtime": e["mtime"], "url": e["url"],
+        target = next((g for g in installed if n.startswith(g["id"] + "-") or n.startswith(g["id"] + "@")
+                       or (e["group"] and e["group"].lower() == g["id"].lower())), None) if kind == "game" else None
+        items.append({"key": key, "for": (target["name"] + " " + target["version"]) if target else "", "name": n, "group": e["group"], "kind": kind, "size": e["size"], "mtime": e["mtime"], "url": e["url"],
                       "sha_url": e["url"] + ".sha256" if (e["group"], n + ".sha256") in names else "",
                       "compatible": compatible, "installed": key in done,
                       "changed": key in done and done[key] != stamp})
@@ -179,13 +194,10 @@ def install_item(item):
         _download(cfg, item["url"], dest, name)
         G.install_game(dest, sha)
     else:
-        games = G.installed_games()
-        target = G.inbox_pup_target(name, games) if name.endswith(".pup.zip") else None
-        if not target:
-            raise G.JobError(f"{name}: a pack must be named <game>.pup.zip or <game>@<version>.pup.zip for an installed game")
         dest = os.path.join(C.UPLOADS, "pup.zip")
         _download(cfg, item["url"], dest, name)
-        G.install_pup(dest, target)
+        G.pup_store(dest, name)           # into the library: the page assigns it to a game
+        G.job_set(state="done", msg=f"{name} is in the PuP Pack library: assign it to a game")
     cfg = load()
     cfg.setdefault("installed", {})[item["key"]] = f"{item['size']}|{item['mtime']}"
     _write(conf_path(), cfg)
