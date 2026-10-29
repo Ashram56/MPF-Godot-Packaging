@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | GDE GoZen at `f9448619324ad7d0d4e79d3bd501bde477ea4b7f` (`src/gozen_video.cpp` `GoZenVideo::open()`) |
 | Platforms | Linux arm64 on a Jetson: AGX Orin, L4T R36.4.3 (JetPack 6.2), and Xavier NX, L4T R35.6.4 (JetPack 5.1.4); elsewhere it falls back to software |
-| Found on | Tron Legacy MPF, 2026-10-04 (Tron-Legacy-MPF commit 4a322fb) |
+| Found on | a Stern SAM recreation, 2026-10-04 |
 | Fact | observed (Godot's log says `GoZen: hardware decoder h264_nvmpi` per video; `tegrastats` shows NVDEC busy) |
 | Our fix | [`../../build/gozen/gozen.patch`](../../build/gozen/gozen.patch) (`GoZenVideo::open()`, `_open_decoder()`); FFmpeg built with jetson-ffmpeg's `*_nvmpi` decoders by [`../../build/gozen/build_gozen.sh`](../../build/gozen/build_gozen.sh); libnvmpi installed on the board by [`../../platforms/jetson/install_jetson_hwdec.sh`](../../platforms/jetson/install_jetson_hwdec.sh) |
 | Applied by | the committed binaries in `addons/gde_gozen/bin/` (rebuilt by `build/gozen/build_gozen.sh`), copied by `python -m mpf_godot addons GAME --video` |

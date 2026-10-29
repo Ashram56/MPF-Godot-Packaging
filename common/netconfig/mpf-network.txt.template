@@ -14,3 +14,8 @@ SSH_PASSWORD_LOGIN=
 
 # Password of the setup web page http://<address>:8080 (empty: the password of the image user)
 WEB_PASSWORD=
+
+# Read-only production mode: maintenance makes the system writable (updates of the operating system), production closes it
+# again. Read once at the next boot, then emptied. maintenance stays on across reboots until you set production here, or
+# run `sudo mpf-mode production` / use the page on port 8080. Empty: unchanged.
+MODE=

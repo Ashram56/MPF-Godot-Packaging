@@ -1,6 +1,6 @@
 [Unit]
 Description=MPF game (installed from the setup page)
-After=network.target
+After=network.target mpf-netconfig-inbox.service
 ConditionPathExistsGlob=/opt/games/*/bundle.json
 
 [Service]

@@ -7,7 +7,7 @@
 | Kind | packaging |
 | Affected versions | mpf-monitor 1.0.0 on PyPI (wheel and sdist); and later until fixed upstream |
 | Platforms | all |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-03 |
+| Found on | a Stern SAM recreation, 2026-10-03 |
 | Fact | observed; the PyPI wheel and sdist listed again on 2026-10-12 (no `.ui` file in either) |
 | Our fix | [`mpf_godot/toolchain.py`](../../mpf_godot/toolchain.py) `MPF_MONITOR_UI_FILES`, `MPF_MONITOR_UI_URL`; [`mpf_godot/setup_toolchain.py`](../../mpf_godot/setup_toolchain.py) `install_monitor_ui()` |
 | Applied by | `python -m mpf_godot setup` (unless `--no-monitor`) |

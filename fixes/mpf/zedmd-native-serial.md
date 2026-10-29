@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | MPF 0.80.1; and later until fixed upstream |
 | Platforms | Linux arm64 (Raspberry Pi, Jetson); any Python other than the one the extension was built for |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-25 |
+| Found on | a Stern SAM recreation, 2026-10-25 |
 | Fact | observed (Python 3.13 on Linux x64: the extension does not import); code (`mpf/platforms/zedmd.py`) for the architecture test |
 | Our fix | [`mpf_godot/zedmd_native.py`](../../mpf_godot/zedmd_native.py): an MPF platform that speaks the ZeDMD serial protocol with pyserial |
 | Applied by | a game's config: `mpf: platforms: zedmd_native: mpf_godot.zedmd_native.ZedmdNativePlatform`, `hardware: rgb_dmd: zedmd_native` |

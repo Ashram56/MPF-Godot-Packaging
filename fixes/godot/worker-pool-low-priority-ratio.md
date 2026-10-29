@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | Godot 4.6.3-stable (measured) |
 | Platforms | all (a project setting); matters on 4-core boards; measured on Jetson Xavier NX, L4T R35.6.4 |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit 5581c2c) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (clip suite, Xavier NX nvpmodel mode 5) |
 | Our fix | project setting `threading/worker_pool/low_priority_thread_ratio=0.5` |
 | Applied by | a project setting a game sets in its `project.godot` |

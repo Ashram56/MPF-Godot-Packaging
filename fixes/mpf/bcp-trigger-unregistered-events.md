@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | MPF 0.80.1 with GMC 1.0.0; and later until documented upstream |
 | Platforms | all |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-03 |
+| Found on | a Stern SAM recreation, 2026-10-03 |
 | Fact | observed (no sound at all), cause from MPF 0.80.1 code |
 | Our fix | none in this repository: a game's custom code calls `bcp_trigger_client()` (below) |
 | Applied by | the game's code; nothing to apply |

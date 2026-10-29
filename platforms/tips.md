@@ -117,7 +117,7 @@ server is installed.
 
 ## 8. Raspberry Pi 4 (Debian 13 trixie, Raspberry Pi kernel 6.18, Godot 4.6.3 OpenGL ES)
 
-Found with Tron Legacy MPF on 2026-10-24 (all observed). Every measured setting, with the cabinet's files: [raspberrypi.md](raspberrypi.md). Performance findings: [GoZen zero-copy](../fixes/gde-gozen/v4l2m2m-zero-copy.md),
+Found on 2026-10-24 (all observed). Every measured setting, with the cabinet's files: [raspberrypi.md](raspberrypi.md). Performance findings: [GoZen zero-copy](../fixes/gde-gozen/v4l2m2m-zero-copy.md),
 [the canvas shader's fill rate](../fixes/godot/pi4-canvas-shader-fill-rate.md).
 
 - **No 3.5 mm jack sound card**: the device tree's bootargs carry `snd_bcm2835.enable_headphones=0` even with

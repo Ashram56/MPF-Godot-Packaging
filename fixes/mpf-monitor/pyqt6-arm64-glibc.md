@@ -7,7 +7,7 @@
 | Kind | packaging |
 | Affected versions | mpf-monitor 1.0.0 (`PyQt6>=6.4.2`, no upper bound) with PyQt6 6.8 and later; and later until fixed upstream |
 | Platforms | Linux arm64 with glibc older than 2.39 (Jetson L4T R35 / JetPack 5: glibc 2.31; L4T R36 / JetPack 6: 2.35; Ubuntu 22.04 arm64) |
-| Found on | a Stern SAM recreation (Tron Legacy MPF) on a Jetson, 2026-10-05 |
+| Found on | a Stern SAM recreation on a Jetson, 2026-10-05 |
 | Fact | observed (the sdist build failed on JetPack 5/6); the fix checked on an emulated JetPack 6 (Ubuntu 22.04, glibc 2.35): PyQt6 6.7.1 installs from a wheel and `mpfmonitor` imports. The monitor window on a real Jetson: not reported |
 | Our fix | [`mpf_godot/toolchain.py`](../../mpf_godot/toolchain.py) `MONITOR_REQUIREMENTS`: `PyQt6>=6.4.2,<6.8; sys_platform == "linux" and platform_machine == "aarch64"`; [`install/install_linux.sh`](../../install/install_linux.sh) leaves the monitor out on arm64 with glibc older than 2.28 |
 | Applied by | `python -m mpf_godot setup`, `install/install_linux.sh` |

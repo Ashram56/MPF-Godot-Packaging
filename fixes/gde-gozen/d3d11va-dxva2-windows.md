@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | GDE GoZen at `f9448619324ad7d0d4e79d3bd501bde477ea4b7f` (`src/gozen_video.cpp`, `SConstruct`) |
 | Platforms | Windows 10/11 x86_64 (MinGW-w64 cross build); NVIDIA, AMD and Intel GPUs through FFmpeg's hwaccels |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit 9f547e5); tested on a Windows PC (Ryzen 7 7800X3D) with d3d11va, merged 2026-10-10 (commit 79a3fff) |
+| Found on | a Stern SAM recreation, 2026-10-09; tested on a Windows PC (Ryzen 7 7800X3D) with d3d11va, merged 2026-10-10 |
 | Fact | observed (d3d11va on one Windows PC; the DLL loads under Wine with system imports only, software decoding 2.3 ms per frame there); DXVA2 compiled in, not seen in use |
 | Our fix | [`../../build/gozen/gozen.patch`](../../build/gozen/gozen.patch) (`_hw_device()`, `_get_hw_format()`, `_open_hwaccel()`, `_hw_download()`, the `_WIN32` block of `open()`, SConstruct `lean=yes` Windows libs); built by [`../../build/gozen/build_gozen.sh`](../../build/gozen/build_gozen.sh) `windows` ([`../../build/gozen/build_windows_in_docker.sh`](../../build/gozen/build_windows_in_docker.sh)) |
 | Applied by | the committed `addons/gde_gozen/bin/libgozen.windows.template_release.x86_64.dll`, copied by `python -m mpf_godot addons GAME --video` |

@@ -16,7 +16,13 @@
 #       mpf    : MPF + Godot + GMC installed by install/install_linux.sh from this repository into
 #                /home/pi/MPF-Godot; automatic login on tty1 and startx (needs video and x11, added when missing)
 #   (Wi-Fi/SSH: edit mpf-network.txt on the boot partition, or use http://<ip>:8080; see common/netconfig/README.md)
-#   ROOT_PAD_MB=1024           free space left in the root filesystem of the image (grown at first boot anyway)
+#   ROOT_PAD_MB=1024           free space left in the root filesystem of the image (grown at first boot anyway; with READONLY=1 it
+#                              is only the room for a maintenance session: apt upgrade, a kernel)
+#   READONLY=1                 production mode (default): root and boot partition read-only, logs in RAM, one small read/write
+#                              partition "mpfdata" (settings, scores, games, Wi-Fi, SSH keys) made at the first boot in the free
+#                              space after the root partition (the rest of the card). READONLY=0: an ordinary writable image whose
+#                              root grows at first boot. common/readonly/README.md; the page on port 8080 or
+#                              `sudo mpf-mode maintenance` (or MODE=maintenance in mpf-network.txt) makes it writable
 # Output: $WORK/out/rpi4-debian13-sd.img.xz and .sha256
 
 set -euo pipefail
@@ -31,6 +37,7 @@ IMG_NAME="rpi4-debian13-sd.img"
 PI_PASSWORD="${PI_PASSWORD:-raspberry}"
 EXTRAS="${EXTRAS-video x11 mpf}"
 ROOT_PAD_MB="${ROOT_PAD_MB:-1024}"
+READONLY="${READONLY:-1}"
 FW_MB=256
 REPO_ROOT="$(cd "$KIT/../../../.." && pwd)"
 
@@ -162,13 +169,15 @@ display_auto_detect=1
 
 dtparam=audio=on
 CFG
-echo "console=serial0,115200 console=tty1 root=LABEL=rootfs rootfstype=ext4 fsck.repair=yes rootwait net.ifnames=0 quiet" > "$FWDIR/cmdline.txt"
+echo "console=serial0,115200 console=tty1 root=LABEL=rootfs rootfstype=ext4 fsck.repair=yes rootwait net.ifnames=0 quiet$([ "$READONLY" = 1 ] && echo ' ro')" > "$FWDIR/cmdline.txt"
 for f in kernel8.img initramfs8 start4.elf fixup4.dat bcm2711-rpi-4-b.dtb overlays/vc4-kms-v3d.dtbo; do
     [ -s "$FWDIR/$f" ] || { echo "missing /boot/firmware/$f"; ls -la "$FWDIR"; exit 1; }
 done
 
-install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
-install -m 644 "$KIT/files/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
+if [ "$READONLY" != 1 ]; then   # a read-only image keeps its root as built: mpf-persist makes the data partition in the free space instead
+    install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
+    install -m 644 "$KIT/files/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
+fi
 
 in_chroot "sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen >/dev/null && update-locale LANG=en_US.UTF-8"
 
@@ -194,7 +203,8 @@ chmod 600 "$WPA"
 # Wi-Fi power saving (brcmfmac enables it) made the latency 170 ms and more to the gateway: off for good
 mkdir -p "$R/etc/systemd/system/wpa_supplicant@wlan0.service.d"
 printf '[Service]\nExecStartPost=-/usr/sbin/iw dev wlan0 set power_save off\n' > "$R/etc/systemd/system/wpa_supplicant@wlan0.service.d/power-save-off.conf"
-in_chroot "systemctl enable resizerootfs.service systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
+[ "$READONLY" != 1 ] && in_chroot "systemctl enable resizerootfs.service >/dev/null 2>&1"
+in_chroot "systemctl enable systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
 in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 
 # Wi-Fi / SSH setup shared with the other images (common/netconfig): text file on the boot partition read at
@@ -202,16 +212,22 @@ in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 in_chroot "apt-get install -y -qq python3 hostapd dnsmasq-base"
 in_chroot "systemctl disable hostapd >/dev/null 2>&1 || true; systemctl mask hostapd >/dev/null 2>&1 || true"
 NC="$REPO_ROOT/common/netconfig"
-install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
+install -m 755 "$NC"/mpf_*.py "$R/usr/local/bin/"
 install -m 644 "$NC"/mpf-netconfig-*.service "$NC/mpf-game.service" "$R/etc/systemd/system/"
 install -m 644 "$NC/mpf-network.txt.template" "$FWDIR/mpf-network.txt"
 printf 'MPF_NETCONFIG_FILE=/boot/firmware/mpf-network.txt\nMPF_USER=pi\nMPF_WLAN=wlan0\nMPF_GOZEN_SO=/home/pi/MPF-Godot/addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so\n' > "$R/etc/default/mpf-netconfig"
-# Game bundle uploaded from the web page (Tron-Legacy-MPF docs/bundle.md): GODOT / TRON_VENV point at what the base system provides
+# Game bundle uploaded from the web page (common/games/README.md): GODOT / MPF_GAME_VENV point at what the base system provides
 mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"
 printf 'MPF_GAME_ARGS=-- --rendering-driver opengl3\n' > "$R/etc/default/mpf-game"
-in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service >/dev/null 2>&1"
+in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service mpf-netconfig-inbox.service >/dev/null 2>&1"
 
 in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
+if [ "$READONLY" = 1 ]; then
+    . "$REPO_ROOT/common/readonly/install-readonly.sh"
+    mpf_readonly_install "$R" pi /boot/firmware ""
+    # the game starts at power-on (the page's "start at power-on" switch toggles this link in a short writable window)
+    in_chroot "systemctl enable mpf-game.service >/dev/null 2>&1"
+fi
 
 ##############################################################################
 log "3/6 Optional feature groups: ${EXTRAS:-none}"

@@ -76,7 +76,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** the one line builds one script block: `& ([scriptblock]::Create((irm URL) -join [char]10))`, which
   works whether `irm` returns one string or lines. The script's help says never to pipe it to `iex`.
 - **Versions:** Windows PowerShell 5.1; checked as a dry run with pwsh 7.4.
-- **Found:** 2026-10-10, observed (on a Transformers MPF owner's PC; fix found on Tron Legacy MPF, commit 37ef409).
+- **Found:** 2026-10-10, observed (on a Transformers MPF owner's PC).
 
 ### 2. A stray argument binds to a named parameter
 - **Problem:** in the one line's `& ([scriptblock]::Create(...))` form, a bare extra argument meant for setup
@@ -86,7 +86,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** `[CmdletBinding(PositionalBinding = $false)]` at the top of `install/install_windows.ps1`; leftovers go
   to `$SetupArgs`. Keep it when adding a string parameter.
 - **Versions:** verified with pwsh 7.4 on Linux; a `-File` run did not show it.
-- **Found:** 2026-10-10, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-10, observed.
 
 ### 3. Windows PowerShell 5.1 turns git's stderr into a fatal error
 - **Problem:** the access check stopped the installer on "fatal: could not read Username".
@@ -95,7 +95,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** `'Continue'` around git calls and the exit code only: `Test-RepoAccess`, `Clear-UntrackedInUpdate`
   and the branch check in the repository step.
 - **Versions:** Windows PowerShell 5.1 (PowerShell 7 does not do this).
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-05, observed.
 
 ### 4. Git Credential Manager opens a login window
 - **Problem:** the private-repository check opened GCM's login window, which asks for a user and password that
@@ -104,7 +104,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** `Test-RepoAccess` sets `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never` for the check, and tests
   anonymously first with `-c credential.helper=`.
 - **Versions:** Git for Windows with GCM.
-- **Found:** 2026-10-04, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-04, observed.
 
 ### 5. Ctrl+V does not paste the token
 - **Problem:** at the hidden token prompt, Ctrl+V did nothing.
@@ -112,14 +112,14 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** the prompt in `Invoke-GitHubAuth` says to paste with a right-click; the token is stripped of
   whitespace and its length and type are printed (never the token).
 - **Versions:** Windows PowerShell console.
-- **Found:** 2026-10-07, observed (owner test on Windows, Tron Legacy MPF).
+- **Found:** 2026-10-07, observed (owner test on Windows).
 
 ### 6. Git just installed is not on the PATH
 - **Problem:** setup, which runs `git`, failed right after Git was installed.
 - **Cause:** the installer updates the PATH for new terminals, not for the running session.
 - **Fix:** `$env:Path` gets Git's folder (`%ProgramFiles%\Git\cmd`, or the folder `Find-Git` found) in the Git step.
 - **Versions:** all.
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-05, observed.
 
 ### 7. The bare `python` is the Microsoft Store stub
 - **Problem:** on a fresh Windows, `python` opens the Store instead of running Python.
@@ -127,7 +127,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** `Find-Python` never calls the bare `python`: the `py -3.11` launcher, then the default install
   folders. Step 6 puts the real Python first in the user PATH.
 - **Versions:** Windows 10 and 11.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, code.
 
 ### 8. winget's per-user Python is not on the PATH
 - **Problem:** after `winget install Python.Python.3.11 --scope user`, `python` and `pip` were not found in a new
@@ -136,7 +136,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** step 6 adds Python's folder and `Scripts` to the user PATH (`[Environment]::SetEnvironmentVariable`)
   and to this session. Open a new terminal afterwards.
 - **Versions:** winget; Python 3.11.9 is the last 3.11 release with a Windows installer.
-- **Found:** 2026-10-03, observed (found on Tron Legacy MPF, commit e18dbb6).
+- **Found:** 2026-10-03, observed.
 
 ### 9. Paths over 260 characters
 - **Problem:** pip, Godot's import cache and deep git trees can pass Windows' 260-character limit.
@@ -144,7 +144,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** step 7: `LongPathsEnabled = 1` through one elevated PowerShell, and `git config --global
   core.longpaths true`. When it stays off the installer says to keep the clone in a short folder such as `C:\mpf`.
 - **Versions:** Windows 10 1607+ for the setting.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, code.
 
 ### 10. OneDrive: deletes and renames fail for a moment
 - **Problem:** setup failed with `FileExistsError` or `PermissionError` in a folder synced by OneDrive.
@@ -154,7 +154,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
   `clear_dir`, `replace`, `copy_file`, `copy_tree`): retries for about 5 s and clears the read-only flag. The
   default install folder is outside OneDrive.
 - **Versions:** Windows with OneDrive folder backup (Documents, Desktop).
-- **Found:** 2026-10-04, observed (found on Tron Legacy MPF, commit 182408d).
+- **Found:** 2026-10-04, observed.
 
 ### 11. A video add-on folder Windows will not remove
 - **Problem:** re-running setup over an add-on folder failed when Windows held a file in it (a loaded DLL).
@@ -162,7 +162,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** the add-on copy uses `fsutil.copy_tree`, which copies over what will not go (`mpf_godot/__main__.py`,
   `addons()`).
 - **Versions:** all.
-- **Found:** 2026-10-04, observed (found on Tron Legacy MPF, commit 6bdb035).
+- **Found:** 2026-10-04, observed.
 
 ### 12. MPF never started: Godot listens on IPv6 only
 - **Problem:** the launcher waited forever for GMC's port, so MPF never started.
@@ -170,7 +170,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** `mpf_godot/launcher.py`, `port_in_use()`: binds on IPv4 and IPv6 (`IPV6_V6ONLY`), with
   `SO_EXCLUSIVEADDRUSE` on Windows; it binds, never connects, because GMC quits when a client hangs up.
 - **Versions:** Godot 4.x on Windows.
-- **Found:** 2026-10-03, observed (found on Tron Legacy MPF, commit e18dbb6).
+- **Found:** 2026-10-03, observed.
 
 ### 13. P-ROC on Windows: VC++ runtime and D2XX
 - **Problem:** `--hw proc` needs MPF's bundled `pinproc.cp3xx-win_amd64.pyd`, which loads only with
@@ -180,7 +180,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
   `%SystemRoot%\System32\ftd2xx.dll`; the D2XX driver comes from ftdichip.com by hand. Windows on ARM: no
   pypinproc build, the installer warns.
 - **Versions:** MPF 0.80.1 ships pypinproc for Python 3.8 to 3.14, x64 and 32-bit.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF). Not run on a real P-ROC from Windows in the sources.
+- **Found:** 2026-10-03, code. Not run on a real P-ROC from Windows in the sources.
 
 ### 14. Video: GoZen with GPU decoding, native_video as the fallback
 - **Problem:** videos through the native_video add-on (Media Foundation) stuttered.
@@ -190,7 +190,7 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
   decoding; native_video stays beside it as the fallback. `GOZEN_HWDEC=0` forces software.
   [../fixes/gde-gozen/d3d11va-dxva2-windows.md](../fixes/gde-gozen/d3d11va-dxva2-windows.md).
 - **Versions:** Godot 4.6.3, FFmpeg 7.1; tested on a Ryzen 7800X3D with d3d11va.
-- **Found:** 2026-10-10, observed (owner decision and test on Tron Legacy MPF, PR #15).
+- **Found:** 2026-10-10, observed (owner decision and test).
 
 ### 15. native_video crashed or failed to open videos
 - **Problem:** 21 to 24 of 80 opens failed (panic, `OpenFailed`, heap corruption `0xC0000374`).
@@ -207,11 +207,11 @@ Installer exit codes 0, 3010 (reboot pending) and 1638 (newer version present) c
 - **Fix:** once, as Administrator: `.venv\Scripts\python .venv\Scripts\pywin32_postinstall.py -install`. Register
   the COM server from an Administrator terminal too. Not part of this installer.
 - **Versions:** pywin32 from pip.
-- **Found:** 2026-10-04, code (Tron Legacy MPF `docs/vpx.md`).
+- **Found:** 2026-10-04, code (the game's `docs/vpx.md`).
 
 ### 17. Firewall prompt
 - **Problem:** Windows asks to let Godot and Python through the firewall.
 - **Cause:** GMC listens on TCP 5050, MPF's BCP server for MPF Monitor on 5051.
 - **Fix:** "Private networks" is enough: everything talks over localhost.
 - **Versions:** all.
-- **Found:** 2026-10-03, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, observed.

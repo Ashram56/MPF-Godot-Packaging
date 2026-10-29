@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | Godot 4.6.3-stable (gain measured); 4.5.2-stable (loss measured) |
 | Platforms | all (a project setting); measured on Jetson Xavier NX, L4T R35.6.4, Vulkan, Mobile renderer |
-| Found on | Tron Legacy MPF, 2026-10-09 on (Tron-Legacy-MPF commit f52ba68); the 4.5.2 loss 2026-10-10 (commit c9a8be2) |
+| Found on | a Stern SAM recreation, 2026-10-09 on; the 4.5.2 loss 2026-10-10 |
 | Fact | observed (clip suite, Xavier NX nvpmodel mode 5) |
 | Our fix | project setting `rendering/driver/threads/thread_model=2`; the launcher's `--no-render-thread` turns it off (`mpf_godot/launcher.py`) |
 | Applied by | a project setting a game sets in its `project.godot`; the launcher (`python -m mpf_godot run`) adds `--render-thread safe` with `--no-render-thread` or with the opengl3 renderer |
@@ -44,12 +44,12 @@ Known costs with it on:
 - captures with the opengl3 renderer (under Xvfb) wrote no frames with it: the launcher runs those with
   `--render-thread safe`;
   **Beware on a board that needs opengl3 for real play**: a Raspberry Pi 4 must run `--rendering-driver opengl3` (Vulkan
-  froze with video there), so a launcher that adds `--render-thread safe` for every opengl3 run (Tron's `run.py` and
+  froze with video there), so a launcher that adds `--render-thread safe` for every opengl3 run (an earlier `run.py` and
   `mpf_godot/launcher.py` did) silently plays without the separate render thread while the project says it is on. On
   the Pi 4 the main thread was then the limit (76 % of a core, Godot 36 %, Mesa's CPU part 22 %). Test `RenderingServer.is_on_render_thread()` at run time, never the setting (a command-line `--render-thread`
   overrides it). But the separate thread **cannot be used there**: with `--render-thread separate` and opengl3 Godot 4.6.3
   crashes at start ("Error initializing GLAD" in `RasterizerGLES3`, then SIGSEGV) because the GL ES context (EGL fallback
-  on X11) is not created on the render thread (Godot calls the mode experimental). 2026-10-24, Tron Legacy MPF.
+  on X11) is not created on the render thread (Godot calls the mode experimental). 2026-10-24.
   **Update 2026-10-25:** the crash is one missing line in `EGLManager::release_current()`
   ([gles-separate-render-thread-crash](gles-separate-render-thread-crash.md)); a Godot built with that patch runs
   `--render-thread separate --max-fps 30` at 29.5 FPS, main thread 49 % instead of ~90 %. Pass `--render-thread separate`

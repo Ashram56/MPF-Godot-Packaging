@@ -70,7 +70,7 @@ Options go after the line: `bash <(curl ...) --no-monitor --proc`. Settings go i
   `.pkg`. Should that be skipped, `mpf_godot/setup_toolchain.py`, `download()`, retries with `curl` when urllib
   fails.
 - **Versions:** python.org 3.11.9 (`python-3.11.9-macos11.pkg`), the last 3.11 release with a macOS installer.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, code.
 
 ### 2. `/usr/bin/git` is a stub
 - **Problem:** calling `git` on a Mac without the Command Line Tools opens Apple's installer instead of running.
@@ -78,7 +78,7 @@ Options go after the line: `bash <(curl ...) --no-monitor --proc`. Settings go i
 - **Fix:** `install/install_macos.sh` uses `/usr/bin/git` only when `xcode-select -p` succeeds; otherwise
   Homebrew's git, or it runs `xcode-select --install` and stops with "run this script again".
 - **Versions:** every macOS.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, code.
 
 ### 3. Godot.app must be unpacked with `ditto`
 - **Problem:** unpacking the Godot zip with Python's `zipfile` loses the app bundle's symlinks, permissions and
@@ -87,7 +87,7 @@ Options go after the line: `bash <(curl ...) --no-monitor --proc`. Settings go i
 - **Fix:** `mpf_godot/setup_toolchain.py`, `unzip()`: on macOS, `ditto -x -k`, which keeps the signature (the
   build is signed by the Godot project).
 - **Versions:** Godot 4.6.3 `macos.universal`.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, code.
 
 ### 4. MPF's bundled P-ROC module does not load on Apple silicon
 - **Problem:** `--hw proc` could not import `pinproc` on a current Mac.
@@ -96,7 +96,7 @@ Options go after the line: `bash <(curl ...) --no-monitor --proc`. Settings go i
 - **Fix:** `--proc` builds libpinproc (pinned commit) and pypinproc (the Python 3 port) with
   `install/build_pinproc.sh` against Homebrew's `libusb`, `libusb-compat` and `libftdi`, into `$(brew --prefix)`.
 - **Versions:** MPF 0.80.1.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF). No run on a real P-ROC from a Mac in the sources.
+- **Found:** 2026-10-03, code. No run on a real P-ROC from a Mac in the sources.
 
 ### 5. macOS claims the P-ROC as a serial port
 - **Problem:** the board shows as `/dev/tty.usbserial*` and libftdi cannot open it.
@@ -111,7 +111,7 @@ Options go after the line: `bash <(curl ...) --no-monitor --proc`. Settings go i
 - **Fix:** `addons/native_video/libnative_video.macos.{debug,release}.dylib` rebuilt with the gdzig heap fix by a
   macOS CI workflow (`macos-15` runner). Do not replace them with an upstream zip.
 - **Versions:** native_video v0.3.1, Godot 4.6 (the add-on needs 4.6).
-- **Found:** 2026-10-04, code (Tron Legacy MPF commit 4ae9703, workflow run 37237009333). Playback on a Mac is
+- **Found:** 2026-10-04, code. Playback on a Mac is
   not reported in the sources.
 
 ### 7. No GoZen on macOS

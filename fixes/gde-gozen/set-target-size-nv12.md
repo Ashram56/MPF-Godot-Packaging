@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | GDE GoZen at `f9448619324ad7d0d4e79d3bd501bde477ea4b7f` (`src/gozen_video.cpp`, `video_playback.gd`, both YUV shaders) |
 | Platforms | scaling: Jetson with jetson-ffmpeg's nvmpi decoders (measured on Xavier NX, L4T R35.6.4); NV12 path: Jetson and Windows (GPU frames come back as NV12) |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit 2c1c6dd) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (clip suite, Xavier NX nvpmodel mode 5) |
 | Our fix | [`../../build/gozen/gozen.patch`](../../build/gozen/gozen.patch) (`set_target_size()`, `get_target_size()`, `is_nv12()`, `_open_decoder()`, NV12 branch of `open()` and `_copy_frame_data()`); [`../../addons/gde_gozen/video_playback.gd`](../../addons/gde_gozen/video_playback.gd) (`decode_to_display_size`, two-plane upload); [`../../addons/gde_gozen/yuv_to_rgb_forward.gdshader`](../../addons/gde_gozen/yuv_to_rgb_forward.gdshader) and [`../../addons/gde_gozen/yuv_to_rgb_compatibility.gdshader`](../../addons/gde_gozen/yuv_to_rgb_compatibility.gdshader) (`nv12` uniform) |
 | Applied by | the committed binaries plus the add-on scripts, copied by `python -m mpf_godot addons GAME --video`; a game turns on `decode_to_display_size` on its `VideoPlayback` nodes |

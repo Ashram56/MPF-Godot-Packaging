@@ -35,7 +35,7 @@ existing NV12 path. A video the GPU cannot decode (profile, 10-bit on an old GPU
 Not done: zero-copy (VAAPI surface to DRM PRIME to an EGL/Vulkan texture, as [v4l2m2m-zero-copy](v4l2m2m-zero-copy.md) does for the
 Pi 4). The copy of a 1080p NV12 frame out of a VAAPI surface costs a few milliseconds on an iGPU: to measure.
 
-The game must not force `GOZEN_HWDEC=0`: Tron's `game/pup/gozen_player.gd` does that on a Linux PC without `/dev/nvmap` unless `GOZEN_HWDEC`
+The game must not force `GOZEN_HWDEC=0`: a game's player script (`gozen_player.gd`) can do that on a Linux PC without `/dev/nvmap` unless `GOZEN_HWDEC`
 is already set, so the x86 image sets `GOZEN_HWDEC=1` for the services.
 
 ## How to check
@@ -43,7 +43,7 @@ is already set, so the x86 image sets `GOZEN_HWDEC=1` for the services.
 1. `vainfo` lists `VAProfileH264High : VAEntrypointVLD` (and HEVC); `ffmpeg -hwaccel vaapi -i video.mp4 -f null -` works.
 2. `GOZEN_HWDEC=1 godot ...`: the log says `GoZen: hardware decoding h264 (vaapi)` for each video; `intel_gpu_top` shows the Video engine busy.
 3. `GOZEN_HWDEC=0`: software decoding. Compare the CPU in `top`.
-4. `python scripts/pup/video_check.py` of the game (Tron-Legacy-MPF) prints GPU or software per video and the speed.
+4. `python scripts/pup/video_check.py` of the game prints GPU or software per video and the speed.
 
 ## Upstream issue (draft, not filed)
 

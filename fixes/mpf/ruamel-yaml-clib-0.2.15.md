@@ -7,7 +7,7 @@
 | Kind | packaging |
 | Affected versions | MPF 0.80.1 (pins `setuptools~=72.2.0`, `ruamel.yaml==0.18.6`) with ruamel.yaml.clib 0.2.15, Python 3.10 to 3.12; and later until fixed upstream |
 | Platforms | all (Python before 3.13; ruamel.yaml does not use the C library from 3.13 on) |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-03 |
+| Found on | a Stern SAM recreation, 2026-10-03 |
 | Fact | observed (`mpf` stopped at start); the `pkg_resources` step reproduced on Python 3.11.x, setuptools 72.2.0, 2026-10-12 |
 | Our fix | [`mpf_godot/toolchain.py`](../../mpf_godot/toolchain.py) `REQUIREMENTS`: `ruamel.yaml.clib==0.2.14; python_version < "3.13"` |
 | Applied by | `python -m mpf_godot setup` (pip installs the pin next to MPF) |

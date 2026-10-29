@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | godot-native-video v0.3.1 (`6d51d93`) with its `vendor/gdzig` submodule at `14458fb` (`src/heap.zig`); later releases not checked |
 | Platforms | Windows x86_64 (seen: panics, `OpenFailed`, heap corruption); macOS dylibs rebuilt with the same fix as a precaution (the allocator is shared code) |
-| Found on | a Windows game using native_video, 2026-09-30; carried into Tron Legacy MPF 2026-10-03 (Windows, Tron-Legacy-MPF commit 51e3458) and 2026-10-04 (macOS, commits 5271021, 4ae9703) |
+| Found on | a Windows game using native_video, 2026-09-30; carried into a Stern SAM recreation 2026-10-03 (Windows) and 2026-10-04 (macOS) |
 | Fact | observed (bad opens out of 80 per build, below); code (the allocator's padding) |
 | Our fix | [`../../build/native_video/heap.zig`](../../build/native_video/heap.zig), a replacement for gdzig's `src/heap.zig` at `14458fb`; binaries in [`../../addons/native_video/`](../../addons/native_video/) |
 | Applied by | the committed binaries, copied by `python -m mpf_godot addons GAME --video` on Windows and macOS; rebuilt by hand ([`../../build/native_video/README.md`](../../build/native_video/README.md)) |
@@ -47,7 +47,7 @@ Built with the fix here:
   ReleaseFast build is byte-size identical (872448) to the shipped DLL, so the toolchain matches upstream's. The
   x86_32 and arm64 DLLs are upstream's, not rebuilt.
 - macOS universal dylibs, by a GitHub Actions workflow on a macOS runner (`.github/workflows/native_video_macos.yml`
-  in the Tron-Legacy-MPF repository, run 37237009333); not ported to this repository yet.
+  in the game's repository); not ported to this repository yet.
 
 Updating the add-on from a new upstream zip brings the bug back until gdzig or the add-on ships the fix.
 

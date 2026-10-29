@@ -3,12 +3,12 @@
 > Moved here from Stern-SAM-Decryption `agents/packaging.md` (section 5d) on 2026-10-27: Godot, GoZen, V4L2 and
 > board findings belong to this repository; Stern-SAM-Decryption keeps ROM extraction and re-coding. Related fixes
 > with upstream drafts: [fixes/godot/](../fixes/README.md#godot), [fixes/gde-gozen/](../fixes/README.md#gde-gozen).
-> Worked example: Tron Legacy MPF on a Raspberry Pi 4B.
+> Worked example: a Stern SAM recreation on a Raspberry Pi 4B.
 
 
-Tron tested on a Pi 4B, Debian 13 (trixie), Raspberry Pi kernel 6.18, Mesa 25.0.7 (Mesa 26.2.2 from the Pi repository
+Tested on a Pi 4B, Debian 13 (trixie), Raspberry Pi kernel 6.18, Mesa 25.0.7 (Mesa 26.2.2 from the Pi repository
 gave the same times), Godot 4.6.3 on the Compatibility (OpenGL ES) renderer, GoZen for the PuP Pack's videos, a 1080p
-backglass full screen, the classic 128x32 DMD in its own window (2026-10-24; findings also in issue #44). The Tron
+backglass full screen, the classic 128x32 DMD in its own window (2026-10-24; findings also in issue #44). The
 numbers are in the game repository (`docs/pup/README.md`, "Raspberry Pi 4"); this is the method and what applies to
 any SAM game or any new board (a Pi 5, an Orange Pi, another Jetson). All observed on the machine unless said.
 
@@ -20,7 +20,7 @@ any SAM game or any new board (a Pi 5, an Orange Pi, another Jetson). All observ
    > `v3dv_job_allocate_tile_state`. A bare Godot 1080p scene does 74.8 fps in Vulkan against 39 in OpenGL, so only
    video uploads are the problem. The separate render thread under Vulkan crashed after 5 s: a game script touched
    the scene tree from that thread. V3DV exposes `VK_EXT_external_memory_dma_buf`, but a zero-copy import needs a
-   GDExtension doing the import and a TFU copy to a tiled image: not built). Tron's `run.py` added `--render-thread safe` whenever `opengl3` was asked (a workaround for
+   GDExtension doing the import and a TFU copy to a tiled image: not built). A game's `run.py` added `--render-thread safe` whenever `opengl3` was asked (a workaround for
    the captures under Xvfb), so the Pi ran with the separate render thread off while `project.godot` said on and
    Jetson docs said "on by default". Ask the engine (`RenderingServer.is_on_render_thread()`), never the setting
    (a command-line `--render-thread` overrides `project.godot`'s `thread_model`). It cannot be turned on there: Godot 4.6.3
@@ -36,8 +36,8 @@ any SAM game or any new board (a Pi 5, an Orange Pi, another Jetson). All observ
    +10 ms render at 1080p; an empty scene 45 fps windowed, 60 fps with `--fullscreen`, which page flips). A second
    window on the same X screen (an LCD DMD beside a full screen backglass) loses the page flip as well: Pi 4 at a
    30 fps cap, 29.6 -> 21 fps, the TFU from 13 % to 42 % (observed). Draw the second display inside the full screen
-   window instead (a `Control` over or beside the backglass's screens: same cost as no DMD, observed; Tron:
-   `[dmd] window="backglass"` in `game/pup.cfg`). A 3D background behind such a DMD (Tron's light cycles) cost
+   window instead (a `Control` over or beside the backglass's screens: same cost as no DMD, observed; a game's
+   `[dmd] window="backglass"` in `game/pup.cfg`). A 3D background behind such a DMD (a 3D animated frame) cost
    ~40 ms of GPU a frame there: keep it off small GPUs.
 3. **The cost of a full-window layer, with the default 2D shader.** Measure an empty scene, then a `ColorRect`,
    then N layers. On the Pi 4 (V3D, 8 QPU at 500 MHz, about 16 G instructions a second) Godot's default canvas
@@ -48,7 +48,7 @@ any SAM game or any new board (a Pi 5, an Orange Pi, another Jetson). All observ
    A full-window `ColorRect` for a black background costs 3 to 6 fps: use `RenderingServer.set_default_clear_color`.
 4. **Videos: layers hidden under an opaque video should neither be drawn nor decoded** (a silent one pauses until
    uncovered). The Pi 4's hardware decoder slows the GPU by 15 to 30 %, software decoding in parallel does not.
-5. **A heavy background in a SubViewport** (Tron's DMD light cycles: 3D with glow, about 13 passes a frame) cost
+5. **A heavy background in a SubViewport** (a 3D animated DMD frame: 3D with glow, about 13 passes a frame) cost
    27 ms a frame on the Pi 4 and half of the frame rate; turning it off (or the classic 128x32 DMD) is the largest
    single gain. Count the render passes a frame before blaming the video.
 6. **GPU frequency was not the limit once the shaders were light**: an overclock to 600 MHz (no extra voltage)
@@ -91,7 +91,7 @@ any SAM game or any new board (a Pi 5, an Orange Pi, another Jetson). All observ
   kernel update until the fix is upstream. Check `dmesg` for the warning after a soak, not only that videos play.
 - **A hardware decoding switch keyed to one board decodes in software on the next.** A game that turns hardware
   decoding on only when it finds Jetson device nodes (`/dev/nvhost-*`) silently runs software decoding on a Pi 4,
-  and a benchmark that forces the environment variable (Tron: `GOZEN_HWDEC=1`) hides it (code). Detect each
+  and a benchmark that forces the environment variable (`GOZEN_HWDEC=1`) hides it (code). Detect each
   board's decoder (`/dev/video10` with `bcm2835-codec` on a Pi), and check the startup log line (for example
   "software decoding") of the *installed service*, not of a hand-started run.
 - Pi sound and screens, found on the way: the 3.5 mm jack card is missing on trixie (`snd_bcm2835.enable_headphones=0`
@@ -106,9 +106,9 @@ any SAM game or any new board (a Pi 5, an Orange Pi, another Jetson). All observ
   not belong on the board (FFmpeg and godot-cpp took about 45 minutes with the game stopped): cross-build in
   Docker or on a build machine and hand the library over through a throwaway git branch the board clones.
 
-**Open (Tron):** `tools/pup/runtime/` (the runtime other games copy) does not have these changes yet: the fast YUV shader,
+**Open:** `tools/pup/runtime/` (the runtime other games copy) does not have these changes yet: the fast YUV shader,
 covered layers neither drawn nor decoded, no full-window `ColorRect`, `render_size`, and the zero-copy patch of GoZen
-(Tron: `scripts/gozen/gozen_zerocopy.patch`, `pup_addons/gde_gozen/video_playback.gd`, `game/pup/`).
+(in the first game: a `gozen_zerocopy.patch`, the add-on's `video_playback.gd` and the PuP player).
 
 ## C. Measuring (any new board)
  compare at the same frame rate and report the video lag (median and the 95th

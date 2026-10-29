@@ -1,7 +1,7 @@
 # RGB LED DMDs: PIN2DMD and ZeDMD
 
 A GMC game can show its 128x32 DMD on a PIN2DMD or a ZeDMD as well as (or instead of) the screen. GMC does not
-need a screen for this: Godot reads back its own picture and sends it on. Worked example: Tron Legacy MPF
+need a screen for this: Godot reads back its own picture and sends it on. Worked example: a Stern SAM recreation
 (`docs/hardware.md`, "PIN2DMD" and "ZeDMD"), where these pieces were written. **Neither device has been tried on real
 hardware yet**: the packets follow libdmdutil's and libzedmd's source, checked in tests against fake devices.
 
@@ -36,7 +36,7 @@ godot --path GAME -- --zedmd --zedmd-feed=$PWD/zedmd_feed # MPF with examples/dm
 ## Findings
 
 1. The DMD must be the exact 128x32 picture: an HD or smoothed DMD read back and shrunk gives blurred dots. A game
-   with an HD mode should switch it off when one of these args is given (Tron: `dmd_mode.gd` forces its classic mode).
+   with an HD mode should switch it off when one of these args is given (a game's `dmd_mode.gd` may force its classic mode).
 2. MPF's `pin2dmd` platform accepts only the `rgb_dmds` device named `default`. MPF stops with "Pin2Dmd USB device not
    found" when the PIN2DMD is missing or another program (DMDext) holds it.
 3. On a P-ROC machine, a P-ROC DMD and an LED DMD together are not supported: the overlays move `dmds: dmd` to the
@@ -45,3 +45,34 @@ godot --path GAME -- --zedmd --zedmd-feed=$PWD/zedmd_feed # MPF with examples/dm
    pinball" mode; the ZeDMD's port, firmware 5.x, colour order, and the brightness command's payload (a guess).
 5. Colour pictures (a colourisation) are out of scope here: this add-on only ever sends one colour scaled by
    brightness.
+
+## Choosing the device
+
+Which display a machine uses (a PIN2DMD, a ZeDMD, or the screen) depends on the board and on what is plugged in, not
+on the game, so the platform decides it:
+
+```sh
+python -m mpf_godot dmd-detect        # prints pin2dmd, zedmd, or nothing
+python -m mpf_godot addons GAME --dmd # copies addons/dmd_out into the game (add it as an autoload)
+```
+
+A PIN2DMD counts when its USB id (0314:e457) is on the bus; a ZeDMD only when it answers the handshake on its USB serial
+port (the ESP32's own USB 303a:1001, or a CH340 / CP210x bridge, ids other boards share). Linux only (sysfs); a ZeDMD on
+Wi-Fi is not looked for. A game's launcher runs `dmd-detect` at start and, if it names a device, starts Godot with
+`--pin2dmd` / `--zedmd` and MPF with the matching overlay; a choice made by the player (the setup page's "DMD display")
+wins over detection. The game itself only has to keep its DMD classic 128x32 when one of these args is present.
+
+## Sizes and pictures a game can publish
+
+A game can offer more than the classic dots. In Godot it calls `get_node("/root/dmd_out").publish("hd", viewport)` (any name;
+`classic`, the root viewport, is the default) and the machine's launcher starts Godot with the device's size and the picture
+it wants:
+
+| Device | `resolution` / size arg | Picture |
+|---|---|---|
+| ZeDMD, PIN2DMD | `128x32` (default) | `classic`: the exact dots, 16 shades |
+| PIN2DMD XL | `192x64`, `--dmd-size=192x64` | any published picture, Lanczos to size, 8 bits |
+| PIN2DMD HD, ZeDMD HD | `256x64`, `--dmd-size=256x64` | e.g. `--dmd-feed=256x64` or `hd` |
+
+MPF's pin2dmd platform takes 128x32, 192x64 and 256x64. The native ZeDMD feeder is 128x32 only. Colour stays the game's
+business: without it the add-on sends one colour scaled by brightness. Not run on a device.

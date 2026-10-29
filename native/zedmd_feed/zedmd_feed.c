@@ -1,7 +1,7 @@
 /* zedmd_feed: drives a ZeDMD (https://github.com/PPUC/ZeDMD) over its USB serial port.
  *
  * Reads raw RGB888 frames (width x height x 3 bytes, default 128 x 32) from stdin and sends the changed 8x4-pixel
- * zones with the ZeDMD serial protocol, as libzedmd's ZeDMDComm does (same as game/tron/zedmd_native.py, the Python
+ * zones with the ZeDMD serial protocol, as libzedmd's ZeDMDComm does (same as mpf_godot/zedmd_native.py, the Python
  * fallback). When frames arrive faster than the ZeDMD takes them only the newest one is sent. Linux and macOS (termios);
  * no dependency beyond libc.
  *

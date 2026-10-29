@@ -20,7 +20,7 @@ index 5e7fcdf..8f91ba5 100644
 -    if arch != "arm64":
 -        env.Append(LIBS=["z"])
 +    # lean=yes: FFmpeg built without libvpx, libaom, LibreSSL and zlib (the Jetson build of
-+    # Tron-Legacy-MPF-PuP, scripts/build_gozen.sh)
++    # scripts/build_gozen.sh)
 +    # (and with FFmpeg's assembly, whose static objects need -Bsymbolic to link into a shared library)
 +    if ARGUMENTS.get("lean", "no") == "yes":
 +        env.Append(LINKFLAGS=["-Wl,-Bsymbolic"])
@@ -34,8 +34,8 @@ index 5e7fcdf..8f91ba5 100644
      env.Append(LINKFLAGS=["-static"], LIBS=LIBS_COMMON)
  
 -    env.Append(LIBS=["vpx", "aom"])
-+    # lean=yes: FFmpeg without libvpx and libaom, with Direct3D 11 Video / DXVA2 decoding (Tron-Legacy-MPF-PuP,
-+    # scripts/build_gozen.sh windows); FFmpeg loads d3d11.dll, dxgi.dll, d3d9.dll and dxva2.dll at run time
++    # lean=yes: FFmpeg without libvpx and libaom, with Direct3D 11 Video / DXVA2 decoding
++    # (scripts/build_gozen.sh windows); FFmpeg loads d3d11.dll, dxgi.dll, d3d9.dll and dxva2.dll at run time
 +    if ARGUMENTS.get("lean", "no") == "yes":
 +        env.Append(LIBS=["ole32", "user32"])
 +    else:

@@ -7,9 +7,9 @@
 | Kind | improvement |
 | Affected versions | Godot 4.6.3, Compatibility renderer |
 | Platforms | Raspberry Pi 4 (V3D); not measured elsewhere |
-| Found on | Tron Legacy MPF on a Raspberry Pi 4, 2026-10-26 |
+| Found on | a Stern SAM recreation on a Raspberry Pi 4, 2026-10-26 |
 | Fact | observed: GPU render 75 % with `clip_children` on a 535x148 panel, 55 % without; frames over 40 ms 15 % vs 4 % |
-| Our fix | the game draws a rounded black panel behind the DMD and keeps the DMD inside the round area instead of clipping it (Tron-Legacy-MPF: `[dmd] corner_clip=false`, the default) |
+| Our fix | the game draws a rounded black panel behind the DMD and keeps the DMD inside the round area instead of clipping it (`[dmd] corner_clip=false`, the default) |
 | Applied by | the game's code |
 | Upstream | none needed |
 

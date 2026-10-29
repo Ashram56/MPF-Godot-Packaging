@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | Godot 4.5.2-stable (seen); 4.6.3-stable works the same way (the launcher's Xvfb path is used with it) |
 | Platforms | all for `--headless` and `--write-movie`; the Xvfb workaround is Linux only |
-| Found on | Tron Legacy MPF, 2026-10-02 (Tron-Legacy-MPF commit c909b9b, headless display capture) |
+| Found on | a Stern SAM recreation, 2026-10-02 |
 | Fact | code (`--headless` uses the dummy rendering driver) and observed (blank captures; the BCP client never connected under `--write-movie`) |
 | Our fix | `mpf_godot/launcher.py` `godot_command()`: on Linux without a display, Godot runs under `xvfb-run` with a real window; with the opengl3 renderer it adds `--render-thread safe` |
 | Applied by | the launcher (`python -m mpf_godot run`, `--xvfb` to force it) |
