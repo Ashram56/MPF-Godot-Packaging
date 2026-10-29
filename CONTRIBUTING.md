@@ -14,3 +14,8 @@ A finding that spans both (for example a PuP Pack that needs a decoder fix) is w
 Stern-SAM-Decryption file gets a one-line pointer to it. New fix: copy `fixes/TEMPLATE.md`, then run
 `python fixes/make_index.py`; platform findings go in the platform's page under "Findings" or in a page listed in
 `platforms/README.md`. Run `python -m pytest -q tests` before pushing. Never commit a ROM or private material.
+
+**No game content here.** This repository holds no game: no recipe, no bundle spec, no file list, no URL, no name of a game or of its
+PuP Pack. The game's repository (or the session that creates the game) produces a complete game package and describes it in its own
+`bundle_spec.json` (`common/games/README.md`, "What the game provides"); this repository only turns that package into a bundle. The
+provenance of a finding ("found on game X") is fine in `fixes/` and `platforms/`. `tests/test_no_game_content.py` enforces it.
