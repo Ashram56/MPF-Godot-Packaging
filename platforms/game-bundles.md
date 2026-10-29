@@ -36,7 +36,7 @@ What it does, in order:
    default (lossless) import gets no S3TC/ETC2 variant, whatever the project setting says, and the bundle carries none (the
    builder warns). Tracked `.import` files: list their folders in `force_vram`; untracked ones: `import_seed`.
    The VRAM texture format depends on the GPU: ARM GPUs (Pi 4, Jetson) take ETC2/ASTC, PCs S3TC/BPTC. `--target all` keeps
-   **both** (about 300 MB packed for Tron), so one archive installs anywhere; a single target drops the other
+   **both** (about 300 MB packed for a game with HD frames), so one archive installs anywhere; a single target drops the other
    format from every `.import` and deletes its `.ctex` (Godot imports the host's preferred format whatever the setting says).
 3. **No binary:** `platform_addons` goes into `bundle.json`; nothing from `addons/` is packed except what the game tracks itself.
 4. **Write `bundle.json`** (format 1: `id`, `name`, `version`, `target` with `arch` `arm64`, `x86_64` or `arm64+x86_64`
@@ -45,14 +45,14 @@ What it does, in order:
 `game/.godot` (the import) is packed on purpose; the version defaults to `YYYY.MM.DD-<short commit>`; `requires.godot` is this platform's pinned Godot.
 5. **Check** with `xz -t`, `tar -xJOf ARCHIVE <id>/bundle.json`, and that no `libgozen` is in a universal archive.
 
-Tron also has its own builder (Tron-Legacy-MPF `scripts/package/build_bundle.py`, `docs/bundle.md`), which adds its
+A game can have its own builder (by convention `scripts/package/build_bundle.py` in its repository), which adds its
 runner scripts, option schema, board profiles and a PuP install; a game that needs more than the spec says can do the
 same around this one. A small update is a zip of the changed files plus `REMOVED.txt`, made from two bundles' `SHA256SUMS`.
 
 ## Rules every prebuilt bundle follows
 
 They are the same for every game, each one comes from a bundle that installed fine and then crashed in a loop on a machine
-(Transformers, 2026-10-29: `mpf-game.service` restarted 22 times). `build_game_package.py` checks the ones a tool can check.
+(observed 2026-10-29: `mpf-game.service` restarted 22 times). `build_game_package.py` checks the ones a tool can check.
 
 | # | Rule | Why, and what breaks without it |
 |---|---|---|

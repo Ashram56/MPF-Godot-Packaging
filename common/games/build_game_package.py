@@ -3,14 +3,12 @@
 
     build_game_package.py GAME [--ref BRANCH] [--workdir DIR] [--version V] [--target all|arm64|x86_64]
                                [--out DIR] [--skip-setup] [--publish WEBDAV_URL] [--dry-run]
-    build_game_package.py --list
 
-GAME says which game, in any of these ways: a recipe name from `--list` (`tron-legacy-mpf`); the **git URL** of the game's repository
-(https://github.com/Ashram56/Transformers-MPF.git: a recipe made for that repository is used, else the repository's own
-`mpf-package.json`, else its `bundle_spec.json` is built); or a **folder** with a clone you already made (used as it is: your branch, your
-changes). A recipe (common/games/recipes/, or a file path) says how to prepare the workspace and how to build; common/games/README.md
-("Building the package of a game"). Without a recipe command the game's `bundle_spec.json` is built with `python -m mpf_godot bundle`
-(platforms/game-bundles.md).
+GAME says which game: the **git URL** of the game's repository, or a **folder** with a clone you already made (used as it is: your
+branch, your changes). This tool knows no game: the game's repository says how it is prepared and built, in its own
+`mpf-package.json` (setup and build commands), else by the convention of the Stern SAM games (`scripts/setup.py`, then
+`scripts/package/build_bundle.py`), else by its `bundle_spec.json`, built with `python -m mpf_godot bundle` (platforms/game-bundles.md).
+A game's `mpf-package.json` can also be given as a file path. common/games/README.md ("Building the package of a game").
 
 What it does: 1. get the repository (clone it, or use the folder given by --repo: a clone you already made is used as it is);
 2. run the recipe's `setup` commands there (skipped with --skip-setup: the workspace is ready); 3. run the `build` command;
@@ -39,7 +37,6 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLATFORM = os.path.dirname(os.path.dirname(HERE))
-RECIPES = os.path.join(HERE, "recipes")
 TARGET_ARCH = {"arm64": "arm64", "x86_64": "x86_64", "all": "arm64+x86_64"}
 CABINET = re.compile(r"(^|/)(game/(data|audits|logs)(/|$)|[^/]*\.local\.cfg$|machine_vars\.yaml$|scorbit_device_key\.txt$)")
 
@@ -52,43 +49,28 @@ def say(msg):
     print(msg, flush=True)
 
 
-def recipes():
-    out = {}
-    for n in sorted(os.listdir(RECIPES)):
-        if n.endswith(".json"):
-            with open(os.path.join(RECIPES, n), encoding="utf-8") as f:
-                out[n[:-5]] = json.load(f)
-    return out
-
-
-def norm(url):
-    return re.sub(r"(\.git)?/*$", "", url.strip().lower())
-
-
 def load_recipe(game, repo):
-    """(recipe, repo) from what the user named: a recipe name, a recipe file, a git URL or a folder."""
-    known = recipes()
-    if game in known:
-        return known[game], repo or None
+    """(recipe, repo) from what the user named: a recipe file, a git URL or a folder. The recipe is the game's own
+    (`mpf-package.json` in its repository); a game without one is built by the convention or by its bundle_spec.json."""
     if os.path.isfile(game) and game.endswith(".json"):
         with open(game, encoding="utf-8") as f:
             return json.load(f), repo or None
     if os.path.isdir(game) or re.match(r"^(https?://|git@|ssh://)", game):
-        remote = game
-        if os.path.isdir(game):                       # a clone: its origin tells which game it is
-            got = subprocess.run(["git", "-C", game, "remote", "get-url", "origin"], capture_output=True, text=True)
-            remote = got.stdout.strip() if got.returncode == 0 else ""
-        for r in known.values():                      # a repository a recipe is made for
-            if r.get("repo") and remote and norm(r["repo"]) == norm(remote):
-                return r, game
-        folder = os.path.isdir(game)
-        own = os.path.join(game, "mpf-package.json") if folder else ""
+        own = os.path.join(game, "mpf-package.json") if os.path.isdir(game) else ""
         if own and os.path.isfile(own):               # the game brings its own recipe
             with open(own, encoding="utf-8") as f:
                 return json.load(f), game
-        rid = re.sub(r"[^a-z0-9._-]", "-", os.path.basename(norm(game)).lower()) or "game"
+        rid = re.sub(r"[^a-z0-9._-]", "-", re.sub(r"(\.git)?/*$", "", game.strip().lower()).rsplit("/", 1)[-1]) or "game"
         return {"id": rid, "repo": game, "target": "all", "setup": [], "generic": True}, game
-    die(f"{game!r} is not a recipe name, a recipe file, a folder or a git URL (--list shows the recipes)")
+    die(f"{game!r} is not a recipe file, a folder or a git URL")
+
+
+DESCRIPTIONS = ("bundle_spec.json", "game_package.json", "scripts/package/game_package.json")
+
+
+def description_of(repo):
+    """The game's own description of its package (common/games/README.md, "What the game provides"), or ""."""
+    return next((os.path.join(repo, d) for d in DESCRIPTIONS if os.path.isfile(os.path.join(repo, d))), "")
 
 
 def fill(items, values):
@@ -315,8 +297,7 @@ def publish(url, archive, folder):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], epilog="See the top of this file for details.")
-    ap.add_argument("game", nargs="?", help="a recipe name (--list), a recipe file, a git URL or a folder with the game's repository")
-    ap.add_argument("--list", action="store_true", help="list the recipes and exit")
+    ap.add_argument("game", nargs="?", help="a git URL or a folder with the game's repository (or its mpf-package.json)")
     ap.add_argument("--repo", help="the game's repository: a folder already cloned (used as it is) or a git URL")
     ap.add_argument("--ref", help="branch or tag to build (a cloned URL only)")
     ap.add_argument("--workdir", default=os.path.join(os.path.expanduser("~"), "mpf-game-builds"), help="where a URL is cloned")
@@ -331,10 +312,8 @@ def main():
     ap.add_argument("--check", action="store_true", help="only check that this machine can run the build, and exit")
     a = ap.parse_args()
 
-    if a.list or not a.game:
-        for n, r in recipes().items():
-            print(f"{n:24} {r.get('name', '')}  <{r.get('repo', '')}>")
-        return
+    if not a.game:
+        ap.error("name the game: a git URL or a folder with its repository")
     recipe, found_repo = load_recipe(a.game, a.repo)
     a.repo = a.repo or found_repo
     target = a.target or recipe.get("target", "all")
@@ -353,7 +332,7 @@ def main():
     values = {"python": sys.executable, "target": target, "version": version, "out": out, "platform": PLATFORM, "repo": repo}
     env = dict(os.environ, **dict(zip(recipe.get("env", {}), fill(recipe.get("env", {}).values(), values))))
     env["PYTHONPATH"] = PLATFORM + os.pathsep + env.get("PYTHONPATH", "")        # the game's builder may call this repository's mpf_godot
-    convention = recipe.get("generic") or not (recipe.get("build") or recipe.get("spec"))
+    convention = recipe.get("generic") or not recipe.get("build")
     setup = recipe.get("setup", [])
     if convention and not setup and os.path.isfile(os.path.join(repo, "scripts", "setup.py")):
         with open(os.path.join(repo, "scripts", "setup.py"), encoding="utf-8", errors="replace") as f:
@@ -369,19 +348,7 @@ def main():
         found = sorted(glob.glob(os.path.join(repo, "tools", "godot", "Godot_v*")))
         if found:
             env["GODOT"] = found[0]
-    tmp_spec = ""
-    if recipe.get("spec"):
-        # the game brings no builder: this platform holds the list of what is packed (recipes/specs/), the game repository stays as it is
-        with open(os.path.join(RECIPES, recipe["spec"]), encoding="utf-8") as f:
-            spec = json.load(f)
-        for pattern in recipe.get("spec_globs", []):      # files named by pattern in the clone (generated or per-effect)
-            spec["copy"] += sorted(os.path.relpath(q, repo).replace(os.sep, "/") for q in glob.glob(os.path.join(repo, pattern)))
-        tmp_spec = os.path.join(repo, ".bundle_spec.build.json")
-        if not a.dry_run:
-            with open(tmp_spec, "w", encoding="utf-8") as f:
-                json.dump(spec, f, indent=1)
-        cmd = [sys.executable, "-m", "mpf_godot", "bundle", tmp_spec, "--target", target, "--out", out] + (["--version", version] if version else [])
-    elif recipe.get("build"):
+    if recipe.get("build"):
         cmd = fill(recipe["build"], values)
         if not version:      # the game's builder chooses (date and commit)
             i = cmd.index("--version") if "--version" in cmd else -1
@@ -396,16 +363,12 @@ def main():
         for opt, val in (("--target", target), ("--version", version)):
             if val and (a.dry_run or opt in helptext):
                 cmd += [opt, val]
-    elif os.path.isfile(os.path.join(repo, "bundle_spec.json")):
-        cmd = [sys.executable, "-m", "mpf_godot", "bundle", "bundle_spec.json", "--target", target, "--out", out] + (["--version", version] if version else [])
+    elif description_of(repo):
+        cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else [])
     else:
-        die("the repository has no scripts/package/build_bundle.py and no bundle_spec.json, and no recipe says how to build it "
+        die("the repository has no scripts/package/build_bundle.py and no package description (" + ", ".join(DESCRIPTIONS) + "), and no recipe says how to build it "
             "(for your own MPF code without a build step: common/games/make_bundle.py)")
-    try:
-        run(cmd, repo, env, a.dry_run)
-    finally:
-        if tmp_spec and os.path.exists(tmp_spec):
-            os.remove(tmp_spec)
+    run(cmd, repo, env, a.dry_run)
     if a.dry_run:
         say("dry run: nothing built")
         return

@@ -77,21 +77,20 @@ it the way the page will. Needs Linux or WSL, `git`, `python3` 3.10+ and an inte
 
 ```sh
 git clone https://github.com/Ashram56/MPF-Godot-Packaging && cd MPF-Godot-Packaging
-python3 common/games/build_game_package.py tron-legacy-mpf --out dist
+python3 common/games/build_game_package.py https://example.com/my-game.git --out dist
 ```
 
-**Which game?** The first argument says it, three ways: a recipe name (`--list` shows them), the **git URL of the game's repository**,
+**This repository knows no game.** The game comes with its own package description (see *What the game provides* below); nothing about a
+game, its files or its build is kept here. **Which game?** The first argument says it, two ways: the **git URL of the game's repository**,
 or a **folder** holding a clone:
 
 ```sh
-python3 common/games/build_game_package.py --list
-python3 common/games/build_game_package.py https://github.com/Ashram56/Tron-Legacy-MPF --out dist
-python3 common/games/build_game_package.py ~/Tron-Legacy-MPF --out dist      # your clone, your branch, as it is
-python3 common/games/build_game_package.py transformers-mpf --out dist     # recipe + the platform's own spec (recipes/specs/), game repository untouched
-# dist/tron-legacy-mpf-<date>-<commit>-linux-all.tar.xz  and  ...tar.xz.sha256      (about 235 MB)
+python3 common/games/build_game_package.py https://example.com/my-game.git --out dist
+python3 common/games/build_game_package.py ~/my-game --out dist      # your clone, your branch, as it is
+# dist/my-game-<date>-<commit>-linux-all.tar.xz  and  ...tar.xz.sha256
 ```
 
-With a name or a URL it clones the game's repository into `~/mpf-game-builds/tron-legacy-mpf` (`--workdir` changes it), runs its setup, builds, and checks.
+With a URL it clones the game's repository into `~/mpf-game-builds/<id>` (`--workdir` changes it), runs its setup, builds, and checks.
 Options: `--repo FOLDER` uses a clone you already made *as it is* (your branch, your changes: nothing is cloned or checked out),
 `--repo URL` another remote, `--ref BRANCH_OR_TAG`, `--version 2026.10.29` (default: the date and the commit), `--target arm64|x86_64|all`
 (default `all`: one archive for every machine, no binary inside), `--skip-setup` when the workspace is already prepared (rebuilds
@@ -111,20 +110,20 @@ has to clone, the tools the recipe lists, free disk space) and reports **everyth
 `--check` only does that check; `--install-deps` installs a missing git or `python3-venv` with apt (Debian, Ubuntu, Raspberry Pi OS; root or sudo).
 **First run and `--skip-setup`.** The workspace is named after the recipe's `id` (`~/mpf-game-builds/<id>`), and `--skip-setup` only works on a workspace
 that a full run already prepared. On a fresh one it fails late, with a bare `FileNotFoundError ... toolchain/godot/Godot_v...` from `mpf_godot bundle`: run once
-without `--skip-setup`. A recipe's `id` must equal the `id` of the spec it packs (`transformers-pro` for Transformers, not `transformers-mpf`): the check
+without `--skip-setup`. The `id` of the game's `mpf-package.json` must equal the `id` of the spec it packs: the check
 stops with `bundle.json id is X, the recipe says Y` after the whole build. While setting up a game with a private `pup_pack` submodule the log shows
 `could not read Username ... Failed to clone 'pup_pack'`: expected without access, the game builds without the PuP Pack (it is never in the archive).
 Be aware that git is needed for the whole build, not only for the clone: the game's own setup fetches its asset submodule with it and the
-bundler stages the files git tracks (`mpf_godot bundle`), so a game recipe lists `git` in `tools`.
+bundler stages the files git tracks (`mpf_godot bundle`), so a game's `mpf-package.json` lists `git` in `tools`.
 
 What each step does, so it can also be done by hand:
 
-1. **Get the repository** and its submodules (a recipe says whether it needs them).
-2. **Setup** (recipe `setup`): for Tron `python3 scripts/setup.py --no-monitor` in the clone: a Python venv with MPF, Godot, the generated
+1. **Get the repository** and its submodules (the game's `mpf-package.json` says whether it needs them).
+2. **Setup** (the game's `setup`, or by convention `python3 scripts/setup.py --no-monitor`) in the clone: a Python venv with MPF, Godot, the generated
    MPF config, media, sounds and baked fonts. About 12 GB of disk; the longest step.
-3. **Build** (recipe `build`): for Tron `.venv/bin/python scripts/package/build_bundle.py --target all --version V --out DIR`, which stages the game, makes the Godot
+3. **Build** (the game's `build`, or by convention `.venv/bin/python scripts/package/build_bundle.py --target all --version V --out DIR`), which stages the game, makes the Godot
    import for both GPU families and writes `bundle.json` and `SHA256SUMS`. It uses this repository's `mpf_godot bundle` (the tool finds
-   the checkout; the recipe sets `MPF_GODOT_PACKAGING`). Any game with a `bundle_spec.json` and no `build` in its recipe is built with
+   the checkout; the recipe sets `MPF_GODOT_PACKAGING`). Any game with a `bundle_spec.json` and no `build` is built with
    `python -m mpf_godot bundle bundle_spec.json` ([platforms/game-bundles.md](../../platforms/game-bundles.md)).
 4. **Check**: the `.sha256`, `bundle.json` (format 1, the id the recipe says, a version, the target), that every platform add-on it names exists in this
    repository, that no cabinet data (`game/data`, `*.local.cfg`, logs) is inside and that a universal archive carries no GoZen binary. A failure stops with the reason.
@@ -133,9 +132,24 @@ Then put it on a machine: drop the file on the page (*Install and updates*), or 
 (`WEBDAV_USER` and `WEBDAV_PASS` in the environment) which uploads the archive and its `.sha256` to `<URL>/<folder>/`, the layout of the page's
 *Updates* card. The **PuP Pack is never in the archive**: it is the author's zip, uploaded separately (*Add a game or a PuP Pack*).
 
-**A recipe** is a small JSON file in `common/games/recipes/`, or `mpf-package.json` at the root of the game's repository (the tool finds it), or any path: `id` (what `bundle.json` must say), `repo`, `ref`, `submodules`,
-`setup` (commands, run in the clone), `build` (the command; `{python} {version} {target} {out} {platform}` are replaced), `env`, `target`,
-`publish_folder`, `needs` (shown in this document). To add a game: write its recipe, or give the game a `bundle_spec.json`; for plain MPF
+## What the game provides (the contract)
+
+This repository holds **no game**: no recipe, no spec, no file list, no name. The game's own repository (or the session that creates the
+game) produces a **complete game package** and describes it; this repository only checks the description, adds the platform's add-ons,
+imports the textures and packs. The PuP Pack is never part of it (`pup.install`, installed separately).
+
+1. **A complete package.** Every file the game needs at run time exists in the repository folder when the build starts, **generated files
+   included** (config, media, sounds, baked fonts, generated slides and data tables that git ignores). The game's own setup or build
+   step produces them, here nothing is generated. `mpf_godot bundle` stops and lists any path of the spec's `copy` that is missing
+   (`optional` lists those that may be absent), and the check refuses a Godot project that uses `mpf-gmc` without the add-on.
+2. **`bundle_spec.json`** (or `game_package.json`, at the root or in `scripts/package/`) ([platforms/game-bundles.md](../../platforms/game-bundles.md), example in
+   `examples/bundle/bundle_spec.json`, JSON schema in `schema/game_package.schema.json`, checked by `mpf_godot bundle`): id, files, exclusions, `keep_on_update`, `requires`, `run`, `options`, `pup`, `platform_addons`.
+3. **Optionally `mpf-package.json`** at the repository root when the game is not built by the Stern SAM convention: `id` (what `bundle.json`
+   must say), `submodules`, `tools`, `disk_gb`, `min_python`, `setup` (commands, run in the clone), `build` (the command;
+   `{python} {version} {target} {out} {platform}` are replaced), `env`, `target`, `publish_folder`, `needs`.
+
+The rule is enforced by `tests/test_no_game_content.py` (it fails on a game name, a recipes folder or a PuP Pack path outside `fixes/` and
+`platforms/`) and stated in [CONTRIBUTING.md](../../CONTRIBUTING.md). For plain MPF
 code use `make_bundle.py` above. `tests/test_build_game.py` runs the whole tool on a small game.
 
 Not checked by the tool: that the game *runs*. **Always install the archive on a machine and watch it** (page upload, then on the machine
@@ -226,7 +240,7 @@ Anything else in `bundle.json` is the game's own: loaders ignore unknown keys.
 |---|---|
 | `make_bundle.py` | a folder of your code → `<id>@<version>.tar.xz` + `.sha256` |
 | `inject_image.py` | bundles and packs → an image, before flashing |
-| `build_game_package.py`, `recipes/` | a game's repository → its bundle, checked |
+| `build_game_package.py` | a game's repository → its bundle, checked |
 | `check_installed.sh` | on the machine: does the installed game stay up? |
 | [`../netconfig/mpf_games.py`](../netconfig/mpf_games.py) | the loader: install, versions, active game, inbox, start and stop |
 | `tests/test_games.py`, `tests/test_inject.py`, `tests/test_ota.py` | the loader's contract, the two tools and the WebDAV updates |

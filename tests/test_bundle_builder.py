@@ -44,6 +44,22 @@ class Builder(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(stage, "gen", "frame.png")))
         self.assertFalse(os.path.exists(os.path.join(stage, "game", "addons")))
 
+    def test_missing_generated_file_stops_the_build(self):
+        """A file the spec lists but the game did not produce (a generated, git-ignored one) is an error, not a silent gap."""
+        stage = os.path.join(self.root, "stage")
+        os.makedirs(stage)
+        with self.assertRaises(SystemExit) as e:
+            bundle.stage_tree(self.root, dict(self.spec, copy=["gen", "game/slides/deffs"]), stage)
+        self.assertIn("game/slides/deffs", str(e.exception))
+        bundle.stage_tree(self.root, dict(self.spec, copy=["gen", "game/slides/deffs"], optional=["game/slides/deffs"]), stage)
+
+    def test_spec_contract(self):
+        ok = {"id": "g", "run": {"start": "x"}, "copy": []}
+        self.assertEqual([], bundle.validate_spec(ok))
+        self.assertTrue(any("unknown key" in p for p in bundle.validate_spec(dict(ok, copi=[]))))
+        self.assertTrue(bundle.validate_spec({"run": {"start": "x"}}))
+        self.assertTrue(bundle.validate_spec({"id": "g"}))
+
     def test_cabinet_data_refused(self):
         stage = os.path.join(self.root, "stage")
         write(os.path.join(stage, "game", "data", "x"))
