@@ -99,7 +99,7 @@ with the game* until you choose another.
 ## Updates from a WebDAV server (*Updates* card)
 
 Type the server address (the server only, `https://host`), the **folder on the server** (default `MPF Games`; sub-folders are written
-`MPF Games/Tron`), user and password once (kept on this machine only, in `ota.json` of the state folder, never shown again; an empty
+`MPF Games/my-game`), user and password once (kept on this machine only, in `ota.json` of the state folder, never shown again; an empty
 password field keeps the saved one; redirects are refused). The fields keep what you type until you save. *Check for updates* lists
 the bundles (`*.tar.xz`, with a `.sha256` beside) and `.zip` PuP Packs in the folder and its sub-folders. Each bundle says which
 installed game it **updates** (its file name or sub-folder starts with the game's id) or *new game*; *Install* downloads it and installs
