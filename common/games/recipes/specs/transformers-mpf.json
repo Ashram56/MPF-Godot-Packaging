@@ -14,6 +14,8 @@
   "game/sounds",
   "game/media",
   "game/fonts",
+  "game/slides/deffs",
+  "game/tf/media_data.json",
   "rom/rom_data/io",
   "rom/rom_data/sound",
   "rom/rom_data/settings",
