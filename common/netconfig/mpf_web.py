@@ -420,6 +420,8 @@ fieldset label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px
 dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
 .sw{justify-content:flex-start;padding:6px 10px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;text-align:left}
 .sw.on{background:var(--ok);border-color:var(--ok);color:#04210f;font-weight:600}.sw small{display:block;opacity:.7;font-size:11px}
+#monCard.fsx{position:fixed;inset:0;z-index:60;border-radius:0;overflow:auto;background:var(--bg);padding:10px}#monCard.fsx .pfw img{height:calc(var(--z,1)*(100vh - 70px));max-width:none}
+#monCard.fsx #monLogBox,#monCard.fsx h2,#monCard.fsx .muted[data-t=monHint]{display:none}
 .pfw{position:relative;display:inline-block;line-height:0}.pfw img{height:calc(var(--z,1)*min(80vh,860px));max-width:100%;width:auto;display:block;border-radius:10px}
 .sp{position:absolute;transform:translate(-50%,-50%);aspect-ratio:1;min-width:12px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:50%;border:1.5px solid rgba(255,255,255,.6);background:rgba(0,0,0,.4);color:#fff;display:grid;place-items:center;font:bold 10px/1 sans-serif;transition:background .08s}
 .sp.switch{border-radius:3px;cursor:pointer}.sp.switch.on{background:#3ddc97;border-color:#fff;box-shadow:0 0 8px #3ddc97}
@@ -471,7 +473,7 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
 <section data-tab="install"><h2><svg stroke="currentColor"><use href="#i-redo"/></svg><span data-t="ota"></span></h2><div class="card">
  <form class="form" id="otaForm"><div class="two"><label><span data-t="otaUrl"></span><input name="url" id="otaUrl" placeholder="https://server.example" autocomplete="off"></label>
  <label><span data-t="otaFolder"></span><input name="folder" id="otaFolder" placeholder="MPF Games" autocomplete="off"></label></div><div class="two">
- <label><span data-t="otaUser"></span><input name="user" id="otaUser" autocomplete="off"></label></div>
+ <label><span data-t="otaUser"></span><input name="user" id="otaUser" autocomplete="off"></label>
  <label><span data-t="otaPw"></span><input name="password" id="otaPw" type="password" autocomplete="new-password"></label></div>
  <div class="row"><button type="submit"><span data-t="otaSave"></span></button><button type="button" id="otaCheck" class="pri"><span data-t="otaCheck"></span></button><span class="muted" data-t="otaHint"></span></div></form>
  <div class="nets mt" id="otaList"></div></div></section>
@@ -495,8 +497,8 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
 <section data-tab="config"><h2><svg stroke="currentColor"><use href="#i-term"/></svg><span data-t="diag"></span></h2><div class="card">
  <div class="row"><button id="logsBtn"><svg><use href="#i-term"/></svg><span data-t="logs"></span></button><button id="saveLogBtn" class="pri"><svg><use href="#i-disk"/></svg><span data-t="saveLog"></span></button><button id="monBtn"><svg><use href="#i-cpu"/></svg><span data-t="monitor"></span></button></div>
  <p class="muted mt" data-t="saveLogHint"></p><div class="nets" id="savedLogs"></div></div></section>
-<section data-tab="monitor"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="monitor"></span>&nbsp;<span class="badge" id="monBadge"></span></h2><div class="card"><div class="row"><input id="monFilter" style="max-width:240px" data-ph="monFilter"><span id="monZoomBox" class="row hide"><label class="muted row" style="gap:6px"><span data-t="monZoom"></span><input type="range" id="monZ" min="0.5" max="4" step="0.1" style="width:110px;padding:0"></label><label class="muted row" style="gap:6px"><span data-t="monSize"></span><input type="range" id="monK" min="0.8" max="4" step="0.1" style="width:90px;padding:0"></label><button id="monFit" type="button">1:1</button></span><select id="monView" style="width:auto" class="hide"><option value="pf" data-t="monViewPf"></option><option value="list" data-t="monViewList"></option></select><span class="muted" id="monCount"></span></div>
-<p class="muted" data-t="monHint"></p><div id="monPf" class="hide" style="text-align:center;overflow:auto;max-height:84vh"><div class="pfw" id="pfw"><img id="pfImg" alt=""></div></div><div class="sws mt" id="monGrid"></div><h2 class="mt"><span data-t="monLog"></span></h2><pre id="monLogBox" style="max-height:160px"></pre></div></section>
+<section data-tab="monitor"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="monitor"></span>&nbsp;<span class="badge" id="monBadge"></span></h2><div class="card" id="monCard"><div class="row"><button id="monFull" type="button" title="">⛶</button><input id="monFilter" style="max-width:240px" data-ph="monFilter"><span id="monZoomBox" class="row hide"><label class="muted row" style="gap:6px"><span data-t="monZoom"></span><input type="range" id="monZ" min="0.5" max="4" step="0.1" style="width:110px;padding:0"></label><label class="muted row" style="gap:6px"><span data-t="monSize"></span><input type="range" id="monK" min="0.8" max="4" step="0.1" style="width:90px;padding:0"></label><button id="monFit" type="button">1:1</button></span><select id="monView" style="width:auto" class="hide"><option value="pf" data-t="monViewPf"></option><option value="list" data-t="monViewList"></option></select><span class="muted" id="monCount"></span></div>
+<p class="muted" data-t="monHint"></p><div id="monPf" class="hide" style="text-align:center;overflow-x:auto"><div class="pfw" id="pfw"><img id="pfImg" alt=""></div></div><div class="sws mt" id="monGrid"></div><h2 class="mt"><span data-t="monLog"></span></h2><pre id="monLogBox" style="max-height:160px"></pre></div></section>
 </main>
 
 <dialog id="dlg"><div class="hd"><b id="dlgTitle" class="grow"></b><button id="dlgClose">✕</button></div><div class="bd" id="dlgBody"></div><div class="ft" id="dlgFoot"></div></dialog>
@@ -554,8 +556,7 @@ function render(s){
    :`<button class="pri" data-a="activate" data-f="${esc(x.folder)}">${ico('play')}${t('activate')}</button>`}
    ${x.settings?`<button data-a="settings" data-f="${esc(x.folder)}" data-n="${esc(x.name)}">${ico('gear')}${t('settings')}</button>`:''}
    <span class="grow"></span><button class="dng" data-a="delete" data-f="${esc(x.folder)}" title="${t('delete')}">${ico('trash')}</button></div></div>`).join(''):`<div class="card muted">${t('noGames')}</div>`;
- const sel=$('#pupFor'),cur=sel.value;sel.innerHTML=s.games.filter(x=>x.pup.supported).map(x=>`<option value="${esc(x.folder)}"${x.active?' selected':''}>${esc(x.name)} ${esc(x.version)}</option>`).join('');if(cur)sel.value=cur;
- const au=s.game.autostart;
+  const au=s.game.autostart;
  $('#inboxNote').innerHTML=s.inbox.length?t('inbox')+s.inbox.map(esc).join(', '):t('inboxHelp');
  $('#autoNote').innerHTML=`<span>${au?t('autostart'):t('noAuto')}</span> · <a href="#" id="autoLink">${au?t('disableAuto'):t('enableAuto')}</a>`;
  const al=$('#autoLink');if(al)al.onclick=e=>{e.preventDefault();post('/api/game',{do:au?'disable':'enable'})};
@@ -673,6 +674,11 @@ function monBind(root,sel){root.addEventListener('pointerdown',e=>{const b=e.tar
  const up=e=>{const b=e.target.closest(sel);if(!b||!b.dataset.held)return;delete b.dataset.held;monSend(b.dataset.n,'off')};
  root.addEventListener('pointerup',up);root.addEventListener('pointercancel',up);
  root.addEventListener('contextmenu',e=>{const b=e.target.closest(sel);if(!b)return;e.preventDefault();monSend(b.dataset.n,'toggle')})}
+const fsOff=()=>{$('#monCard').classList.remove('fsx')};
+$('#monFull').onclick=()=>{const c=$('#monCard'),on=!c.classList.contains('fsx');c.classList.toggle('fsx',on);
+ try{if(on&&c.requestFullscreen)c.requestFullscreen().catch(()=>{});else if(!on&&document.fullscreenElement)document.exitFullscreen()}catch(e){}};
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)fsOff()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')fsOff()});
 monBind($('#pfw'),'.sp.switch');monBind($('#monGrid'),'button[data-n]');monApply();
 applyLang();showTab();if(TAB==="config")savedList();refresh();poll();setInterval(refresh,4000);
 </script></body></html>
