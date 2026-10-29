@@ -363,6 +363,8 @@ def main():
     ap.add_argument("--target", choices=sorted(TARGET_ARCH))
     ap.add_argument("--out", default="dist")
     ap.add_argument("--skip-setup", action="store_true")
+    ap.add_argument("--pup-zip", metavar="ZIP", help="the game's PuP Pack zip (a path or URL): the game's builder makes the media derived from it "
+                    "(clips, letters, HD DMD art) here, offline, and ships them in the bundle; the machine that runs the game makes nothing")
     ap.add_argument("--publish", metavar="WEBDAV_URL")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
     ap.add_argument("--install-deps", action="store_true", help="install a missing git / venv with apt (Debian, Ubuntu, Raspberry Pi OS; needs root or sudo)")
@@ -418,7 +420,11 @@ def main():
         py = venv_py if os.path.exists(venv_py) else sys.executable
         helptext = "" if a.dry_run else subprocess.run([py, script, "--help"], cwd=repo, env=env, capture_output=True, text=True).stdout
         cmd = [py, script, "--out", out]
-        for opt, val in (("--target", target), ("--version", version)):
+        if a.pup_zip and not a.dry_run:      # the build machine's tools for that media (rule 12): not the target's business
+            sys.path.insert(0, PLATFORM)
+            from mpf_godot import toolchain as tc
+            run([py, "-m", "pip", "install", "--quiet"] + tc.BUILD_REQUIREMENTS, repo, env, a.dry_run)
+        for opt, val in (("--target", target), ("--version", version), ("--pup-zip", a.pup_zip)):
             if val and (a.dry_run or opt in helptext):
                 cmd += [opt, val]
     elif description_of(repo):

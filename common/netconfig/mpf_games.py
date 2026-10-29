@@ -334,21 +334,6 @@ def install_platform_addons(dest, b, me):
         job_log(f"{name}: the platform's build ({src}) installed for {me}")
 
 
-def install_python_packages(b):
-    """The bundle's requires.python_packages that the game's venv lacks (numpy for the tools that make media on the machine):
-    one pip call, best effort; a failure is logged, not fatal (the game starts, only the art made from a PuP Pack is missing)."""
-    pkgs = [p for p in (b.get("requires") or {}).get("python_packages", []) if isinstance(p, str)]
-    py = venv_python()
-    if not pkgs or not py:
-        return
-    job_set(msg="Python packages the game needs")
-    job_log("$ pip install " + " ".join(pkgs))
-    r = run(py, "-m", "pip", "install", "--quiet", *pkgs)
-    job_log((r.stdout + r.stderr)[-1500:])
-    if r.returncode:
-        job_log("WARNING: pip could not install the game's packages (no network?): the PuP art will be made at the next start that can")
-
-
 def reimport_scripts(dest, b):
     """A platform add-on made of scripts (mpf-gmc) that is put into a bundle exported without it leaves Godot's class cache
     (game/.godot/global_script_class_cache.cfg) without its classes: the game would stop at "Could not find base class". One
@@ -470,7 +455,6 @@ def install_game(archive, expect_sha, keep_old=True):
     shutil.rmtree(stage, ignore_errors=True)
     shutil.rmtree(old, ignore_errors=True)
     install_platform_addons(dest, b, me)
-    install_python_packages(b)
     if C.GAME_OVERRIDE and os.path.isfile(C.GAME_OVERRIDE):
         os.makedirs(os.path.join(dest, "game"), exist_ok=True)
         shutil.copy2(C.GAME_OVERRIDE, os.path.join(dest, "game", "override.cfg"))
