@@ -61,6 +61,25 @@ def git(root, *args):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+KEYS = {"id": str, "name": str, "description": str, "icon": str, "game_dir": str, "git_tracked": list, "git_exclude": list, "copy": list,
+        "optional": list, "never": list, "never_names": list, "import_seed": list, "force_vram": list, "platform_addons": list,
+        "requires": dict, "run": dict, "options": dict, "pup": dict, "keep_on_update": list, "monitor": dict, "profiles": dict,
+        "gozen": dict, "extra": dict, "source_commits": dict, "precheck": list}
+
+
+def validate_spec(spec):
+    """The contract a game's spec follows (schema/game_package.schema.json): returns the problems, an unknown key is one."""
+    problems = [] if spec.get("id") else ["`id` is missing"]
+    for k, v in spec.items():
+        if k not in KEYS:
+            problems.append("unknown key `{}` (typo? the contract lists: {})".format(k, ", ".join(sorted(KEYS))))
+        elif not isinstance(v, KEYS[k]):
+            problems.append("`{}` must be a {}".format(k, KEYS[k].__name__))
+    if not isinstance(spec.get("run", {}), dict) or not spec.get("run", {}).get("start"):
+        problems.append("`run.start` is missing: the command that starts the game")
+    return problems
+
+
 def skip(rel):
     return any(p in SKIP_NAMES for p in rel.replace("\\", "/").split("/")) or rel.endswith(SKIP_SUFFIX)
 
@@ -95,6 +114,10 @@ def stage_tree(root, spec, stage):
         for p in git(root, "ls-files", "-z", folder).split("\0"):
             if p and not p.startswith(exclude):
                 n += copy_path(root, p, stage)
+    missing = [rel for rel in spec.get("copy", []) if rel not in spec.get("optional", []) and not os.path.exists(os.path.join(root, rel))]
+    if missing:
+        raise SystemExit("the game's package is incomplete: the spec lists files that are not there (generated files the game "
+                         "must produce before packing; `optional` lists the ones that may be absent): " + ", ".join(missing))
     for rel in spec.get("copy", []):
         n += copy_path(root, rel, stage)
     return n
@@ -268,16 +291,20 @@ def manifest(root, spec, version, target):
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="python -m mpf_godot bundle", description=__doc__.split("\n\n")[0])
-    p.add_argument("spec", help="the game's bundle spec (JSON); its folder is the game's repository root")
+    p.add_argument("spec", help="the game's package description (JSON, `bundle_spec.json` or `game_package.json`)")
+    p.add_argument("--root", help="the game's repository root (default: the folder of the spec)")
     p.add_argument("--target", choices=sorted(FORMATS), default="all")
     p.add_argument("--version", help="default: the date and the short commit")
     p.add_argument("--out", default="dist")
     p.add_argument("--no-archive", action="store_true")
     args = p.parse_args(argv)
     spec_path = os.path.abspath(args.spec)
-    root = os.path.dirname(spec_path)
+    root = os.path.abspath(args.root) if args.root else os.path.dirname(spec_path)
     with open(spec_path, encoding="utf-8") as f:
         spec = json.load(f)
+    problems = validate_spec(spec)
+    if problems:
+        raise SystemExit("the game's package description is not valid:\n  - " + "\n  - ".join(problems))
     game_rel = spec.get("game_dir", "game")
     if spec.get("precheck"):
         if subprocess.run(spec["precheck"], cwd=root).returncode != 0:

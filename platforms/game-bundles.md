@@ -11,6 +11,8 @@ The binaries stay identical for every game; a game never ships its own copy.
 
 ## Building a bundle (the game's side)
 
+One command from a clone of the game's repository, with the checks: [common/games/README.md](../common/games/README.md#building-the-package-of-a-game-from-its-repository) (`build_game_package.py`). What follows is what it runs.
+
 Run from this platform's checkout with `GODOT=/path/to/godot` (or after `mpf_godot setup`). Done on any PC where the game's own setup has finished (the generated config, media, sounds and fonts must be
 current) and where this platform's toolchain is set up (`python -m mpf_godot setup`: the import needs its Godot).
 The game describes itself in a small JSON spec at its repository root ([examples/bundle/bundle_spec.json](../examples/bundle/bundle_spec.json),
@@ -34,7 +36,7 @@ What it does, in order:
    default (lossless) import gets no S3TC/ETC2 variant, whatever the project setting says, and the bundle carries none (the
    builder warns). Tracked `.import` files: list their folders in `force_vram`; untracked ones: `import_seed`.
    The VRAM texture format depends on the GPU: ARM GPUs (Pi 4, Jetson) take ETC2/ASTC, PCs S3TC/BPTC. `--target all` keeps
-   **both** (about 300 MB packed for Tron), so one archive installs anywhere; a single target drops the other
+   **both** (about 300 MB packed for a game with HD frames), so one archive installs anywhere; a single target drops the other
    format from every `.import` and deletes its `.ctex` (Godot imports the host's preferred format whatever the setting says).
 3. **No binary:** `platform_addons` goes into `bundle.json`; nothing from `addons/` is packed except what the game tracks itself.
 4. **Write `bundle.json`** (format 1: `id`, `name`, `version`, `target` with `arch` `arm64`, `x86_64` or `arm64+x86_64`
@@ -43,9 +45,25 @@ What it does, in order:
 `game/.godot` (the import) is packed on purpose; the version defaults to `YYYY.MM.DD-<short commit>`; `requires.godot` is this platform's pinned Godot.
 5. **Check** with `xz -t`, `tar -xJOf ARCHIVE <id>/bundle.json`, and that no `libgozen` is in a universal archive.
 
-Tron also has its own builder (Tron-Legacy-MPF `scripts/package/build_bundle.py`, `docs/bundle.md`), which adds its
+A game can have its own builder (by convention `scripts/package/build_bundle.py` in its repository), which adds its
 runner scripts, option schema, board profiles and a PuP install; a game that needs more than the spec says can do the
 same around this one. A small update is a zip of the changed files plus `REMOVED.txt`, made from two bundles' `SHA256SUMS`.
+
+## Rules every prebuilt bundle follows
+
+They are the same for every game, each one comes from a bundle that installed fine and then crashed in a loop on a machine
+(observed 2026-10-29: `mpf-game.service` restarted 22 times). `build_game_package.py` checks the ones a tool can check.
+
+| # | Rule | Why, and what breaks without it |
+|---|---|---|
+| 1 | **Build only from the game's merged default branch** (`main`), never from a work branch. The tool refuses otherwise (`--allow-branch` for a test package) and prints the branch and commit. | The fixes of a game live on branches until they are merged. A bundle built from an older branch lacks them: the bundle that looped was built from a branch that was 5 fixes behind. |
+| 2 | **A bundle never regenerates anything at start.** The game's launcher must see `bundle.json` (a bundle) and skip every generator: no "are the media current?" step, nothing that empties `game/media`. | The bundle has the generated files but not the generators' inputs (the ROM extraction). A launcher that regenerates finds the inputs missing, fails, and has already emptied the media: crash loop. |
+| 3 | **Ship the files the media fingerprint reads** (names tables, font lists, image lists) so that the stamp inside the bundle matches. | A fingerprint over files that are not in the bundle can never match, which triggers rule 2's failure even if regeneration is skipped for the wrong reason. |
+| 4 | **`platform_addons` lists `gde_gozen` and `mpf-gmc`** unless the game ships its own patched GMC (then it lists only `gde_gozen`). The tool refuses a project that uses `mpf-gmc` when neither is true. | No GMC means no BCP server: Godot starts, MPF never connects. |
+| 5 | **The game's GMC patch step accepts the platform's patched GMC** (the tag of the platform's patch counts as patched) and never re-patches or replaces it. | The platform installs its GMC after the unpack; a game that patches again breaks it. |
+| 6 | **Read the Python venv from `MPF_GAME_VENV`** and declare any other name in `requires.env`; take Godot options only if `run.game_args` is true. | The service forwards those names only. A launcher that rejects Godot options crashes when `MPF_GAME_ARGS` is set. |
+| 7 | **Never convert the PuP videos** and never replace `game/addons/gde_gozen` in the pack's install command. | The platform's GoZen decodes H.264 on the GPU; Theora forces software decoding. |
+| 8 | **Install the archive on a machine and watch it run** before calling it done: `common/games/check_installed.sh 60` (the service stays active, no restart). A build that "checks" has not been run. | Every item above was invisible to the build's own checks. |
 
 ## Installing (the platform's side)
 

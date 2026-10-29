@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | jetson-ffmpeg at `8d70c17efeee57f4d956df500fec78a73f8c27d4` (v3.10.0), FFmpeg 7.1 wrapper `ffmpeg/dev/common/libavcodec/nvmpi_dec.c`; later revisions not checked |
 | Platforms | Jetson AGX Orin, L4T R36.4.3 (JetPack 6.2), Ubuntu 22.04; Jetson Xavier NX, L4T R35.6.4 (JetPack 5.1.4), Ubuntu 20.04 |
-| Found on | Tron Legacy MPF, 2026-10-05 (Tron-Legacy-MPF commit 5b472fb); JetPack 5 checked 2026-10-09 |
+| Found on | a Stern SAM recreation, 2026-10-05; JetPack 5 checked 2026-10-09 |
 | Fact | observed (repro hangs every time on both boards with stock libnvmpi; passes with the patch) |
 | Our fix | [`../../build/gozen/nvmpi_flush.patch`](../../build/gozen/nvmpi_flush.patch), `nvmpi_dec.c` part (`nvmpi_flush_decoder()`, `nvmpi_decode()`, `nvmpi_prime_extradata()`) |
 | Applied by | [`../../build/gozen/build_gozen.sh`](../../build/gozen/build_gozen.sh) (GoZen's FFmpeg) and [`../../platforms/jetson/install_jetson_hwdec.sh`](../../platforms/jetson/install_jetson_hwdec.sh) (the whole patch, same revision); checked by [`../../platforms/jetson/jetson_selftest.sh`](../../platforms/jetson/jetson_selftest.sh) |

@@ -7,7 +7,7 @@
 | Kind | packaging |
 | Affected versions | Godot 4.5 and 4.6.3 with GMC 1.0.0 (any add-on that relies on `class_name`) |
 | Platforms | all |
-| Found on | this repository's smoke test (`examples/minimal`), 2026-10-12; Tron Legacy MPF's setup has imported twice since 2026-10-02 |
+| Found on | this repository's smoke test (`examples/minimal`), 2026-10-12 |
 | Fact | observed |
 | Our fix | `mpf_godot/launcher.py` `import_project()` |
 | Applied by | `python -m mpf_godot addons GAME` and `python -m mpf_godot run GAME` (only when `GAME/.godot/` has no class cache) |
@@ -34,7 +34,7 @@ not build it. The first import pass can also report the add-on's icons as missin
 ## Fix
 
 Before the first run, the launcher runs `godot --headless --path GAME --import` twice when the class cache is
-missing. Games that ship their own setup do the same (Tron Legacy MPF's `setup.py` imports twice).
+missing. Games that ship their own setup do the same (they import twice).
 
 ## How to check
 

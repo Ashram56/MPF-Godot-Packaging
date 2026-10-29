@@ -5,9 +5,9 @@
 | Id | `godot/separate-render-thread-glyph-cache` (this file: `fixes/godot/separate-render-thread-glyph-cache.md`) |
 | Component | Godot |
 | Kind | bug |
-| Affected versions | Godot 4.6.3-stable (official Linux arm64 build); 4.5.2-stable also logged them (Tron-Legacy-MPF commit c9a8be2); later versions not checked |
+| Affected versions | Godot 4.6.3-stable (official Linux arm64 build); 4.5.2-stable also logged them; later versions not checked |
 | Platforms | Linux arm64 seen (Jetson Xavier NX, L4T R35.6.4, Vulkan, Mobile renderer, X11); other platforms not checked |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit f52ba68) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (test project: 8 errors in 10 s with `thread_model=2`, 0 with 1) |
 | Our fix | none: the errors are harmless (pixel-identical picture) and left as they are; test project [`../repro/godot_glyph_cache.zip`](../repro/godot_glyph_cache.zip) |
 | Applied by | - |

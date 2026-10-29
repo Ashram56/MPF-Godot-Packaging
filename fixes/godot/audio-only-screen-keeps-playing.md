@@ -7,9 +7,9 @@
 | Kind | bug |
 | Affected versions | any: the game's own player logic |
 | Platforms | all (seen on a Raspberry Pi 4) |
-| Found on | Tron Legacy MPF, 2026-10-27 |
+| Found on | a Stern SAM recreation, 2026-10-27 |
 | Fact | observed: the PuP OST (an audio-only player) ran from the start of the game to the end of the test, 149 s, through the service menu and the attract |
-| Our fix | on `tron_service_entered` MPF sends the music player a `stopall`, which clears its foreground and background and stops the stream (Tron-Legacy-MPF PR #55, `game/tron_pup/mode.py`, `game/pup/pup_screen.gd`) |
+| Our fix | on the game's service-menu event MPF sends the music player a `stopall`, which clears its foreground and background and stops the stream |
 | Applied by | the game's code |
 | Upstream | none needed |
 

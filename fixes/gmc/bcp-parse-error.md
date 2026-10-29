@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | GMC 1.0.0; and later until fixed upstream |
 | Platforms | all |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-03 |
+| Found on | a Stern SAM recreation, 2026-10-03 |
 | Fact | observed (with [bcp-partial-lines](bcp-partial-lines.md)), cause from GMC 1.0.0 code |
 | Our fix | [`mpf_godot/gmc_patch.py`](../../mpf_godot/gmc_patch.py) (edit `bcp-parse-error`, `scripts/bcp_parse.gd`) |
 | Applied by | `python -m mpf_godot setup`, `python -m mpf_godot patch-gmc [GMC_DIR]`; idempotent |

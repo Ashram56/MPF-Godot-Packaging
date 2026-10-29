@@ -60,26 +60,26 @@ Video add-ons are copied into a game with `python -m mpf_godot addons <game> --v
 
 ## Tested where
 
-Only what the sources report. "Tron" is Tron Legacy MPF, where this kit was built.
+Only what the sources report. "The game" is the first game ported with this kit (a Stern SAM recreation).
 
 | Platform | What was run | Result | Source |
 |---|---|---|---|
-| Windows x86_64 | Tron CI (`windows-latest`): setup and tests, Python 3.11 from `actions/setup-python`, not the installer | pass | Tron `.github/workflows/test.yml` |
+| Windows x86_64 | the game's CI (`windows-latest`): setup and tests, Python 3.11 from `actions/setup-python`, not the installer | pass | the game's `.github/workflows/test.yml` |
 | Windows x86_64 | the installer for real, by the owner (token prompt) | Ctrl+V did not paste the token; fixed by right-click advice | packaging agent, section 5 |
-| Windows x86_64 | GoZen with GPU decoding (Ryzen 7800X3D, d3d11va) | pass | Tron PR #15, merged 2026-10-10 |
-| Windows (pwsh 7.4 on Linux) | the one line as a dry run; `PositionalBinding` check | pass | Tron commit 37ef409, 2026-10-10 |
+| Windows x86_64 | GoZen with GPU decoding (Ryzen 7800X3D, d3d11va) | pass | the game's repository, merged 2026-10-10 |
+| Windows (pwsh 7.4 on Linux) | the one line as a dry run; `PositionalBinding` check | pass | the game's repository, 2026-10-10 |
 | Windows ARM64 | nothing reported | - | - |
-| macOS | Tron CI (`macos-latest`): setup and tests; the installer only as a dry-run plan in tests | pass | Tron `test.yml`, `tests/test_install.py` |
-| Linux x86_64 (Ubuntu) | Tron CI: setup, tests, render check under Xvfb | pass | Tron `test.yml` |
-| Linux dnf, pacman, Debian, Mint, Rocky, EndeavourOS | installer dry runs with fake `/etc/os-release` only | pass | Tron `tests/test_install.py` |
-| Linux arm64, Ubuntu 20.04 (qemu, posing as a Xavier NX on R35.4.1) | full install with `--yes`: Python 3.11 from uv, MPF Monitor, Godot arm64; libnvmpi builds | pass | Tron `docs/jetson/README.md` |
-| Linux arm64, Ubuntu 22.04 (emulated JetPack 6) | PyQt6 6.7.1 and Qt 6.7.1 from wheels, `mpfmonitor` imports | pass | Tron commit d8ea9a1, 2026-10-05 |
-| Jetson AGX Orin, L4T R36.4.3 | game with three video windows, hardware decoding | pass (fixes needed) | Tron `docs/jetson/README.md` |
-| Jetson Xavier NX, L4T R35.6.4 | decoder self-test, two game scenarios in five power modes | pass (fixes needed) | Tron `docs/jetson/README.md`, `xavier_nx.md` |
-| P-ROC (`--proc`), any OS | `build_pinproc.sh` and the udev step as dry-run plans in tests; no run on a real board reported | plan only | Tron `tests/test_install.py` |
+| macOS | the game's CI (`macos-latest`): setup and tests; the installer only as a dry-run plan in tests | pass | the game's `test.yml`, `tests/test_install.py` |
+| Linux x86_64 (Ubuntu) | the game's CI: setup, tests, render check under Xvfb | pass | the game's `test.yml` |
+| Linux dnf, pacman, Debian, Mint, Rocky, EndeavourOS | installer dry runs with fake `/etc/os-release` only | pass | the game's `tests/test_install.py` |
+| Linux arm64, Ubuntu 20.04 (qemu, posing as a Xavier NX on R35.4.1) | full install with `--yes`: Python 3.11 from uv, MPF Monitor, Godot arm64; libnvmpi builds | pass | the game's `docs/jetson/README.md` |
+| Linux arm64, Ubuntu 22.04 (emulated JetPack 6) | PyQt6 6.7.1 and Qt 6.7.1 from wheels, `mpfmonitor` imports | pass | the game's repository, 2026-10-05 |
+| Jetson AGX Orin, L4T R36.4.3 | game with three video windows, hardware decoding | pass (fixes needed) | the game's `docs/jetson/README.md` |
+| Jetson Xavier NX, L4T R35.6.4 | decoder self-test, two game scenarios in five power modes | pass (fixes needed) | the game's `docs/jetson/README.md`, `xavier_nx.md` |
+| P-ROC (`--proc`), any OS | `build_pinproc.sh` and the udev step as dry-run plans in tests; no run on a real board reported | plan only | the game's `tests/test_install.py` |
 | Xavier NX minimal image | boots from SD and from NVMe | pass | [jetson/image/README.md](jetson/image/README.md) |
 
-The installers of this repository were renamed from Tron's (`install_prereqs_*` to `install_*`, `TRON_*` to
+The installers of this repository were renamed from the first game's (`install_prereqs_*` to `install_*`, its own variable prefix to
 `MPF_GODOT_*`); the one lines above have not been run from this repository yet.
 
 ## Common to the three installers
@@ -87,9 +87,11 @@ The installers of this repository were renamed from Tron's (`install_prereqs_*` 
 | Problem | Fix | Found |
 |---|---|---|
 | A clone whose branch was deleted on GitHub (a merged pull request) could not be pulled | the installer fetches and switches to `MPF_GODOT_BRANCH` (`checkout -B ... --track`) | 2026-10-04, code |
-| `git pull` aborts on untracked files the update adds: Godot writes a `.uid` next to each script it opens, often before the commit that tracks it | `clear_untracked_in_update` (bash) / `Clear-UntrackedInUpdate` (PowerShell): remove `.uid`/`.import` and identical copies, move any other file to `<file>.local` | 2026-10-10, observed on Windows (Tron PR #43) |
+| `git pull` aborts on untracked files the update adds: Godot writes a `.uid` next to each script it opens, often before the commit that tracks it | `clear_untracked_in_update` (bash) / `Clear-UntrackedInUpdate` (PowerShell): remove `.uid`/`.import` and identical copies, move any other file to `<file>.local` | 2026-10-10, observed on Windows |
 | A private fork: `curl`/`irm` get 404 without a token, and git needs a token, not a password | token flow: [linux.md, "A private repository and its token"](linux.md#a-private-repository-and-its-token) | 2026-10-04 to 10-07 |
 | Godot downloads from downloads.tuxfamily.org failed on some networks | Godot from GitHub releases (`toolchain.GODOT_RELEASES`) | code |
+| Release tags cannot be pushed from a cloud session (git proxy answers 403) | the owner creates the tag on GitHub or from a clone | observed |
+| A board without GitHub credentials (Remote Control) cannot push | it hands changes back as `git format-patch` files; a cloud session applies and pushes them | observed on the AGX Orin |
 | Release tags cannot be pushed from a cloud session (git proxy answers 403) | the owner creates the tag on GitHub or from a clone | observed, Tron PuP fork |
 | A board without GitHub credentials (Remote Control) cannot push | it hands changes back as `git format-patch` files; a cloud session applies and pushes them | observed, Tron on the AGX Orin |
 

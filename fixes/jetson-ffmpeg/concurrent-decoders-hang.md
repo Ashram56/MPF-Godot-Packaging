@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | jetson-ffmpeg at `8d70c17efeee57f4d956df500fec78a73f8c27d4` (v3.10.0), libnvmpi; later revisions not checked |
 | Platforms | Jetson AGX Orin, L4T R36.4.3 (JetPack 6.2): hangs; Jetson Xavier NX, L4T R35.6.4 (JetPack 5.1.4): segfaults |
-| Found on | Tron Legacy MPF, 2026-10-05 (Tron-Legacy-MPF commit 6c16a51); JetPack 5 checked 2026-10-09 |
+| Found on | a Stern SAM recreation, 2026-10-05; JetPack 5 checked 2026-10-09 |
 | Fact | observed (repro: 4 of 6 runs hung on the Orin, 5 of 20 segfaulted on the Xavier NX; 0 with the patch); the root cause inside NVIDIA's libraries is not known |
 | Our fix | [`../../build/gozen/nvmpi_flush.patch`](../../build/gozen/nvmpi_flush.patch), `src/` part (`nvmpi_dec_setup_mutex`, the capture thread's STREAMOFF on error, `put_packet()` failing while in error) |
 | Applied by | [`../../platforms/jetson/install_jetson_hwdec.sh`](../../platforms/jetson/install_jetson_hwdec.sh); checked by [`../../platforms/jetson/jetson_selftest.sh`](../../platforms/jetson/jetson_selftest.sh) |

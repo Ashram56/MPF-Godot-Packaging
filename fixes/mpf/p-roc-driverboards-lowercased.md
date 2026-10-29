@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | MPF 0.80.1 (and earlier 0.5x releases with the same validator, not checked); and later until fixed upstream |
 | Platforms | all |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-03 |
+| Found on | a Stern SAM recreation, 2026-10-03 |
 | Fact | code (MPF 0.80.1 `config_validator.py` and `config_spec.yaml`; the strings of MPF's bundled pypinproc); not run on a P-ROC |
 | Our fix | none in code: a game puts `driverboards:` under `hardware:` (example below) |
 | Applied by | the game's config; nothing to apply |

@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | jetson-ffmpeg at `8d70c17efeee57f4d956df500fec78a73f8c27d4` (v3.10.0), libnvmpi; later revisions not checked |
 | Platforms | Jetson AGX Orin, L4T R36.4.3 (JetPack 6.2); Jetson Xavier NX, L4T R35.6.4 (JetPack 5.1.4) |
-| Found on | Tron Legacy MPF, 2026-10-05 (Tron-Legacy-MPF commit f269df7); JetPack 5 checked 2026-10-09 |
+| Found on | a Stern SAM recreation, 2026-10-05; JetPack 5 checked 2026-10-09 |
 | Fact | observed (close times from the repro on both boards) |
 | Our fix | [`../../build/gozen/nvmpi_flush.patch`](../../build/gozen/nvmpi_flush.patch), `src/` part (`closing` flag in `nvmpi_decoder_close()`, 50 ms `dqEvent()` slices in the capture loop) |
 | Applied by | [`../../platforms/jetson/install_jetson_hwdec.sh`](../../platforms/jetson/install_jetson_hwdec.sh) (builds libnvmpi with the patch); checked by [`../../platforms/jetson/jetson_selftest.sh`](../../platforms/jetson/jetson_selftest.sh) |

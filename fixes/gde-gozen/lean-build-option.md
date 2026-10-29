@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | GDE GoZen at `f9448619324ad7d0d4e79d3bd501bde477ea4b7f` (`SConstruct`) |
 | Platforms | Linux x86_64 and arm64 (glibc 2.31+), Windows x86_64 (MinGW-w64) |
-| Found on | Tron Legacy MPF, 2026-10-04 (Tron-Legacy-MPF commit 4a322fb); Windows part 2026-10-09 (commit 9f547e5) |
+| Found on | a Stern SAM recreation, 2026-10-04; Windows part 2026-10-09 |
 | Fact | code (SConstruct links them unconditionally) |
 | Our fix | [`../../build/gozen/gozen.patch`](../../build/gozen/gozen.patch) (SConstruct `lean=yes`); FFmpeg configured in [`../../build/gozen/build_in_docker.sh`](../../build/gozen/build_in_docker.sh) and [`../../build/gozen/build_windows_in_docker.sh`](../../build/gozen/build_windows_in_docker.sh) |
 | Applied by | [`../../build/gozen/build_gozen.sh`](../../build/gozen/build_gozen.sh) (`scons ... lean=yes`) |

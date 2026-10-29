@@ -48,7 +48,7 @@ The hardware decoder saves little CPU in the game (about 35 points), because the
   (`bcm2835_mmal_vchiq: timed out waiting for sync completion`, `Failed disabling i/p port, ret -62`, videobuf2 WARNINGs). It stays unusable until the next reboot
   (`ffmpeg -c:v h264_v4l2m2m` answers `VIDIOC_REQBUFS failed`). Seen twice: with a weak power supply and with a good one (CMA 419 MB free). Do not open more than two.
 - **No loop.** `ffmpeg -stream_loop` with `h264_v4l2m2m` stops at the end of the file (software loops).
-- **The game does not use it.** `game/pup/gozen_player.gd` of Tron-Legacy-MPF sets `GOZEN_HWDEC=0` when `/dev/nvmap` is missing (a Jetson test), so on a Pi 4 the game decodes in software.
+- **A game may not use it.** A game's player script (`gozen_player.gd`) can set `GOZEN_HWDEC=0` when `/dev/nvmap` is missing (a Jetson test), and such a game then decodes in software on a Pi 4.
   Forcing `GOZEN_HWDEC=1` lowers the CPU but not the frame rate: the game is limited by the GPU (V3D), not by decoding.
 - A cap on the number of simultaneous hardware decoders is still to do.
 

@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | GDE GoZen at `f9448619324ad7d0d4e79d3bd501bde477ea4b7f` (`video_playback.gd`) |
 | Platforms | all (GDScript); measured on Jetson Xavier NX, L4T R35.6.4 |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commits 042695c one frame ahead, 4fb806b no seek and high priority, f64de13 three frames ahead) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (clip suite and full sessions, Xavier NX) |
 | Our fix | [`../../addons/gde_gozen/video_playback.gd`](../../addons/gde_gozen/video_playback.gd) (`QUEUE_FRAMES`, `_fill_queue()`, `_decode_one()`, `_wait_decode()`, the clock in `_process()`) |
 | Applied by | `python -m mpf_godot addons GAME --video` |
@@ -74,7 +74,7 @@ still. An app playing three videos at once on a Jetson Xavier NX ran at about 5 
   the decoder as fast as the game's frame rate: with a slow decoder (a Raspberry Pi 4's V4L2 one) and a 30 FPS cap
   (27.4 FPS drawn in attract) a 30 fps video with sound fell 85 ms behind its sound every second and never caught up,
   5 s late after a minute. A test with a 14 ms decoder at a 27 FPS cap: lag 97 ms/s before, flat under 50 ms after
-  (2026-10-27, Tron Legacy MPF).
+  (2026-10-27).
 - High-priority tasks, so they never queue behind low-priority work (opens, closes, resource loads).
 - No seek inside decode tasks: forward decoding only.
 - `_process()` shows the frame the clock has reached; a frame not ready yet is shown late, never waited for.

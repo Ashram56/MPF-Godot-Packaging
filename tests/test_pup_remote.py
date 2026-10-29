@@ -15,7 +15,7 @@ _spec = importlib.util.spec_from_file_location("topper", os.path.join(ROOT, "mpf
 topper = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(topper)
 
-FILES = ["Background - Topper/TronLegacyLogo.mp4", "TopperModes/CLU.mp4", "TopperModes/Gem.mp4",
+FILES = ["Background - Topper/Title.mp4", "TopperModes/Hero.mp4", "TopperModes/Spark.mp4",
          "TopperEvents/Jackpot2.mp4", "TopperEvents/Jackpot10.mp4", "TopperEvents/Jackpot1.mp4"]
 
 
@@ -52,7 +52,7 @@ def library(playlists=None):
 
 class TestScreenRules(unittest.TestCase):
 
-    def screen(self, popup=False, bg=("Background - Topper", "TronLegacyLogo.mp4")):
+    def screen(self, popup=False, bg=("Background - Topper", "Title.mp4")):
         self.out, self.timers = Output(), Timers()
         return screen_rules.Screen(13, library(), self.out, self.timers, popup=popup, bg_playlist=bg[0],
                                    bg_file=bg[1])
@@ -60,33 +60,33 @@ class TestScreenRules(unittest.TestCase):
     def test_background_then_priority(self):
         s = self.screen()
         s.start_background()
-        self.assertEqual(("start", "Background - Topper/TronLegacyLogo.mp4", True), self.out.log[-1])
-        s.command({"playlist": "TopperModes", "file": "CLU", "priority": 5, "mode": "Loop"})
-        self.assertEqual(("start", "TopperModes/CLU.mp4", True), self.out.log[-1])
-        s.command({"playlist": "TopperModes", "file": "Gem.mp4", "priority": 4})           # lower: dropped
-        self.assertEqual("TopperModes/CLU.mp4", s.key)
-        s.command({"playlist": "TopperModes", "file": "Gem", "priority": 5, "mode": "SkipSamePrty"})
-        self.assertEqual("TopperModes/CLU.mp4", s.key)
-        s.command({"playlist": "TopperModes", "file": "clu", "mode": "StopFile"})          # the background back
-        self.assertEqual(("start", "Background - Topper/TronLegacyLogo.mp4", True), self.out.log[-1])
+        self.assertEqual(("start", "Background - Topper/Title.mp4", True), self.out.log[-1])
+        s.command({"playlist": "TopperModes", "file": "Hero", "priority": 5, "mode": "Loop"})
+        self.assertEqual(("start", "TopperModes/Hero.mp4", True), self.out.log[-1])
+        s.command({"playlist": "TopperModes", "file": "Spark.mp4", "priority": 4})           # lower: dropped
+        self.assertEqual("TopperModes/Hero.mp4", s.key)
+        s.command({"playlist": "TopperModes", "file": "Spark", "priority": 5, "mode": "SkipSamePrty"})
+        self.assertEqual("TopperModes/Hero.mp4", s.key)
+        s.command({"playlist": "TopperModes", "file": "hero", "mode": "StopFile"})          # the background back
+        self.assertEqual(("start", "Background - Topper/Title.mp4", True), self.out.log[-1])
 
     def test_video_end_and_length(self):
         s = self.screen()
         s.start_background()
-        s.command({"playlist": "TopperModes", "file": "Gem", "priority": 1})
+        s.command({"playlist": "TopperModes", "file": "Spark", "priority": 1})
         self.assertFalse(s.loop)
         s.finished()
-        self.assertEqual("Background - Topper/TronLegacyLogo.mp4", s.key)
-        s.command({"playlist": "TopperModes", "file": "Gem", "priority": 1, "length": 3})
+        self.assertEqual("Background - Topper/Title.mp4", s.key)
+        s.command({"playlist": "TopperModes", "file": "Spark", "priority": 1, "length": 3})
         self.timers.fire()
-        self.assertEqual("Background - Topper/TronLegacyLogo.mp4", s.key)
+        self.assertEqual("Background - Topper/Title.mp4", s.key)
 
     def test_stale_length_timer(self):
         s = self.screen()
-        s.command({"playlist": "TopperModes", "file": "Gem", "priority": 1, "length": 3})
-        s.command({"playlist": "TopperModes", "file": "CLU", "priority": 1, "mode": "Loop"})
-        self.timers.fire()                                   # Gem's timer: CLU plays on
-        self.assertEqual("TopperModes/CLU.mp4", s.key)
+        s.command({"playlist": "TopperModes", "file": "Spark", "priority": 1, "length": 3})
+        s.command({"playlist": "TopperModes", "file": "Hero", "priority": 1, "mode": "Loop"})
+        self.timers.fire()                                   # Spark's timer: Hero plays on
+        self.assertEqual("TopperModes/Hero.mp4", s.key)
 
     def test_popup_hides(self):
         s = self.screen(popup=True, bg=("", ""))
@@ -101,8 +101,8 @@ class TestScreenRules(unittest.TestCase):
 
     def test_set_bg(self):
         s = self.screen()
-        s.command({"playlist": "TopperModes", "file": "Gem", "mode": "SetBG"})
-        self.assertEqual(("start", "TopperModes/Gem.mp4", True), self.out.log[-1])
+        s.command({"playlist": "TopperModes", "file": "Spark", "mode": "SetBG"})
+        self.assertEqual(("start", "TopperModes/Spark.mp4", True), self.out.log[-1])
 
     def test_pick(self):
         lib = library({"topperevents": {"alpha_sort": True, "volume": 50}})
@@ -132,7 +132,7 @@ class FakeMpv:
         self.plays.append(None)
 
 
-SCREENS = {13: {"playlist": "Background - Topper", "file": "TronLegacyLogo.mp4", "active": "Show"},
+SCREENS = {13: {"playlist": "Background - Topper", "file": "Title.mp4", "active": "Show"},
            14: {"playlist": "", "file": "", "active": "ForcePopBack"}}
 
 
@@ -151,50 +151,50 @@ class TestDisplay(unittest.TestCase):
 
     def test_popup_over_underlay_then_resume(self):
         self.display.setup(self.welcome["screens"], {}, [13, 14])
-        self.assertEqual([("TronLegacyLogo.mp4", True, 0.0)], self.mpv.plays)
+        self.assertEqual([("Title.mp4", True, 0.0)], self.mpv.plays)
         self.mpv.position = 12.5
         self.display.command({"screen": 14, "playlist": "TopperEvents", "file": "Jackpot1", "priority": 1})
         self.assertEqual(("Jackpot1.mp4", False, 0.0), self.mpv.plays[-1])
         self.mpv.on_eof()                                    # the pop-up ends: the logo where it was
-        self.assertEqual(("TronLegacyLogo.mp4", True, 12.5), self.mpv.plays[-1])
+        self.assertEqual(("Title.mp4", True, 12.5), self.mpv.plays[-1])
 
     def test_rejoin_keeps_the_loop(self):
         self.display.setup(self.welcome["screens"], {}, [13, 14])
         self.display.setup(self.welcome["screens"], {}, [13, 14])
         self.assertEqual(1, len(self.mpv.plays))
-        cmd = {"screen": 13, "playlist": "TopperModes", "file": "CLU", "priority": 2, "mode": "Loop"}
-        self.display.setup(self.welcome["screens"], {}, [13, 14], [cmd])       # the game says CLU runs
+        cmd = {"screen": 13, "playlist": "TopperModes", "file": "Hero", "priority": 2, "mode": "Loop"}
+        self.display.setup(self.welcome["screens"], {}, [13, 14], [cmd])       # the game says Hero runs
         self.display.setup(self.welcome["screens"], {}, [13, 14], [cmd])
-        self.assertEqual([("TronLegacyLogo.mp4", True, 0.0), ("CLU.mp4", True, 0.0)], self.mpv.plays)
+        self.assertEqual([("Title.mp4", True, 0.0), ("Hero.mp4", True, 0.0)], self.mpv.plays)
 
     def test_underlay_changes_under_popup(self):
         self.display.setup(self.welcome["screens"], {}, [13, 14])
         self.display.command({"screen": 14, "playlist": "TopperEvents", "file": "Jackpot1", "priority": 1})
-        self.display.command({"screen": 13, "playlist": "TopperModes", "file": "Gem", "priority": 1,
+        self.display.command({"screen": 13, "playlist": "TopperModes", "file": "Spark", "priority": 1,
                               "mode": "Loop"})
         self.assertEqual(("Jackpot1.mp4", False, 0.0), self.mpv.plays[-1])    # covered: nothing shown changes
         self.mpv.on_eof()
-        self.assertEqual(("Gem.mp4", True, 0.0), self.mpv.plays[-1])
+        self.assertEqual(("Spark.mp4", True, 0.0), self.mpv.plays[-1])
 
 
 class TestServer(unittest.TestCase):
 
     def test_current_state(self):
         server = remote.RemoteServer(SCREENS, {})
-        server.send({"screen": 13, "playlist": "TopperModes", "file": "Gem", "mode": "SetBG"})
-        server.send({"screen": 13, "playlist": "TopperModes", "file": "CLU", "priority": 3, "mode": "Loop"})
+        server.send({"screen": 13, "playlist": "TopperModes", "file": "Spark", "mode": "SetBG"})
+        server.send({"screen": 13, "playlist": "TopperModes", "file": "Hero", "priority": 3, "mode": "Loop"})
         server.send({"screen": 13, "playlist": "TopperEvents", "priority": 1})           # lower: the loop goes on
         server.send({"screen": 14, "playlist": "TopperEvents", "priority": 9})
-        self.assertEqual(["Gem", "CLU"], [c["file"] for c in server.current([13, 14])])
-        server.send({"screen": 13, "playlist": "TopperModes", "file": "Gem.mp4", "mode": "StopFile"})
+        self.assertEqual(["Spark", "Hero"], [c["file"] for c in server.current([13, 14])])
+        server.send({"screen": 13, "playlist": "TopperModes", "file": "Spark.mp4", "mode": "StopFile"})
         self.assertEqual(2, len(server.current([13])))                                    # not the running loop
-        server.send({"screen": 13, "playlist": "TopperModes", "file": "clu", "mode": "StopFile"})
-        self.assertEqual(["Gem"], [c["file"] for c in server.current([13])])
-        server.send({"screen": 13, "playlist": "TopperModes", "file": "CLU", "priority": 3, "mode": "Loop"})
+        server.send({"screen": 13, "playlist": "TopperModes", "file": "hero", "mode": "StopFile"})
+        self.assertEqual(["Spark"], [c["file"] for c in server.current([13])])
+        server.send({"screen": 13, "playlist": "TopperModes", "file": "Hero", "priority": 3, "mode": "Loop"})
         server.send({"screen": 13, "playlist": "TopperEvents", "priority": 3})            # replaces it
-        self.assertEqual(["Gem"], [c["file"] for c in server.current([13])])
+        self.assertEqual(["Spark"], [c["file"] for c in server.current([13])])
         welcome = server.welcome([13, 14])
-        self.assertEqual({"bg_playlist": "Background - Topper", "bg_file": "TronLegacyLogo.mp4", "popup": False},
+        self.assertEqual({"bg_playlist": "Background - Topper", "bg_file": "Title.mp4", "popup": False},
                          welcome["screens"]["13"])
         self.assertTrue(welcome["screens"]["14"]["popup"])
         json.dumps(welcome)
@@ -207,7 +207,7 @@ class TestServer(unittest.TestCase):
             await server.start()
             found = await topper.discover(server.port, target="127.0.0.1")
             self.assertEqual(("127.0.0.1", server.port), found)
-            server.send({"screen": 13, "playlist": "TopperModes", "file": "CLU", "priority": 3, "mode": "Loop"})
+            server.send({"screen": 13, "playlist": "TopperModes", "file": "Hero", "priority": 3, "mode": "Loop"})
             mpv = FakeMpv()
             display = topper.Display(mpv, library())
             opts = topper.load_config(None, {"host": "127.0.0.1", "port": str(server.port), "timeout": "1"})
@@ -216,7 +216,7 @@ class TestServer(unittest.TestCase):
                 await asyncio.sleep(0.02)
                 if server.clients:
                     break
-            self.assertEqual([("CLU.mp4", True, 0.0)], mpv.plays)
+            self.assertEqual([("Hero.mp4", True, 0.0)], mpv.plays)
             self.assertTrue(display.library.playlists["topperevents"]["alpha_sort"])
             server.send({"screen": 14, "playlist": "TopperEvents", "file": "Jackpot2", "priority": 1})
             server.send({"screen": 2, "playlist": "Drain", "priority": 1})                # not a topper screen
@@ -271,9 +271,9 @@ class TestAgent(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, "manifest.json"), "w") as f:
-                json.dump({"files": {"TopperModes/CLU.mp4": {"out": "TopperModes/CLU.mp4"}}}, f)
+                json.dump({"files": {"TopperModes/Hero.mp4": {"out": "TopperModes/Hero.mp4"}}}, f)
             lib = topper.load_library(d)
-            self.assertEqual(os.path.join(d, "TopperModes/CLU.mp4"), lib.path(lib.pick("TopperModes", "CLU")))
+            self.assertEqual(os.path.join(d, "TopperModes/Hero.mp4"), lib.path(lib.pick("TopperModes", "Hero")))
 
 
 

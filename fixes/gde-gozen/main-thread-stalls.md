@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | GDE GoZen at `f9448619324ad7d0d4e79d3bd501bde477ea4b7f` (`video_playback.gd`), Godot 4.6.3; later revisions not checked |
 | Platforms | all (GDScript); worst with a slow-to-open hardware decoder: Jetson AGX Orin, L4T R36.4.3, and Jetson Xavier NX, L4T R35.6.4, with `h264_nvmpi` |
-| Found on | Tron Legacy MPF, 2026-10-05 (Tron-Legacy-MPF commit f269df7); `close()` never waiting 2026-10-12 (Tron-Legacy-MPF commit 0023339) |
+| Found on | a Stern SAM recreation, 2026-10-05; `close()` never waiting 2026-10-12 |
 | Fact | code (the calls below) and observed (timing logs on the Orin) |
 | Our fix | [`../../addons/gde_gozen/video_playback.gd`](../../addons/gde_gozen/video_playback.gd) (`_open_video()`, `_process()`, `restart()`, `close()`, `_release_video()`, `_exit_tree()`) |
 | Applied by | `python -m mpf_godot addons GAME --video` (copies the patched add-on into the game) |

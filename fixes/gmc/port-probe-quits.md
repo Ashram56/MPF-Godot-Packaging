@@ -7,7 +7,7 @@
 | Kind | bug (quits) / improvement (a ready signal) |
 | Affected versions | GMC 1.0.0, Godot 4.5.x and 4.6.x; and later until fixed upstream |
 | Platforms | all (the quit); Windows (IPv6-only listener) |
-| Found on | a Stern SAM recreation (Tron Legacy MPF): the quit 2026-10-03, the Windows IPv6 case 2026-10-03 |
+| Found on | a Stern SAM recreation: the quit 2026-10-03, the Windows IPv6 case 2026-10-03 |
 | Fact | observed; GMC's code for the quit not read here (inferred: GMC treats any client that hangs up as MPF leaving) |
 | Our fix | [`mpf_godot/launcher.py`](../../mpf_godot/launcher.py) `port_in_use()`, `wait_for_port()` |
 | Applied by | the launcher (`python -m mpf_godot run GAME`) |

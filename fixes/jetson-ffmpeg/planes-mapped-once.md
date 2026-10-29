@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | jetson-ffmpeg at `8d70c17efeee57f4d956df500fec78a73f8c27d4` (v3.10.0), libnvmpi with NvUtils (`WITH_NVUTILS`); later revisions not checked |
 | Platforms | measured on Jetson Xavier NX, L4T R35.6.4 (JetPack 5.1.4); the same patch is installed on Jetson AGX Orin, L4T R36.4.3 (not measured or re-checked there) |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit 042695c) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (decode speed and CPU time per frame on the Xavier NX) |
 | Our fix | [`../../build/gozen/nvmpi_flush.patch`](../../build/gozen/nvmpi_flush.patch), `src/` part (`copyNvBufToFrame()` in `nvmpi_dec_api.cpp`, `nvmpi_frame_buffer::destroy()`) |
 | Applied by | [`../../platforms/jetson/install_jetson_hwdec.sh`](../../platforms/jetson/install_jetson_hwdec.sh) |

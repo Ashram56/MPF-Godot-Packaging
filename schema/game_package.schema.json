@@ -1,0 +1,91 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "Game package description (the contract between a game and the platform)",
+ "description": "Written and owned by the game, in its repository (bundle_spec.json or game_package.json). The platform keeps no game's spec. See common/games/README.md, 'What the game provides'.",
+ "type": "object",
+ "required": [
+  "id",
+  "run"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "id": {
+   "type": "string"
+  },
+  "name": {
+   "type": "string"
+  },
+  "description": {
+   "type": "string"
+  },
+  "icon": {
+   "type": "string"
+  },
+  "game_dir": {
+   "type": "string"
+  },
+  "git_tracked": {
+   "type": "array"
+  },
+  "git_exclude": {
+   "type": "array"
+  },
+  "copy": {
+   "type": "array"
+  },
+  "optional": {
+   "type": "array"
+  },
+  "never": {
+   "type": "array"
+  },
+  "never_names": {
+   "type": "array"
+  },
+  "import_seed": {
+   "type": "array"
+  },
+  "force_vram": {
+   "type": "array"
+  },
+  "platform_addons": {
+   "type": "array"
+  },
+  "requires": {
+   "type": "object"
+  },
+  "run": {
+   "type": "object",
+   "required": [
+    "start"
+   ]
+  },
+  "options": {
+   "type": "object"
+  },
+  "pup": {
+   "type": "object"
+  },
+  "keep_on_update": {
+   "type": "array"
+  },
+  "monitor": {
+   "type": "object"
+  },
+  "profiles": {
+   "type": "object"
+  },
+  "gozen": {
+   "type": "object"
+  },
+  "extra": {
+   "type": "object"
+  },
+  "source_commits": {
+   "type": "object"
+  },
+  "precheck": {
+   "type": "array"
+  }
+ }
+}
