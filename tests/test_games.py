@@ -232,6 +232,58 @@ class Inbox(Base):
         self.assertIsNone(G.inbox_pup_target("c.pup.zip", games))
 
 
+class StartCheck(Base):
+    """A bundle that cannot start is refused before it is installed, and the game that was running stays the active one."""
+    START = {"run": {"start": "python3 scripts/start.py"}}
+
+    def venv(self):
+        d = os.path.join(self.t.name, "venv", "bin")
+        os.makedirs(d)
+        os.symlink(sys.executable, os.path.join(d, "python"))
+        with open(C.GAME_ENV, "w") as f:
+            f.write(f"MPF_GAME_VENV={os.path.join(self.t.name, 'venv')}\n")
+
+    def refused(self, **kw):
+        arc = os.path.join(self.t.name, "bad.tar.xz")
+        make_bundle(arc, **kw)
+        G.JOB_LOCK.acquire()
+        G.run_job(G.install_game, arc, "")
+        return G.JOB["msg"]
+
+    def test_missing_module_is_refused_and_the_old_game_stays(self):
+        self.venv()
+        self.install(version="1.0", extra=self.START, files={"scripts/start.py": b"import helper\n", "scripts/helper.py": b"X = 1\n"})
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"])
+        msg = self.refused(version="2.0", extra=self.START, files={"scripts/start.py": b"import helper\nimport helper_missing_xyz\n", "scripts/helper.py": b""})
+        self.assertEqual(G.JOB["state"], "error")
+        self.assertIn("helper_missing_xyz", msg)
+        self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])             # nothing of 2.0 was installed
+        self.assertTrue(G.installed_games()[0]["active"])
+
+    def test_optional_imports_and_stdlib_pass(self):
+        self.venv()
+        src = b"import os, json\ntry:\n    import nothing_here_optional\nexcept ImportError:\n    pass\ndef f():\n    import also_missing\n"
+        self.install(extra=self.START, files={"scripts/start.py": src})
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"])
+
+    def test_script_launched_by_the_start_script_is_followed(self):
+        self.venv()
+        self.refused(extra=self.START, files={"scripts/start.py": b"import subprocess\nsubprocess.run(['python3', 'run.py'])\n",
+                                              "scripts/run.py": b"import lost_module_xyz\n"})
+        self.assertEqual(G.JOB["state"], "error")
+        self.assertIn("lost_module_xyz", G.JOB["msg"])
+
+    def test_run_check_decides(self):
+        self.venv()
+        ok = {"run": {"start": "echo hi", "check": "python3 scripts/check.py"}}
+        self.install(version="1.0", extra=ok, files={"scripts/check.py": b"import sys; sys.exit(0)\n"})
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"])
+        msg = self.refused(version="2.0", extra=ok, files={"scripts/check.py": b"import sys; print('no display'); sys.exit(3)\n"})
+        self.assertIn("run.check", msg)
+        self.assertIn("no display", msg)
+        self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])
+
+
 class PupLibrary(Base):
     PACK = {"pup": {"pack_dir": "pup_pack/p", "media_dir": "pup_media/p",
                     "install": "sh -c 'mkdir -p pup_pack/p pup_media/p && echo v > pup_pack/p/a.mp4 && echo m > pup_media/p/a.webm'"}}

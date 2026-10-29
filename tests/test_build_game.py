@@ -98,6 +98,36 @@ class BuildTest(unittest.TestCase):
             self.run_tool(self.recipe(["--platform-addon", "no_such_addon"]), "--repo", self.repo, "--version", "1.3", "--out", self.out)
         self.assertIn("no_such_addon", str(e.exception))
 
+    def archive_of(self, files, run):
+        import tarfile
+        path = os.path.join(self.tmp, "x.tar.xz")
+        meta = {"format": 1, "id": "x", "version": "1", "target": {"os": "linux", "arch": "all"}, "run": run}
+        with tarfile.open(path, "w:xz") as tf:
+            for rel, data in dict(files, **{"bundle.json": json.dumps(meta).encode()}).items():
+                ti = tarfile.TarInfo("x/" + rel)
+                ti.size = len(data)
+                tf.addfile(ti, io.BytesIO(data))
+        return path, meta
+
+    def test_start_check_refuses_a_file_left_out(self):
+        os.makedirs(os.path.join(self.repo, "scripts"))
+        open(os.path.join(self.repo, "scripts", "helper.py"), "w").write("X = 1\n")
+        run = {"start": "python3 scripts/start.py"}
+        arc, meta = self.archive_of({"scripts/start.py": b"import helper\n"}, run)       # helper.py is in the source, not in the archive
+        with self.assertRaises(SystemExit) as e:
+            B.start_check(arc, self.repo, meta)
+        self.assertIn("left out of the bundle", str(e.exception))
+        arc, meta = self.archive_of({"scripts/start.py": b"import helper\n", "scripts/helper.py": b"X = 1\n"}, run)
+        with contextlib.redirect_stdout(io.StringIO()):
+            B.start_check(arc, self.repo, meta)
+
+    def test_start_check_runs_the_games_own_check(self):
+        run = {"start": "echo hi", "check": "python3 scripts/check.py"}
+        arc, meta = self.archive_of({"scripts/check.py": b"import sys; print('boom'); sys.exit(2)\n"}, run)
+        with self.assertRaises(SystemExit) as e:
+            B.start_check(arc, self.repo, meta)
+        self.assertIn("boom", str(e.exception))
+
     def test_publish(self):
         Put.root = os.path.join(self.tmp, "dav")
         os.makedirs(Put.root)

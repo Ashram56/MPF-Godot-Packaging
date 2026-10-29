@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -37,6 +38,8 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLATFORM = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(PLATFORM, "common", "netconfig"))
+import mpf_bundlecheck as BC  # noqa: E402
 TARGET_ARCH = {"arm64": "arm64", "x86_64": "x86_64", "all": "arm64+x86_64"}
 CABINET = re.compile(r"(^|/)(game/(data|audits|logs)(/|$)|[^/]*\.local\.cfg$|machine_vars\.yaml$|scorbit_device_key\.txt$)")
 
@@ -270,6 +273,34 @@ def verify(archive, recipe, target):
 MANIFEST = "mpf-games.json"
 
 
+def start_check(archive, repo, meta):
+    """The check the page makes before it installs (mpf_bundlecheck.py), made here on the extracted archive: a bundle that could not
+    start is a failed build. The game's own `run.check`, when it has one, runs in the extracted copy with the build's venv."""
+    venv = os.path.join(repo, ".venv", "bin", "python") if repo else ""
+    python = venv if os.path.exists(venv) else None
+    with tempfile.TemporaryDirectory(prefix="bundle-check-") as tmp:
+        with tarfile.open(archive, "r:xz") as t:
+            t.extractall(tmp)
+        roots = [d for d in os.listdir(tmp) if os.path.isdir(os.path.join(tmp, d))]
+        root = os.path.join(tmp, roots[0])
+        bad = BC.problems(root, python, meta, source=repo if repo and os.path.isdir(repo) else None)
+        cmd = BC.check_command(meta)
+        if cmd and not bad:
+            if cmd[0] in ("python3", "python"):
+                cmd[0] = python or sys.executable
+            env = dict(os.environ, MPF_BUNDLE_CHECK="1")
+            say(f"   $ {' '.join(cmd)}   (run.check, in the extracted archive)")
+            try:
+                r = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True, timeout=BC.check_timeout(meta))
+                if r.returncode:
+                    bad.append(f"the game's own check (run.check) failed ({r.returncode}): " + (r.stdout + r.stderr).strip()[-800:])
+            except subprocess.TimeoutExpired:
+                bad.append(f"the game's own check (run.check) gave no answer in {BC.check_timeout(meta)} s")
+    if bad:
+        die("the archive could not start, it is not delivered:\n  - " + "\n  - ".join(bad))
+    say("checked: the start script's imports are all in the archive" + (" and run.check passed" if BC.check_command(meta) else ""))
+
+
 def publish(url, archive, folder, meta=None, digest=""):
     user, pw = os.environ.get("WEBDAV_USER", ""), os.environ.get("WEBDAV_PASS", "")
     if not user or not pw:
@@ -405,6 +436,7 @@ def main():
         die(f"the build produced no .tar.xz in {out}")
     archive = os.path.join(out, new[-1])
     meta, digest = verify(archive, dict(recipe, id=meta_id(archive, recipe)), target)
+    start_check(archive, repo, meta)
     say(f"\n{archive}\n  {os.path.getsize(archive) >> 20} MB, sha256 {digest}")
     if a.publish:
         publish(a.publish, archive, recipe.get("publish_folder", meta.get("id", recipe["id"])), meta, digest)

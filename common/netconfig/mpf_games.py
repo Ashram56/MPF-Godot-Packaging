@@ -13,11 +13,13 @@ import pwd
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mpf_bundlecheck as BC  # noqa: E402
 import mpf_common as C  # noqa: E402
 from mpf_common import run  # noqa: E402
 
@@ -77,6 +79,32 @@ def game_python():
     venv = game_env().get("MPF_GAME_VENV")
     py = os.path.join(venv, "bin", "python") if venv else ""
     return py if py and os.path.exists(py) else "python3"
+
+
+def venv_python():
+    """The game's own venv Python, or None when the image has none (the system Python then cannot judge a game's packages)."""
+    py = game_python()
+    return py if os.path.isabs(py) else None
+
+
+def trial(root, b):
+    """What keeps the unpacked bundle in `root` from starting: its imports (common/netconfig/mpf_bundlecheck.py) and the game's own
+    `run.check`. [] when it can start. Nothing is installed yet: a failure leaves the game that was running as it was."""
+    bad = BC.problems(root, venv_python(), b)
+    cmd = BC.check_command(b)
+    if cmd and not bad:
+        pw = pwd.getpwnam(C.USER)
+        sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", root)
+        if cmd[0] in ("python3", "python"):
+            cmd[0] = game_python()
+        env = ["env"] + [f"{k}={v}" for k, v in game_env().items()] + ["MPF_BUNDLE_CHECK=1"]
+        try:
+            r = run("runuser", "-u", C.USER, "--", *env, *cmd, cwd=root, timeout=BC.check_timeout(b))
+        except subprocess.TimeoutExpired:
+            r = subprocess.CompletedProcess(cmd, 124, "", f"no answer after {BC.check_timeout(b)} s")
+        if r.returncode:
+            bad.append(f"the game's own check (run.check) failed ({r.returncode}): " + (r.stdout + r.stderr).strip()[-600:])
+    return bad
 
 
 def free_gb(path):
@@ -395,6 +423,10 @@ def install_game(archive, expect_sha, keep_old=True):
     if os.path.isfile(os.path.join(root, "SHA256SUMS")):
         job_set(msg="Verifying every file (sha256sum)")
         sh("sha256sum", "-c", "SHA256SUMS", "--quiet", cwd=root)
+    job_set(msg="Checking that the game can start")
+    bad = trial(root, b)
+    if bad:
+        raise JobError("this bundle cannot start, so it was not installed (the current game is untouched): " + " | ".join(bad[:6]))
     folder = folder_name(b)
     dest = os.path.join(C.GAMES, folder)
     old = dest + ".old"

@@ -209,6 +209,7 @@ refused by a page that does not know it.
 | Field | Meaning |
 |---|---|
 | `run.start` | the command (default `python3 scripts/package/start.py`); `run.cwd` its folder, relative to the bundle (default the bundle); `needs_display` false: do not wait for the X session |
+| `run.check` | optional: a command (run in the bundle folder, `python3` meaning the game's venv Python) that exits 0 when the game can start, in a few seconds, with no display and nothing left running (`MPF_BUNDLE_CHECK=1` is set). The builder runs it on the extracted archive and the page before it installs; a failure refuses the bundle. `run.check_timeout`: seconds (default 90). Before it, both always check that every module the start script imports at the top of a file is in the bundle or importable by the game's Python (`common/netconfig/mpf_bundlecheck.py`) |
 | `run.game_args` | `true`: the board's Godot arguments (`MPF_GAME_ARGS` of `/etc/default/mpf-game`, for example `-- --rendering-driver opengl3`) are added to `run.start`. Default: only for a game started by `scripts/package/start.py` (which forwards them), never for another command (it would reject them). `make_bundle.py --game-args` sets it |
 | `keep_on_update` | paths (files or folders, relative to the bundle) carried from the previous version of the same game |
 | `options.tool` | a program that answers `list` (the settings schema as JSON), `get`, `set ID VALUE...`, `unset ID...`: the page builds its form from it. No tool, no settings card. The page never writes a game's files itself |

@@ -63,12 +63,32 @@ They are the same for every game, each one comes from a bundle that installed fi
 | 5 | **The game's GMC patch step accepts the platform's patched GMC** (the tag of the platform's patch counts as patched) and never re-patches or replaces it. | The platform installs its GMC after the unpack; a game that patches again breaks it. |
 | 6 | **Read the Python venv from `MPF_GAME_VENV`** and declare any other name in `requires.env`; take Godot options only if `run.game_args` is true. | The service forwards those names only. A launcher that rejects Godot options crashes when `MPF_GAME_ARGS` is set. |
 | 7 | **Never convert the PuP videos** and never replace `game/addons/gde_gozen` in the pack's install command. | The platform's GoZen decodes H.264 on the GPU; Theora forces software decoding. |
-| 8 | **Install the archive on a machine and watch it run** before calling it done: `common/games/check_installed.sh 60` (the service stays active, no restart). A build that "checks" has not been run. | Every item above was invisible to the build's own checks. |
+| 8 | **List every Python file the start chain reaches** in the game's `copy` or `git_tracked`: the start script, what it imports at the top of a file, what it launches by name. The builder and the page both run `mpf_bundlecheck.py` on the unpacked archive and refuse one where an import cannot be found. | A script imported by `start.py` was missing from the game's list (observed 2026-10-29): `ModuleNotFoundError`, the service restarted every 10 s. Nothing in the game's own tests saw it because they only read the imports of one file, not of the files it imports. |
+| 9 | **Give the game a `run.check`** when its start needs more than imports (a file read at start, a config): a command that exits 0 when the game can start, in a few seconds, with no display. | The import check cannot see a missing table or a bad config; the game's own check can. |
+| 10 | **Deliver a bundle only from a commit that is on the remote default branch.** The tool refuses a commit that is not (`--allow-branch` makes a test package that is not delivered). | A bundle built from an unpushed commit cannot be rebuilt or fixed by anyone else (observed 2026-10-29). |
+| 11 | **Install the archive on a machine and watch it run** before calling it done: `common/games/check_installed.sh 60` (the service stays active, no restart). A build that "checks" has not been run. | Every item above was invisible to the build's own checks. |
+
+## Known failures (symptom, cause, rule)
+
+A new game's session reads this table before it builds. Each row comes from a real failure; add one when a new kind shows up.
+
+| Symptom | Cause | Rule / what catches it now |
+|---|---|---|
+| `ModuleNotFoundError: No module named 'mpf_platform'`, service restarting every 10 s (2026-10-29) | A script (`dmd_out.py`) imported by the start script imports a module the game's `copy` list leaves out | Rule 8: `mpf_bundlecheck.py` in the builder (the build fails) and in the page (the bundle is refused, the running game stays) |
+| Service restarts 22 times, `game/media` emptied | The launcher regenerated media at start, without the ROM extraction | Rules 2 and 3 |
+| Godot starts, MPF never connects | `mpf-gmc` is neither in the bundle nor in `platform_addons` | Rule 4 (checked by the builder) |
+| Fixes present in the repository are missing from the bundle | Built from a work branch, or from a commit that was never pushed | Rules 1 and 10 (the builder refuses) |
+| `could not read Username ... Failed to clone 'pup_pack'` during setup | The PuP Pack submodule is private | Expected: the pack is never in the bundle (rule 7), installed from the author's zip |
+| A bundle "checks" but does not run | Only the build's own checks were looked at | Rule 11: install it and run `check_installed.sh 60` |
+
+What a bundle that cannot start does on a machine: the page's installer unpacks it, runs `mpf_bundlecheck.py` and the game's
+`run.check`, and **refuses it before touching anything**: the installed game stays the active one, the message says what is missing.
 
 ## Installing (the platform's side)
 
 The setup web page (`common/netconfig/mpf_netconfig.py`, upload field "Game bundle") does, in order: verify the
 `.sha256`; unpack; reject a bundle whose `target.os` or `arch` (split on `+`) does not match the machine; `sha256sum -c`;
+**check that it can start** (`mpf_bundlecheck.py` and `run.check`; a failure refuses the bundle and leaves everything as it was);
 move the previous install's `keep_on_update` paths into the new tree; swap folders; **install each add-on listed
 in `platform_addons` from this platform's `addons/<name>`, only the binaries of this machine**
 (`MPF_PLATFORM_DIR`, default found from the netconfig file or from `MPF_GOZEN_SO`); replace the Pi's GoZen with a
