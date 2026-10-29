@@ -116,6 +116,16 @@ class BuildTest(unittest.TestCase):
         r, _ = B.load_recipe(self.repo, None)
         self.assertTrue(r.get("generic"))                                      # nothing known: bundle_spec.json is tried
 
+    def test_preflight_reports_every_missing_thing_at_once(self):
+        with mock.patch.object(B.shutil, "which", return_value=None):
+            problems = B.preflight({"tools": ["git", "ffmpeg"], "min_python": "99.0", "disk_gb": 10 ** 9}, True, self.tmp, self.out)
+        text = "\n".join(problems)
+        self.assertIn("git is not installed", text)
+        self.assertIn("ffmpeg is not installed", text)
+        self.assertIn("Python 99.0", text)
+        self.assertIn("GB needed", text)
+        self.assertEqual(B.preflight({"tools": [], "disk_gb": 0}, False, self.tmp, self.out), [])
+
     def test_unknown_recipe(self):
         with self.assertRaises(SystemExit):
             self.run_tool("nope-no-such-recipe")

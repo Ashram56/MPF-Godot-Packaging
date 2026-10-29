@@ -103,6 +103,54 @@ def run(cmd, cwd, env=None, dry=False):
         die(f"failed (exit {r.returncode}): {' '.join(cmd)}")
 
 
+PACKAGES = {"apt": {"git": "git", "venv": "python3-venv", "xz": "xz-utils"}, "dnf": {"git": "git", "venv": "python3", "xz": "xz"}}
+HINTS = {"git": {"apt": "sudo apt install git", "dnf": "sudo dnf install git", "brew": "brew install git or xcode-select --install", "winget": "winget install Git.Git"},
+         "venv": {"apt": "sudo apt install python3-venv", "dnf": "sudo dnf install python3"}}
+
+
+def package_manager():
+    for pm in ("apt-get", "dnf", "brew", "winget"):
+        if shutil.which(pm):
+            return "apt" if pm == "apt-get" else pm
+    return ""
+
+
+def preflight(recipe, needs_git, workdir, out, install=False):
+    """Everything the run needs, looked at before anything starts, so that a missing tool is one clear message and not a failure
+    an hour in. Nothing is assumed to be installed. Returns the list of problems; with install=True it first tries apt."""
+    pm = package_manager()
+    tools = list(dict.fromkeys((["git"] if needs_git else []) + list(recipe.get("tools", []))))
+    while True:
+        problems, missing = [], []
+        need = tuple(int(x) for x in str(recipe.get("min_python", "3.9")).split("."))
+        if sys.version_info[:len(need)] < need:
+            problems.append(f"Python {recipe.get('min_python', '3.9')} or newer is needed, this is {sys.version.split()[0]}")
+        for t in tools:
+            if not shutil.which(t):
+                missing.append(t)
+                problems.append(f"{t} is not installed (" + HINTS.get(t, {}).get(pm, f"install {t}") + ")")
+        try:
+            import ensurepip, lzma, venv  # noqa: F401,E401
+        except ImportError as e:
+            missing.append("venv" if "venv" in str(e) or "ensurepip" in str(e) else "xz")
+            problems.append(f"this Python lacks a module ({e.name}): " + HINTS.get("venv", {}).get(pm, "install the venv/ensurepip package of your Python"))
+        for path in (workdir, out):
+            probe = path
+            while probe and not os.path.exists(probe):
+                probe = os.path.dirname(probe)
+            free = shutil.disk_usage(probe or ".").free / 1e9
+            if recipe.get("disk_gb") and free < recipe["disk_gb"]:
+                problems.append(f"{path}: {free:.0f} GB free, {recipe['disk_gb']} GB needed")
+        if install and missing and pm == "apt" and (os.geteuid() == 0 or shutil.which("sudo")):
+            pkgs = sorted({PACKAGES["apt"].get(m, m) for m in missing})
+            cmd = ([] if os.geteuid() == 0 else ["sudo"]) + ["apt-get", "install", "-y"] + pkgs
+            say("installing: " + " ".join(cmd))
+            if subprocess.run(cmd).returncode == 0:
+                install = False
+                continue
+        return problems
+
+
 def get_repo(recipe, repo, ref, workdir, dry):
     repo = repo or recipe.get("repo")
     if not repo:
@@ -233,6 +281,8 @@ def main():
     ap.add_argument("--skip-setup", action="store_true")
     ap.add_argument("--publish", metavar="WEBDAV_URL")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
+    ap.add_argument("--install-deps", action="store_true", help="install a missing git / venv with apt (Debian, Ubuntu, Raspberry Pi OS; needs root or sudo)")
+    ap.add_argument("--check", action="store_true", help="only check that this machine can run the build, and exit")
     a = ap.parse_args()
 
     if a.list or not a.game:
@@ -243,9 +293,13 @@ def main():
     a.repo = a.repo or found_repo
     target = a.target or recipe.get("target", "all")
     out = os.path.abspath(a.out)
-    for need in ("git",) if not os.path.isdir(a.repo or "") else ():
-        if not shutil.which(need):
-            die(f"{need} is not installed")
+    needs_git = not os.path.isdir(a.repo or "")
+    problems = preflight(recipe, needs_git, os.path.abspath(a.workdir), out, a.install_deps)
+    if problems:
+        die("this machine cannot run the build yet:\n  - " + "\n  - ".join(problems) + "\n(--install-deps does the apt ones for you)")
+    if a.check:
+        say("ready: every tool and enough disk space is there")
+        return
     repo = get_repo(recipe, a.repo, a.ref, os.path.abspath(a.workdir), a.dry_run)
     version = a.version or ""
     values = {"python": sys.executable, "target": target, "version": version, "out": out, "platform": PLATFORM, "repo": repo}

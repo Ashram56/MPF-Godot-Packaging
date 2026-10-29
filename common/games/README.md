@@ -97,6 +97,12 @@ Options: `--repo FOLDER` uses a clone you already made *as it is* (your branch, 
 (default `all`: one archive for every machine, no binary inside), `--skip-setup` when the workspace is already prepared (rebuilds
 take minutes instead of the first run's 30 to 60), `--dry-run` to see the commands.
 
+**It assumes nothing is installed.** Before anything starts it checks what the run needs (Python's version and its `venv`/`xz` modules, `git` when it
+has to clone, the tools the recipe lists, free disk space) and reports **everything missing at once**, with the install command for your system.
+`--check` only does that check; `--install-deps` installs a missing git or `python3-venv` with apt (Debian, Ubuntu, Raspberry Pi OS; root or sudo).
+Be aware that git is needed for the whole build, not only for the clone: the game's own setup fetches its asset submodule with it and the
+bundler stages the files git tracks (`mpf_godot bundle`), so a game recipe lists `git` in `tools`.
+
 What each step does, so it can also be done by hand:
 
 1. **Get the repository** and its submodules (a recipe says whether it needs them).
