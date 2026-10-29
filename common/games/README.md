@@ -173,8 +173,10 @@ what starts at power-on, what the page's settings card configures, and what a pa
 ## Updates over the air (WebDAV)
 
 The page's *Updates* card reads a WebDAV folder: one folder, or one sub-folder per game, holding `<id>@<version>.tar.xz` (+ `.sha256`)
-and packs named `<id>.pup.zip` or `<id>@<version>.pup.zip` (the name says which installed game a pack is for). Installing from the
-list follows the rules above (new version kept beside the old one, settings, scores and pack carried over).
+and PuP Pack `.zip` files. The page asks for the server address and the folder separately (default `MPF Games`). Installing a bundle from
+the list follows the rules above (new version kept beside the old one, settings, scores and pack carried over); a pack goes to the page's
+PuP Pack library and is given to a game in the grid (common/netconfig/README.md). A later tool can read a `.json` on the server that lists
+which updates fit which installed game; for now the file name or sub-folder (starting with the game's `id`) decides.
 
 ## The bundle
 
