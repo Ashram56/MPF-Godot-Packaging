@@ -87,7 +87,7 @@ or a **folder** holding a clone:
 python3 common/games/build_game_package.py --list
 python3 common/games/build_game_package.py https://github.com/Ashram56/Tron-Legacy-MPF --out dist
 python3 common/games/build_game_package.py ~/Tron-Legacy-MPF --out dist      # your clone, your branch, as it is
-python3 common/games/build_game_package.py ~/Transformers-MPF --out dist     # no recipe here: the game's own mpf-package.json, else its bundle_spec.json
+python3 common/games/build_game_package.py transformers-mpf --out dist     # recipe + the platform's own spec (recipes/specs/), game repository untouched
 # dist/tron-legacy-mpf-<date>-<commit>-linux-all.tar.xz  and  ...tar.xz.sha256      (about 235 MB)
 ```
 
@@ -109,6 +109,11 @@ else `bundle_spec.json` with `mpf_godot bundle`. The checks also refuse an archi
 **It assumes nothing is installed.** Before anything starts it checks what the run needs (Python's version and its `venv`/`xz` modules, `git` when it
 has to clone, the tools the recipe lists, free disk space) and reports **everything missing at once**, with the install command for your system.
 `--check` only does that check; `--install-deps` installs a missing git or `python3-venv` with apt (Debian, Ubuntu, Raspberry Pi OS; root or sudo).
+**First run and `--skip-setup`.** The workspace is named after the recipe's `id` (`~/mpf-game-builds/<id>`), and `--skip-setup` only works on a workspace
+that a full run already prepared. On a fresh one it fails late, with a bare `FileNotFoundError ... toolchain/godot/Godot_v...` from `mpf_godot bundle`: run once
+without `--skip-setup`. A recipe's `id` must equal the `id` of the spec it packs (`transformers-pro` for Transformers, not `transformers-mpf`): the check
+stops with `bundle.json id is X, the recipe says Y` after the whole build. While setting up a game with a private `pup_pack` submodule the log shows
+`could not read Username ... Failed to clone 'pup_pack'`: expected without access, the game builds without the PuP Pack (it is never in the archive).
 Be aware that git is needed for the whole build, not only for the clone: the game's own setup fetches its asset submodule with it and the
 bundler stages the files git tracks (`mpf_godot bundle`), so a game recipe lists `git` in `tools`.
 
