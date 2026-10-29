@@ -1,6 +1,6 @@
 """MPF boots with examples/dmd_devices/pin2dmd.yaml against a mocked pyusb, and a 128x32 RGB frame (what addons/dmd_out
 sends as BCP "rgb_dmd_frame") becomes MPF's pin2dmd platform's USB packet: 4 header bytes 81 C3 E9 12, then 6 bit planes
-of 2048 bytes. Moved from Tron's tests; game agnostic."""
+of 2048 bytes. Game agnostic."""
 import os
 from unittest.mock import MagicMock, patch
 

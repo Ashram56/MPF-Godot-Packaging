@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | GMC 1.0.0 (Godot 4.5, 4.6); a note in the game's patch says mpf-gmc `main` had the same change in 2026-10 (not re-checked here) |
 | Platforms | all |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-03 |
+| Found on | a Stern SAM recreation, 2026-10-03 |
 | Fact | observed (no sound; script error in Godot's log), cause from GMC 1.0.0 code |
 | Our fix | [`mpf_godot/gmc_patch.py`](../../mpf_godot/gmc_patch.py) (edits `bcp-partial-lines`, 3 edits in `scripts/bcp_server.gd`) |
 | Applied by | `python -m mpf_godot setup` (patches `toolchain/addons/mpf-gmc`), `python -m mpf_godot patch-gmc [GMC_DIR]`; idempotent |

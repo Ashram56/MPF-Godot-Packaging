@@ -104,7 +104,7 @@ in `install/install_windows.ps1`:
 | `git credential approve` | the credential helper, if any, keeps it for later pulls |
 
 `curl` and `irm` get a 404 for a private repository's raw file, so the one line cannot fetch itself there: clone
-first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on Tron Legacy MPF (observed).
+first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on a Stern SAM recreation (observed).
 
 ## Findings
 
@@ -114,7 +114,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
 - **Fix:** `install/install_linux.sh`, `apt_name()`: when a name is not in the apt lists and `<name>t64` is, use the
   latter; `install_pkgs()` also counts an installed `<name>t64` as present. The lists are refreshed first.
 - **Versions:** Ubuntu 24.04, Debian 13.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, code.
 
 ### 2. `apt-cache | grep -q` fails under pipefail
 - **Problem:** the package checks said a package was missing when it was there.
@@ -122,7 +122,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
 - **Fix:** `apt_known()` captures `apt-cache show` in a variable, then greps it. Same pattern for `ldconfig -p` on
   the Jetson (`ld_cache()` in `platforms/jetson/install_jetson_hwdec.sh`).
 - **Versions:** any bash with `set -o pipefail`.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, code.
 
 ### 3. Python 3.11: distribution, deadsnakes, uv
 - **Problem:** many distributions have no final Python 3.11 package.
@@ -130,7 +130,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
 - **Fix:** `find_python()`, `apt_has_python311()` (rejects `~rc` and `~b` versions), `deadsnakes()`,
   `uv_python()`: the distribution's final 3.11, else the deadsnakes PPA on Ubuntu, else uv's standalone build.
 - **Versions:** uv 0.12.22.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, code.
 
 ### 4. deadsnakes failed silently and installed a release candidate
 - **Problem:** on Ubuntu 22.04, the install got Python 3.11.0rc1.
@@ -139,7 +139,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
 - **Fix:** `deadsnakes()`: `|| return 1` after `add-apt-repository` and `apt-get update`, then
   `apt_has_python311 || return 1`, so uv takes over.
 - **Versions:** Ubuntu 22.04 (JetPack 6).
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF, commit 3992cd0).
+- **Found:** 2026-10-05, observed.
 
 ### 5. A dead venv
 - **Problem:** setup stopped when `.venv/bin/python` pointed to an interpreter that was gone.
@@ -147,14 +147,14 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
 - **Fix:** `mpf_godot/setup_toolchain.py`, `Setup.venv()`: if the venv folder exists but its Python does not,
   `python -m venv --clear`.
 - **Versions:** all.
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF, commit 8c7c32c).
+- **Found:** 2026-10-05, observed.
 
 ### 6. libdecor missing on Ubuntu 20.04
 - **Problem:** the apt step failed on Ubuntu 20.04 (JetPack 5).
 - **Cause:** `libdecor-0-0` (Wayland window decorations, optional for Godot) does not exist in 20.04.
 - **Fix:** `install_pkgs()` skips `libdecor-0-0` when apt does not know it, with a note.
 - **Versions:** Ubuntu 20.04.
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF, commit 8a7894e).
+- **Found:** 2026-10-05, observed.
 
 ### 7. MPF Monitor on arm64: no PyQt6 wheel
 - **Problem:** setup stopped installing MPF Monitor on JetPack 5 and 6.
@@ -164,7 +164,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
   wheels); `install/install_linux.sh` leaves the monitor out below glibc 2.28.
   [../fixes/mpf-monitor/pyqt6-arm64-glibc.md](../fixes/mpf-monitor/pyqt6-arm64-glibc.md).
 - **Versions:** PyQt6 6.7.1 checked on an emulated Ubuntu 22.04 (glibc 2.35); JetPack 5 has glibc 2.31.
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF, commits 42acd43, d8ea9a1).
+- **Found:** 2026-10-05, observed.
 
 ### 8. No screen: Xvfb
 - **Problem:** Godot cannot open a window on a server, in CI or in a container.
@@ -173,7 +173,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
   `mpf_godot/launcher.py`, `godot_command()`, starts Godot under `xvfb-run -a -s "-screen 0 1280x720x24"`
   (`toolchain.needs_virtual_display()`). It renders on the CPU (Mesa llvmpipe).
 - **Versions:** all.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF).
+- **Found:** 2026-10-03, code.
 
 ### 9. Godot `--headless` draws nothing
 - **Problem:** captures taken with `--headless` were blank.
@@ -181,7 +181,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
 - **Fix:** a real window under Xvfb instead (finding 8); `--headless` only for `--version` in setup.
   [../fixes/godot/headless-draws-nothing.md](../fixes/godot/headless-draws-nothing.md).
 - **Versions:** Godot 4.x.
-- **Found:** 2026-10-02, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-02, observed.
 
 ### 10. OpenGL under Xvfb wrote no frames with the render thread
 - **Problem:** captures with the `opengl3` renderer wrote no frames.
@@ -189,7 +189,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
 - **Fix:** `launcher.godot_command()` adds `--render-thread safe` when `opengl3` is asked for, or with
   `--no-render-thread`. [../fixes/godot/render-thread-setting.md](../fixes/godot/render-thread-setting.md).
 - **Versions:** Godot 4.6.3.
-- **Found:** 2026-10-09, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-09, observed.
 
 ### 11. The screen blanks during play
 - **Problem:** on a cabinet nobody touches the mouse or keyboard, and X blanked the screens after 5 minutes.
@@ -197,7 +197,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
 - **Fix:** `launcher.keep_screen_on()` runs `xset s off -dpms` on a real X display. GNOME's own idle blanking:
   [jetson.md](jetson.md), finding 8.
 - **Versions:** X11.
-- **Found:** 2026-10-05, observed (Jetson AGX Orin, Tron Legacy MPF).
+- **Found:** 2026-10-05, observed (Jetson AGX Orin).
 
 ### 12. Godot's main thread waits for a core
 - **Problem:** late frames on 4-core ARM boards.
@@ -206,7 +206,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
   last core; `MPF_GODOT_PIN=0` turns it off.
   [../fixes/godot/core-pinning-main-thread.md](../fixes/godot/core-pinning-main-thread.md).
 - **Versions:** measured on a Xavier NX: +1.5 FPS, a third fewer late frames.
-- **Found:** 2026-10-09, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-09, observed.
 
 ### 13. The P-ROC on Linux
 - **Problem:** MPF has no pypinproc for Linux, and libftdi needs USB access.
@@ -216,7 +216,7 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
   `install/99-pinproc.rules` (FTDI 0403:6001 FT245RL and 0403:6015 FT240X, `MODE="0666"`, `uaccess`) and
   reloads udev. In a container without udev the rule applies on the host after a reload.
 - **Versions:** the rule matches FTDI's generic IDs, so it also opens other FTDI adapters to local users.
-- **Found:** 2026-10-03, code (found on Tron Legacy MPF). Real board runs only as dry-run plans in tests.
+- **Found:** 2026-10-03, code. Real board runs only as dry-run plans in tests.
 
 ### 14. `bash <(curl ...)`, not `curl ... | bash`
 - **Problem:** piped into bash, the script would read its answers from the pipe.
@@ -232,4 +232,4 @@ first, then run the installer from the clone. Found 2026-10-04 to 2026-10-07 on 
   base image with `debootstrap focal` and `docker import`. Godot renders in the cloud with lavapipe
   (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`, `--rendering-method mobile`, under `xvfb-run`).
 - **Versions:** Ubuntu 20.04 and 22.04 arm64.
-- **Found:** 2026-10-05 to 2026-10-09, observed (found on Tron Legacy MPF; packaging agent, section 5a).
+- **Found:** 2026-10-05 to 2026-10-09, observed (packaging agent, section 5a).

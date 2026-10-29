@@ -5,7 +5,7 @@ Jetson boards with JetPack 5 or 6 (L4T R35 or R36), as a cabinet PC: MPF, Godot 
 `platforms/jetson/install_jetson_hwdec.sh` by itself on a Jetson, then `platforms/jetson/jetson_selftest.sh`.
 Back to [all platforms](README.md); everything generic to Linux is in [linux.md](linux.md).
 
-| Board | L4T / JetPack | Ubuntu | Tested (found on Tron Legacy MPF) |
+| Board | L4T / JetPack | Ubuntu | Tested |
 |---|---|---|---|
 | Jetson Xavier NX Developer Kit (t194) | R35.6.4 / JetPack 5.1.4 | 20.04.6 | X11 + openbox, no display manager, Godot 4.6.3, HDMI audio; decoder self-test and two game scenarios in five power modes (2026-10-09) |
 | Jetson AGX Orin Developer Kit (t234) | R36.4.3 / JetPack 6.2 | 22.04 | `oot` kernel, Godot 4.6.3, one 1920x1080 DisplayPort screen with three video windows (2026-10-05) |
@@ -195,7 +195,7 @@ variables above.
 - **Fix:** `install_jetson_hwdec.sh`, `l4t_pin()`: a preferences file pins `nvidia-l4t-*` to the version in
   `/etc/nv_tegra_release`, used by this script's `apt_install()` only. Upgrading the BSP stays NVIDIA's `apt upgrade`.
 - **Versions:** L4T R36.4 (the R35.6 repo also carries 35.6.5).
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF, commit 38c8728).
+- **Found:** 2026-10-05, observed.
 
 ### 2. A dpkg config-file question stopped the install
 - **Problem:** the apt run failed on a piped install.
@@ -204,14 +204,14 @@ variables above.
 - **Fix:** `apt_install()`: `-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold`, which keeps
   the existing file.
 - **Versions:** all.
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF, commit 58e39bc).
+- **Found:** 2026-10-05, observed.
 
 ### 3. A package "installed" with its files gone
 - **Problem:** on a stripped image, packages counted as installed but their libraries were missing.
 - **Cause:** images trimmed by deleting files leave dpkg's database as it was.
 - **Fix:** `need()` checks each dependency by file or command, and `apt_install()` uses `--reinstall`.
 - **Versions:** minimal and stripped L4T root images.
-- **Found:** 2026-10-05, code (found on Tron Legacy MPF, commit 1dd72f6).
+- **Found:** 2026-10-05, code.
 
 ### 4. libnvmpi not found in the loader cache
 - **Problem:** the check for libnvmpi failed on a full JetPack image although it was installed.
@@ -219,7 +219,7 @@ variables above.
   output left than a pipe holds, dies of SIGPIPE.
 - **Fix:** `ld_cache()` reads the whole cache into a variable before searching it.
 - **Versions:** full JetPack images (a long loader cache).
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF, commit 95965ca).
+- **Found:** 2026-10-05, observed.
 
 ### 5. `tegra/` or `nvidia/`, and `tegra-egl/`
 - **Problem:** `nvidia-l4t-3d-core` was reinstalled on every run, and `nvidia-tegra.conf` rewritten every time.
@@ -229,8 +229,7 @@ variables above.
 - **Fix:** `$TEGRA` by L4T major version, `$EGL_DIR` for EGL, and `loader_dir()` checks each folder in the cache
   (not a library name) after the GPU driver install.
 - **Versions:** L4T R35 and R36.
-- **Found:** 2026-10-05, observed against NVIDIA's R35.4 apt repository under qemu (found on Tron Legacy MPF,
-  commit 76acfe3).
+- **Found:** 2026-10-05, observed against NVIDIA's R35.4 apt repository under qemu.
 
 ### 6. No decoder device: NVIDIA's libraries crash
 - **Problem:** without the decoder device nodes, opening an nvmpi decoder crashed instead of failing.
@@ -239,7 +238,7 @@ variables above.
   check the same devices and decode in software without them (`GOZEN_HWDEC=0`).
   [../fixes/gde-gozen/hwdec-nvmpi-first.md](../fixes/gde-gozen/hwdec-nvmpi-first.md).
 - **Versions:** any L4T without JetPack's kernel and device tree (a container, a custom kernel).
-- **Found:** 2026-10-05, code (found on Tron Legacy MPF, commit 9e70e63).
+- **Found:** 2026-10-05, code.
 
 ### 7. A board without a clock battery
 - **Problem:** apt, git and curl refused every certificate.
@@ -256,7 +255,7 @@ variables above.
   sudo, with `dbus-run-session`); `--keep-blanking` leaves them. `mpf_godot/launcher.py`, `keep_screen_on()`,
   runs `xset s off -dpms`.
 - **Versions:** GNOME on JetPack 6; X11.
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF, commit 4f3332d).
+- **Found:** 2026-10-05, observed.
 
 ### 9. No sound on the Xavier NX devkit
 - **Problem:** Godot found no sound device and the game was silent.
@@ -266,7 +265,7 @@ variables above.
   present; `hw:HDA,7` on the tested board) through dmix at 48 kHz. Skipped with PulseAudio or PipeWire, and an
   existing `~/.asoundrc` is kept.
 - **Versions:** Xavier NX devkit image, L4T R35.6.4, minimal image without PulseAudio.
-- **Found:** 2026-10-09, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-09, observed.
 
 ### 10. Several monitors need X11
 - **Problem:** on Wayland, Godot could not put one window per monitor.
@@ -274,7 +273,7 @@ variables above.
 - **Fix:** an X11 session ("Ubuntu on Xorg", `WaylandEnable=false`, or X11 with openbox); the install adds an X
   server unless `--no-x`.
 - **Versions:** Godot 4.6.3.
-- **Found:** 2026-10-05, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-05, observed.
 
 ### 11. Four vsync'd windows: 15 FPS
 - **Problem:** with four Godot windows each frame took four refreshes (67 ms).
@@ -282,14 +281,14 @@ variables above.
 - **Fix:** vsync on one window only (the main one); the others redraw every frame anyway.
   [../fixes/godot/vsync-one-window-multiwindow.md](../fixes/godot/vsync-one-window-multiwindow.md).
 - **Versions:** L4T R35, X11, Vulkan.
-- **Found:** 2026-10-09, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-09, observed.
 
 ### 12. Power mode
 - **Problem:** the 2- and 4-core 10 W modes ran the game at 20 to 37 FPS.
 - **Cause:** Godot's main thread is the critical path; per-core speed matters more than cores.
 - **Fix:** `sudo nvpmodel -m 5` (or 8); no reboot needed. `jetson_clocks` adds nothing. Table above.
 - **Versions:** Xavier NX, L4T R35.6.4.
-- **Found:** 2026-10-09, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-09, observed.
 
 ### 13. A sleeping monitor loses its mode
 - **Problem:** after `xset dpms force off` between runs, the next run had every window on one screen at 39 FPS
@@ -298,14 +297,14 @@ variables above.
   `xset dpms force on` does not bring it back; Godot then sees one screen.
 - **Fix:** redo the session's `xrandr --auto` layout before the next run (in the cabinet's start script).
 - **Versions:** Xavier NX, L4T R35.6.4, X11 + openbox.
-- **Found:** 2026-10-12, observed (a lost one-hour soak, found on Tron Legacy MPF).
+- **Found:** 2026-10-12, observed (a lost one-hour soak).
 
 ### 14. Passive DisplayPort adapters
 - **Problem:** a monitor on a passive DP to HDMI adapter stayed disconnected.
 - **Cause:** the Xavier NX devkit's DisplayPort has no DP++ dual mode.
 - **Fix:** a native DP monitor, or an active adapter (one with a converter chip). Forcing a mode does not work.
 - **Versions:** Xavier NX devkit.
-- **Found:** 2026-10-09, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-09, observed.
 
 ### 15. A submodule pointed at a local path
 - **Problem:** syncing a game's submodule on a board reused across sessions failed with
@@ -315,7 +314,7 @@ variables above.
   instead of rewriting the remote; copy a private submodule's content from the old checkout when the board has no
   credentials for it.
 - **Versions:** git 2.38+ (`protocol.file.allow`).
-- **Found:** 2026-10-12, observed (Xavier NX, found on Tron Legacy MPF).
+- **Found:** 2026-10-12, observed (Xavier NX).
 
 ### 16. `tegrastats` shows the decoder's clock, not its load
 - **Problem:** NVDEC looked 95% busy with three videos.
@@ -323,20 +322,20 @@ variables above.
 - **Fix:** measure headroom with parallel `ffmpeg -c:v h264_nvmpi` decodes instead: three 1080p30 videos use about
   a fifth of NVDEC on the Xavier NX (430 to 446 fps in total flat out).
 - **Versions:** L4T R35.
-- **Found:** 2026-10-09, observed (found on Tron Legacy MPF).
+- **Found:** 2026-10-09, observed.
 
 
 ## Moved from Stern-SAM-Decryption `agents/packaging.md` section 5a (2026-10-27)
 
-The rest of that section was already here. Also learned on Tron (Xavier NX, AGX Orin):
+The rest of that section was already here. Also learned on a full game (Xavier NX, AGX Orin):
 
 - **Setup steps that matter on ARM:** `setup.py` bakes the clean HD fonts' signed distance fields
   (`game/tools/bake_fonts.gd`, about 2 minutes on a Xavier NX; without it the first text froze the game 20 s and
   more) and `gen_media.py` imports the HD effect frames VRAM-compressed. Both rerun when their inputs change.
-- **Run options**: `run.py --no-render-thread` / `TRON_RENDER_THREAD=0` (Godot's separate render thread is on by
+- **Run options**: `run.py --no-render-thread` / a `*_RENDER_THREAD=0` variable (Godot's separate render thread is on by
   default on Godot 4.6.3, where it won with three videos; on Godot 4.5.2 with the DMD alone it lost, so retest it at
-  every Godot upgrade), `TRON_PIN=0` (core pinning, Linux with 4+ cores), `TRON_PERF_DIR` (the performance probe; use
-  `scripts/perf/run.sh`). Each new run option reaches `docker/entrypoint.py` and `docker/tron.env.example` too.
+  every Godot upgrade), a `*_PIN=0` variable (core pinning, Linux with 4+ cores), a `*_PERF_DIR` variable (the performance probe; use
+  `scripts/perf/run.sh`). Each new run option reaches `docker/entrypoint.py` and the Docker env example too.
 - **On the board by Remote Control:** the cabinet has no GitHub credentials, so the session there hands its changes
   back as `git format-patch` files in the project's shared files, and a cloud thread applies, checks and pushes
-  them (observed, Tron on the AGX Orin).
+  them (observed on the AGX Orin).

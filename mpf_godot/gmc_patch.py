@@ -20,7 +20,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mpf_godot import toolchain as tc  # noqa: E402
 
-# every edit carries TAG, so a file holds the patch when TAG is in it (older copies carry "# tron patch")
+# every edit carries TAG, so a file holds the patch when TAG is in it. OLD_TAGS: the tag earlier installs wrote (compatibility
+# only: a copy that holds one is already patched and must not be patched twice)
 TAG = "# mpf-godot fix"
 OLD_TAGS = ("# tron patch",)
 

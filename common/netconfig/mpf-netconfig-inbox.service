@@ -1,0 +1,13 @@
+[Unit]
+Description=Install the game bundles and PuP Packs found in the inbox (put there before flashing or from the data partition)
+After=local-fs.target mpf-persist.service mpf-netconfig-apply.service
+Before=mpf-game.service mpf-netconfig-web.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/mpf-netconfig
+ExecStart=/usr/local/bin/mpf_netconfig.py inbox
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,7 @@
 # Raspberry Pi 4
 
 What a Raspberry Pi 4 needs to run an MPF + Godot game with PinUP videos, every setting with its reason and the
-measurement behind it. Measured on the Tron Legacy cabinet, 24-26 Oct 2026: Raspberry Pi 4 Model B 4 GB (V3D 4.2),
+measurement behind it. Measured on one cabinet, 24-26 Oct 2026: Raspberry Pi 4 Model B 4 GB (V3D 4.2),
 Raspberry Pi OS (Debian 13), kernel 6.18.50+rpt-rpi-v8, X11 + openbox, one 1920x1080 screen on HDMI-2, sound on
 the 3.5 mm jack. The files named below are in [raspberrypi/cabinet/](raspberrypi/cabinet/); the minimal image
 ([raspberrypi/image/](raspberrypi/image/README.md)) does not apply them yet.
@@ -26,7 +26,7 @@ DMD pipelines (classic external, HD external, LCD).
 The GPU is the limit, then video decoding. 30 FPS steady is the target (the videos are 30 fps); 1080p rendering,
 Vulkan and a second window are out of reach.
 
-| Measured (Tron, 60-150 s runs, 30 FPS cap) | FPS | Frames > 40 ms | Pi CPU |
+| Measured (60-150 s runs, 30 FPS cap) | FPS | Frames > 40 ms | Pi CPU |
 |---|---|---|---|
 | backglass videos, no DMD | 29.5 | 3.7 % | 166 % |
 | + classic dot DMD in the backglass window | 29.7 | 4.2 % | 168 % |
@@ -46,7 +46,7 @@ gain), a 30 Hz mode (the EDID offers none).
 
 | Setting | Where | Why |
 |---|---|---|
-| An EDID for a screen that sends none | `/lib/firmware/edid/<name>.bin`, cmdline `drm.edid_firmware=HDMI-A-2:edid/<name>.bin` | without EDID, vc4 refuses HDMI audio (-524) and guesses modes. Tron's: 1920x1080 at 60 Hz plus a CTA block with basic audio (LPCM 2 ch); only for such screens |
+| An EDID for a screen that sends none | `/lib/firmware/edid/<name>.bin`, cmdline `drm.edid_firmware=HDMI-A-2:edid/<name>.bin` | without EDID, vc4 refuses HDMI audio (-524) and guesses modes. One that worked: 1920x1080 at 60 Hz plus a CTA block with basic audio (LPCM 2 ch); only for such screens |
 | `video=HDMI-A-2:1920x1080@60D video=HDMI-A-1:1920x1080@60D` | `/boot/firmware/cmdline.txt` | forced outputs; HDMI-1 always shows as connected, so X turns it off (next row) |
 | `snd_bcm2835.enable_headphones=1` | cmdline | the device tree disables the jack's card |
 | One X output: HDMI-2 primary at 1920x1080, HDMI-1 off | `~/.xinitrc` ([xinitrc](raspberrypi/cabinet/xinitrc)) | a second output costs a copy per frame |
@@ -68,7 +68,7 @@ gain), a 30 Hz mode (the EDID offers none).
 ## The game's settings (board profile)
 
 A game's bundle carries these as its Raspberry Pi 4 board profile (applied once at install by the setup page,
-`board_profile()` in `common/netconfig/mpf_netconfig.py`). Tron's names in brackets.
+`board_profile()` in `common/netconfig/mpf_netconfig.py`). The first game's names are not repeated here.
 
 | Setting | Value | Measured |
 |---|---|---|

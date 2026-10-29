@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | GDE GoZen at `f9448619324ad7d0d4e79d3bd501bde477ea4b7f` (`src/gozen_video.cpp` `GoZenVideo::seek_frame()`); later revisions not checked |
 | Platforms | all (C++ loop); seen on Jetson Xavier NX, L4T R35.6.4, nvpmodel mode 3 (10 W, 2 cores), `h264_nvmpi` |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit 4fb806b) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (freeze: 9 min at 10 W, 2 cores; froze for good at about 93 s at 10 W, 4 cores); code (the EOF branch below); inferred (that this loop is what ran for minutes) |
 | Our fix | avoided, not fixed: [`../../addons/gde_gozen/video_playback.gd`](../../addons/gde_gozen/video_playback.gd) never calls `seek_frame()` from its decode tasks (`_fill_queue()`, `_decode_one()`) |
 | Applied by | `python -m mpf_godot addons GAME --video` |

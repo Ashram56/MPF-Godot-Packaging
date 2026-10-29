@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | GMC 1.0.0; a note in the game's patch says mpf-gmc `main` had the same change in 2026-10 (not re-checked here) |
 | Platforms | all (any non-US layout: AZERTY seen; QWERTZ and others likely, inferred) |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-03, French keyboard |
+| Found on | a Stern SAM recreation, 2026-10-03, French keyboard |
 | Fact | observed |
 | Our fix | [`mpf_godot/gmc_patch.py`](../../mpf_godot/gmc_patch.py) (edit `keyboard-layout`, `mpf_gmc.gd`) |
 | Applied by | `python -m mpf_godot setup`, `python -m mpf_godot patch-gmc [GMC_DIR]`; idempotent |

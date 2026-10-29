@@ -7,9 +7,9 @@
 | Kind | improvement |
 | Affected versions | Godot 4.6.3-stable Compatibility (OpenGL ES) renderer, Mesa 25.0.7 and 26.2.2 (same times) |
 | Platforms | Raspberry Pi 4 (V3D 4.2, 8 QPU at 500 MHz); probably every small GPU |
-| Found on | Tron Legacy MPF, 2026-10-24 (Pi 4B, Debian 13 trixie) |
+| Found on | a Stern SAM recreation, 2026-10-24 (Pi 4B, Debian 13 trixie) |
 | Fact | observed (`V3D_DEBUG=shaderdb`, micro-benchmark at 1920x1080, vsync off, 3 runs per variant) |
-| Our fix | [`../../addons/gde_gozen/yuv_to_rgb_fast.gdshader`](../../addons/gde_gozen/yuv_to_rgb_fast.gdshader) and [`../../addons/gde_gozen/yuv_to_rgb_fast_nv12.gdshader`](../../addons/gde_gozen/yuv_to_rgb_fast_nv12.gdshader) (unshaded, branch free); the player side (shader choice, k_y/k_u/k_v), covered layers and `render_size` are in Tron-Legacy-MPF `pup_addons/gde_gozen/video_playback.gd` and `game/pup/` |
+| Our fix | [`../../addons/gde_gozen/yuv_to_rgb_fast.gdshader`](../../addons/gde_gozen/yuv_to_rgb_fast.gdshader) and [`../../addons/gde_gozen/yuv_to_rgb_fast_nv12.gdshader`](../../addons/gde_gozen/yuv_to_rgb_fast_nv12.gdshader) (unshaded, branch free); the player side (shader choice, k_y/k_u/k_v), covered layers and `render_size` are in the game (`video_playback.gd` of the add-on and the PuP player) |
 | Applied by | the player picks the fast shader when a video has no rotation, interlacing or alpha |
 | Upstream | Godot, https://github.com/godotengine/godot/issues; status: none needed (a project and shader choice) |
 
@@ -38,7 +38,7 @@ cost the same), or the GPU clock (an overclock to 600 MHz gained nothing once th
 Also: no full-window `ColorRect` for a black background (3 to 6 fps) but `RenderingServer.set_default_clear_color`;
 a layer fully covered by an opaque video above is neither drawn nor decoded (a silent one pauses; the Pi 4's running
 hardware decoder slows the V3D by 15 to 30 %, software decoding does not); a lower render size
-(`Window.content_scale_size`, the videos keep their resolution): 1600x900 +15 %, 1280x720 +38 %. Result on Tron (original
+(`Window.content_scale_size`, the videos keep their resolution): 1600x900 +15 %, 1280x720 +38 %. Result on a full game (original
 1080p videos): 15.1 to 25.4 fps; 31 fps at a 1280x720 render size. A colour key adds instructions and keeps the layer
 below alive: it lost 3 to 8 %.
 

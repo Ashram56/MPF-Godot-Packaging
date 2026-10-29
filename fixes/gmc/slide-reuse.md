@@ -7,7 +7,7 @@
 | Kind | improvement |
 | Affected versions | GMC 1.0.0 (`scripts/media.gd`, `MPFSlide`); and later until changed upstream |
 | Platforms | all; it matters on slow targets (measured on a Jetson Xavier NX) |
-| Found on | a Stern SAM recreation (Tron Legacy MPF), 2026-10-12 |
+| Found on | a Stern SAM recreation, 2026-10-12 |
 | Fact | observed and measured on the game (figures below); the upstream API is a proposal |
 | Our fix | none in this repository. The game pools its own slides: a GMC patch in `media.gd` `get_slide_instance()` plus a slide class that overrides `MPFSlide.remove()` |
 | Applied by | **not applied by this repository's installer**: it needs game code (which slides to keep, how to reset them). A game that wants it does what is described below |

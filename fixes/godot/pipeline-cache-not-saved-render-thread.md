@@ -7,7 +7,7 @@
 | Kind | bug |
 | Affected versions | Godot 4.6.3-stable and 4.5.2-stable (test project on both); later versions not checked |
 | Platforms | Linux arm64 seen (Jetson Xavier NX, L4T R35.6.4, Vulkan, Mobile renderer, X11); Linux x86_64 with lavapipe shows the error only (lavapipe writes no cache data) |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit 19da222; test project 0bf0761, 2026-10-10) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (test project and game); the error text and line are from Godot's log |
 | Our fix | project setting `rendering/rendering_device/pipeline_cache/save_chunk_size_mb=0.1`; test project [`../repro/godot_pipeline_cache.zip`](../repro/godot_pipeline_cache.zip) |
 | Applied by | a project setting a game sets in its `project.godot` |

@@ -1,7 +1,7 @@
 # RGB LED DMDs: PIN2DMD and ZeDMD
 
 A GMC game can show its 128x32 DMD on a PIN2DMD or a ZeDMD as well as (or instead of) the screen. GMC does not
-need a screen for this: Godot reads back its own picture and sends it on. Worked example: Tron Legacy MPF
+need a screen for this: Godot reads back its own picture and sends it on. Worked example: a Stern SAM recreation
 (`docs/hardware.md`, "PIN2DMD" and "ZeDMD"), where these pieces were written. **Neither device has been tried on real
 hardware yet**: the packets follow libdmdutil's and libzedmd's source, checked in tests against fake devices.
 
@@ -36,7 +36,7 @@ godot --path GAME -- --zedmd --zedmd-feed=$PWD/zedmd_feed # MPF with examples/dm
 ## Findings
 
 1. The DMD must be the exact 128x32 picture: an HD or smoothed DMD read back and shrunk gives blurred dots. A game
-   with an HD mode should switch it off when one of these args is given (Tron: `dmd_mode.gd` forces its classic mode).
+   with an HD mode should switch it off when one of these args is given (a game's `dmd_mode.gd` may force its classic mode).
 2. MPF's `pin2dmd` platform accepts only the `rgb_dmds` device named `default`. MPF stops with "Pin2Dmd USB device not
    found" when the PIN2DMD is missing or another program (DMDext) holds it.
 3. On a P-ROC machine, a P-ROC DMD and an LED DMD together are not supported: the overlays move `dmds: dmd` to the

@@ -7,9 +7,9 @@
 | Kind | improvement |
 | Affected versions | Godot 4.6.3-stable (seen); later versions not checked |
 | Platforms | Jetson Xavier NX, L4T R35.6.4, X11 + openbox, NVIDIA Tegra Vulkan driver, Mobile renderer (seen); other drivers not checked |
-| Found on | Tron Legacy MPF, 2026-10-09 (Tron-Legacy-MPF commit 042695c) |
+| Found on | a Stern SAM recreation, 2026-10-09 |
 | Fact | observed (frame time 4 refreshes with 4 vsync'd windows, 1 refresh with vsync on one) |
-| Our fix | vsync kept on one window only: `DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED, id)` on every other window (a game script; Tron-Legacy-MPF `game/pup/pup_player.gd` `_vsync_one_window()`) |
+| Our fix | vsync kept on one window only: `DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED, id)` on every other window (a game script, run once the extra windows exist) |
 | Applied by | the game's script, once its extra windows are created |
 | Upstream | Godot, https://github.com/godotengine/godot/issues; status: **draft, not filed** |
 

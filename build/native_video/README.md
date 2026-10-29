@@ -11,7 +11,7 @@ payload when the new block aligns differently. Why, and the measurements:
 | Platform | Binaries in `../../addons/native_video/` | Built by |
 |---|---|---|
 | Windows x86_64 | `native_video.windows.{debug,release}.x86_64.dll` | by hand, steps below |
-| macOS universal | `libnative_video.macos.{debug,release}.dylib` | a GitHub Actions workflow on a macOS runner: `.github/workflows/native_video_macos.yml` in the Tron-Legacy-MPF repository. Not ported here yet |
+| macOS universal | `libnative_video.macos.{debug,release}.dylib` | a GitHub Actions workflow on a macOS runner: `.github/workflows/native_video_macos.yml` in the first game's repository. Not ported here yet |
 | Windows x86_32, arm64 | `native_video.windows.*.{x86_32,arm64}.dll` | upstream's v0.3.1 release, not rebuilt (without the fix) |
 
 ## Rebuild on Windows
@@ -44,7 +44,7 @@ upstream's release build; one universal dylib per mode:
     lipo -create aarch64.debug.dylib x86_64.debug.dylib -output libnative_video.macos.debug.dylib
     lipo -create aarch64.release.dylib x86_64.release.dylib -output libnative_video.macos.release.dylib
 
-The Tron-Legacy-MPF workflow above does this on a GitHub `macos-15` runner (run by hand) and commits the dylibs; it is
+The game repository's workflow above does this on a GitHub `macos-15` runner (run by hand) and commits the dylibs; it is
 not ported to this repository yet.
 
 Updating the add-on from a new upstream zip brings the bug back until upstream ships the fix.
