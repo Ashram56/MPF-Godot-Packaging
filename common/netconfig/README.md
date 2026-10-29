@@ -108,3 +108,4 @@ The page has four tabs (*Games*, *Install and updates*, *Configuration*, *Switch
 - **Game output** opens a viewer that refreshes every 3 s. **Save the game log** writes one text file (machine state, journal of the game
   and of this page, the game's log files, latest switch changes) to `/data/logs` (`/var/lib/mpf-logs` on an ordinary image,
   `MPF_SAVED_LOGS_DIR`), keeps the latest 20 and lists them for download: in read-only mode the live logs are in RAM, this keeps them.
+How a game builds a bundle for this page: [platforms/game-bundles.md](../../platforms/game-bundles.md).

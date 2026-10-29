@@ -17,6 +17,7 @@ installer step by step, its options and every lesson learned (numbered "Findings
 | [godot-performance.md](godot-performance.md) | any slow target | GMC + Godot stalls, node pooling, a display drawn from data |
 | [video-playback.md](video-playback.md) | all | GDE GoZen and native video: switching, the Windows build, checking the decoder |
 | [dmd_devices.md](dmd_devices.md) | `addons/dmd_out/`, `examples/dmd_devices/` | PIN2DMD and ZeDMD RGB LED DMDs, any OS (feeder: Linux, macOS) |
+| [pup-remote-topper.md](pup-remote-topper.md) | `mpf_godot/pup_remote/` | PuP screens on a Raspberry Pi (a topper): server for the game, agent and installer for the Pi |
 | [limits.md](limits.md) | none | what each platform cannot run, and how the settings page, the installer and each start enforce it |
 | [tips.md](tips.md) | none | short tips for WSL, Linux hosts without usbipd, and the Xavier NX |
 
@@ -93,3 +94,7 @@ The installers of this repository were renamed from the first game's (`install_p
 | Godot downloads from downloads.tuxfamily.org failed on some networks | Godot from GitHub releases (`toolchain.GODOT_RELEASES`) | code |
 | Release tags cannot be pushed from a cloud session (git proxy answers 403) | the owner creates the tag on GitHub or from a clone | observed |
 | A board without GitHub credentials (Remote Control) cannot push | it hands changes back as `git format-patch` files; a cloud session applies and pushes them | observed on the AGX Orin |
+| Release tags cannot be pushed from a cloud session (git proxy answers 403) | the owner creates the tag on GitHub or from a clone | observed, Tron PuP fork |
+| A board without GitHub credentials (Remote Control) cannot push | it hands changes back as `git format-patch` files; a cloud session applies and pushes them | observed, Tron on the AGX Orin |
+
+- [game-bundles.md](game-bundles.md): how a game builds its universal bundle (code and multimedia, no binary) and how this platform installs it.

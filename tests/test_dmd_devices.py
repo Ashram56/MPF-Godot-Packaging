@@ -43,8 +43,11 @@ class TestAddon(unittest.TestCase):
     def test_frame_format(self):
         with open(ADDON, encoding="utf-8") as f:
             src = f.read()
-        self.assertIn("const WIDTH := 128", src)
-        self.assertIn("const HEIGHT := 32", src)
+        self.assertIn("var WIDTH := 128", src)          # 128x32 unless --dmd-size= says otherwise
+        self.assertIn("var HEIGHT := 32", src)
+        for arg in ("--dmd-size=", "--dmd-feed="):
+            self.assertIn(arg, src)
+        self.assertIn("func publish(", src)
         self.assertIn('send_bytes("rgb_dmd_frame", frame, {"name": "default"})', src)
         for arg in ("--pin2dmd", "--zedmd", "--zedmd-feed="):
             self.assertIn(arg, src)
