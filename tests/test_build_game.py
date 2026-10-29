@@ -4,6 +4,7 @@ import http.server
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -125,6 +126,64 @@ class BuildTest(unittest.TestCase):
         self.assertIn("Python 99.0", text)
         self.assertIn("GB needed", text)
         self.assertEqual(B.preflight({"tools": [], "disk_gb": 0}, False, self.tmp, self.out), [])
+
+    def git(self, *args, cwd=None):
+        env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+        subprocess.run(["git", *args], cwd=cwd or self.repo, check=True, capture_output=True, env=env)
+
+    def test_refuses_a_branch_that_is_not_merged(self):
+        origin = os.path.join(self.tmp, "origin.git")
+        self.git("init", "-q", "--bare", "-b", "main", origin, cwd=self.tmp)
+        self.git("init", "-q", "-b", "main")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "one")
+        self.git("remote", "add", "origin", origin)
+        self.git("push", "-q", "origin", "main")
+        self.git("checkout", "-q", "-b", "work")
+        with open(os.path.join(self.repo, "machine", "new.txt"), "w") as f:
+            f.write("x")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "two, not merged")
+        with self.assertRaises(SystemExit) as e:
+            B.check_source(self.repo, False)
+        self.assertIn("not the merged main", str(e.exception))
+        with contextlib.redirect_stdout(io.StringIO()):
+            B.check_source(self.repo, True)                  # --allow-branch: a test package on purpose
+            self.git("checkout", "-q", "main")
+            B.check_source(self.repo, False)                 # main is fine
+
+    def archive(self, meta, files):
+        top = os.path.join(self.tmp, "pack", "fake@1")
+        import shutil
+        shutil.rmtree(os.path.join(self.tmp, "pack"), ignore_errors=True)
+        os.makedirs(top)
+        files = dict(files, **{"bundle.json": json.dumps(dict({"format": 1, "id": "fake", "version": "1", "target": {"arch": "all"}}, **meta))})
+        for name, text in files.items():
+            os.makedirs(os.path.dirname(os.path.join(top, name)), exist_ok=True)
+            with open(os.path.join(top, name), "w") as f:
+                f.write(text)
+        path = os.path.join(self.tmp, "fake@1.tar.xz")
+        subprocess.run(["tar", "-cJf", path, "-C", os.path.join(self.tmp, "pack"), "fake@1"], check=True)
+        if os.path.exists(path + ".sha256"):
+            os.remove(path + ".sha256")
+        return path
+
+    def check(self, meta, files):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return B.verify(self.archive(meta, files), {"id": "fake"}, "all")
+
+    def test_contract_checks(self):
+        run = {"run": {"start": "python3 scripts/run.py", "cwd": "."}}
+        with self.assertRaises(SystemExit) as e:
+            self.check(run, {"game/project.godot": "x"})
+        self.assertIn("not in the archive", str(e.exception))
+        self.check(run, {"scripts/run.py": "x", "game/project.godot": "x"})                       # fine
+        gmc = {"scripts/run.py": "x", "game/project.godot": 'enabled=PackedStringArray("res://addons/mpf-gmc/plugin.cfg")'}
+        with self.assertRaises(SystemExit) as e:
+            self.check(run, gmc)
+        self.assertIn("without GMC", str(e.exception))
+        self.check(dict(run, platform_addons=["gde_gozen", "mpf-gmc"]), gmc)                      # the platform brings it
+        self.check(run, dict(gmc, **{"game/addons/mpf-gmc/plugin.cfg": "x"}))                      # the game ships it
 
     def test_unknown_recipe(self):
         with self.assertRaises(SystemExit):

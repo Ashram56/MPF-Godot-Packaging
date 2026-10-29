@@ -23,6 +23,7 @@ Linux (or WSL) with git and python3; standard library only.
 import argparse
 import base64
 import datetime
+import glob
 import hashlib
 import json
 import os
@@ -173,6 +174,29 @@ def get_repo(recipe, repo, ref, workdir, dry):
     return dest
 
 
+def git_out(repo, *args):
+    r = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def check_source(repo, allow_branch):
+    """A package is built from the game's merged default branch, never from a work branch: a branch that is not merged yet
+    misses the fixes that are (this is how a broken bundle once reached a machine). Dies unless --allow-branch."""
+    if not os.path.exists(os.path.join(repo, ".git")):
+        say("source: not a git clone, the commit cannot be checked")
+        return
+    head = git_out(repo, "rev-parse", "--short", "HEAD")
+    branch = git_out(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    default = (git_out(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "origin/main").split("/", 1)[-1]
+    subprocess.run(["git", "-C", repo, "fetch", "-q", "origin", default], capture_output=True)
+    merged = subprocess.run(["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD"], capture_output=True).returncode == 0
+    dirty = [ln for ln in git_out(repo, "status", "--porcelain", "--untracked-files=no").splitlines() if ln.strip()]
+    say(f"source: {branch} at {head}; {'merged into' if merged else 'NOT in'} origin/{default}" + (f"; {len(dirty)} modified tracked file(s)" if dirty else ""))
+    if (not merged or dirty) and not allow_branch:
+        die(f"{repo} is not the merged {default} branch of the game (commit {head} " + ("is not in it" if not merged else "has local changes") +
+            f"): fixes that were merged after it would be missing. Build from {default} (`git checkout {default} && git pull`), or add --allow-branch to build a test package on purpose.")
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -229,6 +253,27 @@ def verify(archive, recipe, target):
     for add in meta.get("platform_addons", []):
         if not any(os.path.isdir(os.path.join(PLATFORM, d, add)) for d in ("addons", "toolchain/addons")) and add != "mpf-gmc":
             problems.append(f"platform add-on {add!r} is not in this repository's addons/: the page could not install it")
+    top = names[0].split("/", 1)[0] if names else ""
+    have = {n.split("/", 1)[1] for n in names if "/" in n}
+    run_cfg = meta.get("run") or {}
+    words = str(run_cfg.get("start", "")).split()
+    cwd = os.path.normpath(str(run_cfg.get("cwd", ".")))
+    for w in words[1:] if words and words[0] in ("python", "python3") else words[:1]:
+        if w.startswith("-"):
+            continue
+        if ("/" in w or w.endswith((".py", ".sh"))) and os.path.normpath(os.path.join(cwd, w)) not in have:
+            problems.append(f"run.start runs {w!r}, which is not in the archive (cwd {cwd!r})")
+        break
+    addons = meta.get("platform_addons", [])
+    if "game/addons/mpf-gmc/plugin.cfg" not in have and "mpf-gmc" not in addons:
+        proj = None
+        with tarfile.open(archive, "r:xz") as t:
+            try:
+                proj = t.extractfile(f"{top}/game/project.godot").read().decode("utf-8", "replace")
+            except (KeyError, OSError, AttributeError):
+                pass
+        if proj and "mpf-gmc" in proj:
+            problems.append("the Godot project uses mpf-gmc but the archive neither carries it nor lists \"mpf-gmc\" in platform_addons: the game would start without GMC")
     bad = [n for n in names if CABINET.search(n.split("/", 1)[-1])]
     if bad:
         problems.append("cabinet data in the archive: " + ", ".join(bad[:5]))
@@ -282,6 +327,7 @@ def main():
     ap.add_argument("--publish", metavar="WEBDAV_URL")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
     ap.add_argument("--install-deps", action="store_true", help="install a missing git / venv with apt (Debian, Ubuntu, Raspberry Pi OS; needs root or sudo)")
+    ap.add_argument("--allow-branch", action="store_true", help="build from a commit that is not the merged default branch (a test package)")
     ap.add_argument("--check", action="store_true", help="only check that this machine can run the build, and exit")
     a = ap.parse_args()
 
@@ -301,26 +347,47 @@ def main():
         say("ready: every tool and enough disk space is there")
         return
     repo = get_repo(recipe, a.repo, a.ref, os.path.abspath(a.workdir), a.dry_run)
+    if not a.dry_run:
+        check_source(repo, a.allow_branch)
     version = a.version or ""
     values = {"python": sys.executable, "target": target, "version": version, "out": out, "platform": PLATFORM, "repo": repo}
     env = dict(os.environ, **dict(zip(recipe.get("env", {}), fill(recipe.get("env", {}).values(), values))))
+    env["PYTHONPATH"] = PLATFORM + os.pathsep + env.get("PYTHONPATH", "")        # the game's builder may call this repository's mpf_godot
+    convention = recipe.get("generic") or not recipe.get("build")
+    setup = recipe.get("setup", [])
+    if convention and not setup and os.path.isfile(os.path.join(repo, "scripts", "setup.py")):
+        with open(os.path.join(repo, "scripts", "setup.py"), encoding="utf-8", errors="replace") as f:
+            setup = [["{python}", "scripts/setup.py"] + (["--no-monitor"] if "--no-monitor" in f.read() else [])]
     if not a.skip_setup:
-        for cmd in recipe.get("setup", []):
+        for cmd in setup:
             run(fill(cmd, values), repo, env, a.dry_run)
     os.makedirs(out, exist_ok=True)
     started = time.time()
+    venv_py = os.path.join(repo, ".venv", "bin", "python")
+    script = os.path.join(repo, "scripts", "package", "build_bundle.py")
+    if not env.get("GODOT"):
+        found = sorted(glob.glob(os.path.join(repo, "tools", "godot", "Godot_v*")))
+        if found:
+            env["GODOT"] = found[0]
     if recipe.get("build"):
         cmd = fill(recipe["build"], values)
         if not version:      # the game's builder chooses (date and commit)
             i = cmd.index("--version") if "--version" in cmd else -1
             if i >= 0:
                 del cmd[i:i + 2]
+    elif os.path.isfile(script):
+        # the convention of the Stern SAM games: scripts/setup.py, then scripts/package/build_bundle.py; its options differ a little
+        # from game to game, so only the ones its --help lists are passed
+        py = venv_py if os.path.exists(venv_py) else sys.executable
+        helptext = "" if a.dry_run else subprocess.run([py, script, "--help"], cwd=repo, env=env, capture_output=True, text=True).stdout
+        cmd = [py, script, "--out", out]
+        for opt, val in (("--target", target), ("--version", version)):
+            if val and (a.dry_run or opt in helptext):
+                cmd += [opt, val]
     elif os.path.isfile(os.path.join(repo, "bundle_spec.json")):
-        recipe.pop("generic", None)
         cmd = [sys.executable, "-m", "mpf_godot", "bundle", "bundle_spec.json", "--target", target, "--out", out] + (["--version", version] if version else [])
-        env["PYTHONPATH"] = PLATFORM + os.pathsep + env.get("PYTHONPATH", "")
     else:
-        die("the recipe has no `build` command and the repository has no bundle_spec.json "
+        die("the repository has no scripts/package/build_bundle.py and no bundle_spec.json, and no recipe says how to build it "
             "(for your own MPF code without a build step: common/games/make_bundle.py)")
     run(cmd, repo, env, a.dry_run)
     if a.dry_run:

@@ -97,6 +97,15 @@ Options: `--repo FOLDER` uses a clone you already made *as it is* (your branch, 
 (default `all`: one archive for every machine, no binary inside), `--skip-setup` when the workspace is already prepared (rebuilds
 take minutes instead of the first run's 30 to 60), `--dry-run` to see the commands.
 
+**Which branch.** The package is built from the game's **merged default branch**: the tool fetches `origin`, and refuses a commit that is not in it (or a clone with
+local changes) unless you add `--allow-branch` for a test package. It prints `source: <branch> at <commit>`. A bundle built from an older work branch
+once crashed in a loop on a machine because later fixes were missing.
+
+**No recipe needed for the SAM games.** Without a recipe the tool follows their convention: `scripts/setup.py` (with `--no-monitor` when it
+has that option), then `scripts/package/build_bundle.py` with `--out`, and `--target` / `--version` only when that script's `--help` lists them,
+else `bundle_spec.json` with `mpf_godot bundle`. The checks also refuse an archive whose `run.start` script is missing, or whose Godot project uses
+`mpf-gmc` that neither the archive nor `platform_addons` provides.
+
 **It assumes nothing is installed.** Before anything starts it checks what the run needs (Python's version and its `venv`/`xz` modules, `git` when it
 has to clone, the tools the recipe lists, free disk space) and reports **everything missing at once**, with the install command for your system.
 `--check` only does that check; `--install-deps` installs a missing git or `python3-venv` with apt (Debian, Ubuntu, Raspberry Pi OS; root or sudo).
@@ -124,7 +133,9 @@ Then put it on a machine: drop the file on the page (*Install and updates*), or 
 `publish_folder`, `needs` (shown in this document). To add a game: write its recipe, or give the game a `bundle_spec.json`; for plain MPF
 code use `make_bundle.py` above. `tests/test_build_game.py` runs the whole tool on a small game.
 
-Not checked by the tool: that the game *runs* on the target hardware (install it once on each architecture) and the PuP Pack.
+Not checked by the tool: that the game *runs*. **Always install the archive on a machine and watch it** (page upload, then on the machine
+`sh common/games/check_installed.sh 60`: the service must stay active for 60 s with no restart, else it prints the first errors). The rules
+a bundle must follow so that it runs, with the reason for each, are in [platforms/game-bundles.md](../../platforms/game-bundles.md#rules-every-prebuilt-bundle-follows).
 
 ## Several games and versions
 
@@ -211,5 +222,6 @@ Anything else in `bundle.json` is the game's own: loaders ignore unknown keys.
 | `make_bundle.py` | a folder of your code → `<id>@<version>.tar.xz` + `.sha256` |
 | `inject_image.py` | bundles and packs → an image, before flashing |
 | `build_game_package.py`, `recipes/` | a game's repository → its bundle, checked |
+| `check_installed.sh` | on the machine: does the installed game stay up? |
 | [`../netconfig/mpf_games.py`](../netconfig/mpf_games.py) | the loader: install, versions, active game, inbox, start and stop |
 | `tests/test_games.py`, `tests/test_inject.py`, `tests/test_ota.py` | the loader's contract, the two tools and the WebDAV updates |
