@@ -1,0 +1,13 @@
+{
+  "id": "tron-legacy-mpf",
+  "name": "Tron Legacy (Stern 2011), MPF recreation",
+  "repo": "https://github.com/Ashram56/Tron-Legacy-MPF.git",
+  "ref": "main",
+  "submodules": false,
+  "needs": ["git", "python3 (3.10 or newer)", "an internet connection (Godot, MPF and the ROM-derived assets are downloaded by the game's setup)", "about 12 GB of free disk and 30 to 60 minutes the first time"],
+  "setup": [["{python}", "scripts/setup.py", "--no-monitor"]],
+  "build": [".venv/bin/python", "scripts/package/build_bundle.py", "--target", "{target}", "--version", "{version}", "--out", "{out}"],
+  "env": {"MPF_GODOT_PACKAGING": "{platform}"},
+  "target": "all",
+  "publish_folder": "tron"
+}

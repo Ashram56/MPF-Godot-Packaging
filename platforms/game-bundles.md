@@ -11,6 +11,8 @@ The binaries stay identical for every game; a game never ships its own copy.
 
 ## Building a bundle (the game's side)
 
+One command from a clone of the game's repository, with the checks: [common/games/README.md](../common/games/README.md#building-the-package-of-a-game-from-its-repository) (`build_game_package.py`). What follows is what it runs.
+
 Run from this platform's checkout with `GODOT=/path/to/godot` (or after `mpf_godot setup`). Done on any PC where the game's own setup has finished (the generated config, media, sounds and fonts must be
 current) and where this platform's toolchain is set up (`python -m mpf_godot setup`: the import needs its Godot).
 The game describes itself in a small JSON spec at its repository root ([examples/bundle/bundle_spec.json](../examples/bundle/bundle_spec.json),

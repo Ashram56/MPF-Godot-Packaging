@@ -10,6 +10,7 @@ code with no PuP Pack at all.
 | put the game and its PuP Pack **in the image before flashing** | [`inject_image.py`](#before-flashing-inject_imagepy) |
 | load a game or a new version **on a running machine** | the page on port 8080 (*Games*), or drop the files in the inbox |
 | **run your own MPF code** | [`make_bundle.py`](#your-own-mpf-code-without-a-pup-pack), then one of the two above |
+| **build the package of a game** from its repository (a human, on a PC) | [`build_game_package.py`](#building-the-package-of-a-game-from-its-repository) |
 | keep **several versions or games** and pick one | [Several games and versions](#several-games-and-versions) |
 
 ## Your own MPF code, without a PuP Pack
@@ -67,6 +68,47 @@ the game starts; if anything fails the file goes to `/data/inbox/failed/` with a
 - A big pack or bundle makes a big partition and a big image to flash; the tool prints the size. Keep it for what must be there at
   the first boot and add the rest from the page.
 - Start again from the original image to change the content: an image that already carries a data partition is refused.
+
+## Building the package of a game from its repository
+
+`build_game_package.py` makes the archive that the page installs, from a clone of the game's repository, in one command, and checks
+it the way the page will. Needs Linux or WSL, `git`, `python3` 3.10+ and an internet connection; nothing else is installed by hand
+(the game's own setup fetches Godot, MPF and what the game needs). Standard library only.
+
+```sh
+git clone https://github.com/Ashram56/MPF-Godot-Packaging && cd MPF-Godot-Packaging
+python3 common/games/build_game_package.py tron-legacy-mpf --out dist
+# dist/tron-legacy-mpf-<date>-<commit>-linux-all.tar.xz  and  ...tar.xz.sha256      (about 235 MB)
+```
+
+That clones the game's repository into `~/mpf-game-builds/tron-legacy-mpf` (`--workdir` changes it), runs its setup, builds, and checks.
+Options: `--repo FOLDER` uses a clone you already made *as it is* (your branch, your changes: nothing is cloned or checked out),
+`--repo URL` another remote, `--ref BRANCH_OR_TAG`, `--version 2026.10.29` (default: the date and the commit), `--target arm64|x86_64|all`
+(default `all`: one archive for every machine, no binary inside), `--skip-setup` when the workspace is already prepared (rebuilds
+take minutes instead of the first run's 30 to 60), `--dry-run` to see the commands.
+
+What each step does, so it can also be done by hand:
+
+1. **Get the repository** and its submodules (a recipe says whether it needs them).
+2. **Setup** (recipe `setup`): for Tron `python3 scripts/setup.py --no-monitor` in the clone: a Python venv with MPF, Godot, the generated
+   MPF config, media, sounds and baked fonts. About 12 GB of disk; the longest step.
+3. **Build** (recipe `build`): for Tron `.venv/bin/python scripts/package/build_bundle.py --target all --version V --out DIR`, which stages the game, makes the Godot
+   import for both GPU families and writes `bundle.json` and `SHA256SUMS`. It uses this repository's `mpf_godot bundle` (the tool finds
+   the checkout; the recipe sets `MPF_GODOT_PACKAGING`). Any game with a `bundle_spec.json` and no `build` in its recipe is built with
+   `python -m mpf_godot bundle bundle_spec.json` ([platforms/game-bundles.md](../../platforms/game-bundles.md)).
+4. **Check**: the `.sha256`, `bundle.json` (format 1, the id the recipe says, a version, the target), that every platform add-on it names exists in this
+   repository, that no cabinet data (`game/data`, `*.local.cfg`, logs) is inside and that a universal archive carries no GoZen binary. A failure stops with the reason.
+
+Then put it on a machine: drop the file on the page (*Install and updates*), or `inject_image.py` (above) before flashing, or `--publish https://host/games`
+(`WEBDAV_USER` and `WEBDAV_PASS` in the environment) which uploads the archive and its `.sha256` to `<URL>/<folder>/`, the layout of the page's
+*Updates* card. The **PuP Pack is never in the archive**: it is the author's zip, uploaded separately (*Add a game or a PuP Pack*).
+
+**A recipe** is a small JSON file in `common/games/recipes/` (or any path): `id` (what `bundle.json` must say), `repo`, `ref`, `submodules`,
+`setup` (commands, run in the clone), `build` (the command; `{python} {version} {target} {out} {platform}` are replaced), `env`, `target`,
+`publish_folder`, `needs` (shown in this document). To add a game: write its recipe, or give the game a `bundle_spec.json`; for plain MPF
+code use `make_bundle.py` above. `tests/test_build_game.py` runs the whole tool on a small game.
+
+Not checked by the tool: that the game *runs* on the target hardware (install it once on each architecture) and the PuP Pack.
 
 ## Several games and versions
 
@@ -152,5 +194,6 @@ Anything else in `bundle.json` is the game's own: loaders ignore unknown keys.
 |---|---|
 | `make_bundle.py` | a folder of your code → `<id>@<version>.tar.xz` + `.sha256` |
 | `inject_image.py` | bundles and packs → an image, before flashing |
+| `build_game_package.py`, `recipes/` | a game's repository → its bundle, checked |
 | [`../netconfig/mpf_games.py`](../netconfig/mpf_games.py) | the loader: install, versions, active game, inbox, start and stop |
 | `tests/test_games.py`, `tests/test_inject.py`, `tests/test_ota.py` | the loader's contract, the two tools and the WebDAV updates |
