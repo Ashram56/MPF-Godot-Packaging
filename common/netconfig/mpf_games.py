@@ -583,6 +583,41 @@ def _drop(p):
         shutil.rmtree(p, ignore_errors=True)
 
 
+def pup_ready(src):
+    """The `pup_ready.json` of a pre-processed pack archive (made offline when the bundle was built), or None for the author's zip."""
+    import zipfile as zf
+    try:
+        with zf.ZipFile(src) as z:
+            return json.loads(z.read("pup_ready.json"))
+    except (KeyError, ValueError, OSError, zf.BadZipFile):
+        return None
+
+
+def install_ready_pup(src, b, ready, lib):
+    """Unpack a pre-processed pack into the library: files only, no script of the game runs (nothing is made on the target)."""
+    import zipfile as zf
+    if ready.get("game") != b.get("id"):
+        raise JobError(f"this pack was made for {ready.get('game')}, not for {b.get('id')}")
+    dirs = sorted(pup_dirs(b))
+    os.makedirs(lib, exist_ok=True)
+    with zf.ZipFile(src) as z:
+        for info in z.infolist():
+            top = next((d for d in dirs if info.filename.startswith(d.replace(os.sep, "/") + "/")), None)
+            if not top:
+                continue
+            rel = os.path.relpath(info.filename, top.replace(os.sep, "/"))
+            if rel.startswith(".."):
+                raise JobError("unsafe path in the pack: " + info.filename)
+            dst = os.path.join(lib, _pup_store_name(top), rel)
+            if info.is_dir():
+                os.makedirs(dst, exist_ok=True)
+            else:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with z.open(info) as fi, open(dst, "wb") as fo:
+                    shutil.copyfileobj(fi, fo)
+    job_log("pre-processed PuP Pack unpacked: nothing was converted or generated here")
+
+
 def assign_pup(folder, name):
     game = installed_game(folder)
     if not game:
@@ -596,17 +631,25 @@ def assign_pup(folder, name):
     dirs = sorted(pup_dirs(b))
     lib = os.path.join(C.PUPS, "installed", _pup_key(name, b))
     if not os.path.isdir(lib) or not os.listdir(lib):
-        job_set(state="running", msg="Installing the PuP Pack for this game (videos are checked, a few minutes)")
-        for d in dirs:
-            _drop(os.path.join(game, d))
-        run_pup_installer(game, b, src)
-        os.makedirs(lib, exist_ok=True)
-        for d in dirs:
-            p = os.path.join(game, d)
-            if os.path.isdir(p) and not os.path.islink(p):
-                dst = os.path.join(lib, _pup_store_name(d))
-                shutil.rmtree(dst, ignore_errors=True)
-                shutil.move(p, dst)
+        ready = pup_ready(src)
+        if ready:
+            job_set(state="running", msg="Unpacking the PuP Pack (made when the game was built, a few minutes)")
+            install_ready_pup(src, b, ready, lib)
+        elif b["pup"].get("ready_only"):
+            raise JobError("this game takes only its pre-processed PuP Pack (pup_ready.json in the zip, made when the game was built): "
+                           "nothing is converted on this machine")
+        else:
+            job_set(state="running", msg="Installing the PuP Pack for this game (videos are checked, a few minutes)")
+            for d in dirs:
+                _drop(os.path.join(game, d))
+            run_pup_installer(game, b, src)
+            os.makedirs(lib, exist_ok=True)
+            for d in dirs:
+                p = os.path.join(game, d)
+                if os.path.isdir(p) and not os.path.islink(p):
+                    dst = os.path.join(lib, _pup_store_name(d))
+                    shutil.rmtree(dst, ignore_errors=True)
+                    shutil.move(p, dst)
     job_set(state="running", msg="Linking the PuP Pack")
     for d in dirs:
         stored = os.path.join(lib, _pup_store_name(d))
