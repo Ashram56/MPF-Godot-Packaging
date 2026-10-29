@@ -324,30 +324,26 @@ class PupLibrary(Base):
         G.delete_pup(name)
         self.assertEqual(G.pup_library(), [])
 
-    def ready_zip(self, game="demo", name="ready.zip"):
+    def test_extract_only_unpacks_the_authors_zip_and_runs_nothing(self):
+        """pup.extract_only: the zip's pack folder (the one holding triggers.pup, at any depth) is only unpacked; the game's install command
+        (which would write a marker) never runs, and the media folder of the bundle is left alone."""
         import zipfile
+        pup = {"pack_dir": "pup_pack/p", "extract_only": True, "install": "sh -c 'touch RAN'"}
+        self.install(extra={"pup": pup}, files={"pup_media/p/m.json": b"{}"})
         p = os.path.join(C.UPLOADS, "pup.zip")
         with zipfile.ZipFile(p, "w") as z:
-            z.writestr("pup_ready.json", json.dumps({"game": game}))
-            z.writestr("pup_pack/p/a.mp4", "ready")
-            z.writestr("pup_media/p/m.json", "{}")
-        return G.pup_store(p, name)
-
-    def test_ready_pack_is_unpacked_and_nothing_runs(self):
-        """A pre-processed pack is only unpacked: the game's install command (which would write a marker) never runs; a game that
-        is ready_only refuses the author's raw zip."""
-        extra = {"pup": dict(self.PACK["pup"], ready_only=True)}
-        self.install(extra=extra)
-        with self.assertRaises(G.JobError):
-            G.assign_pup("demo@1.0", self.upload())
-        name = self.ready_zip()
+            z.writestr("PUPVideos/p/triggers.pup", "t")
+            z.writestr("PUPVideos/p/Sub/a.mp4", "video")
+            z.writestr("PUPVideos/other/x.txt", "no")
+            z.writestr("PUPVideos/p/../evil.txt", "no")
+        name = G.pup_store(p, "author.zip")
         G.assign_pup("demo@1.0", name)
         game = os.path.join(C.GAMES, "demo@1.0")
-        self.assertEqual(open(os.path.join(game, "pup_pack/p/a.mp4")).read(), "ready")
+        self.assertEqual(open(os.path.join(game, "pup_pack/p/Sub/a.mp4")).read(), "video")
+        self.assertFalse(os.path.exists(os.path.join(game, "pup_pack/p/x.txt")))
+        self.assertFalse(os.path.exists(os.path.join(game, "RAN")))
         self.assertTrue(os.path.exists(os.path.join(game, "pup_media/p/m.json")))
-        G.unassign_pup("demo@1.0")
-        with self.assertRaises(G.JobError):                                   # a pack made for another game
-            G.assign_pup("demo@1.0", self.ready_zip(game="other", name="other.zip"))
+        self.assertTrue(G.pup_installed(game))
 
     def test_assign_needs_a_pack_and_pack_support(self):
         self.install(extra=self.PACK)

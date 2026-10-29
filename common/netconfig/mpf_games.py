@@ -583,39 +583,34 @@ def _drop(p):
         shutil.rmtree(p, ignore_errors=True)
 
 
-def pup_ready(src):
-    """The `pup_ready.json` of a pre-processed pack archive (made offline when the bundle was built), or None for the author's zip."""
+def extract_pup_zip(src, b, lib):
+    """`pup.extract_only` games: the author's zip is only unpacked, into the pack folder of the library (the folder holding triggers.pup,
+    at any depth). No script of the game runs: what the game derives from the pack (its media folder) is already in the bundle."""
     import zipfile as zf
+    store = os.path.join(lib, _pup_store_name(os.path.normpath(b["pup"]["pack_dir"])))
     try:
-        with zf.ZipFile(src) as z:
-            return json.loads(z.read("pup_ready.json"))
-    except (KeyError, ValueError, OSError, zf.BadZipFile):
-        return None
-
-
-def install_ready_pup(src, b, ready, lib):
-    """Unpack a pre-processed pack into the library: files only, no script of the game runs (nothing is made on the target)."""
-    import zipfile as zf
-    if ready.get("game") != b.get("id"):
-        raise JobError(f"this pack was made for {ready.get('game')}, not for {b.get('id')}")
-    dirs = sorted(pup_dirs(b))
-    os.makedirs(lib, exist_ok=True)
-    with zf.ZipFile(src) as z:
-        for info in z.infolist():
-            top = next((d for d in dirs if info.filename.startswith(d.replace(os.sep, "/") + "/")), None)
-            if not top:
+        z = zf.ZipFile(src)
+    except zf.BadZipFile:
+        raise JobError("not a .zip PuP Pack")
+    with z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        tops = sorted((n for n in names if n.replace("\\", "/").rsplit("/", 1)[-1].lower() == "triggers.pup"), key=lambda n: n.count("/"))
+        if not tops:
+            raise JobError("no triggers.pup in this zip: not a PuP Pack")
+        prefix = tops[0].replace("\\", "/")[:-len("triggers.pup")]
+        shutil.rmtree(store, ignore_errors=True)
+        for name in names:
+            rel = name.replace("\\", "/")
+            if not rel.startswith(prefix):
                 continue
-            rel = os.path.relpath(info.filename, top.replace(os.sep, "/"))
-            if rel.startswith(".."):
-                raise JobError("unsafe path in the pack: " + info.filename)
-            dst = os.path.join(lib, _pup_store_name(top), rel)
-            if info.is_dir():
-                os.makedirs(dst, exist_ok=True)
-            else:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                with z.open(info) as fi, open(dst, "wb") as fo:
-                    shutil.copyfileobj(fi, fo)
-    job_log("pre-processed PuP Pack unpacked: nothing was converted or generated here")
+            parts = rel[len(prefix):].split("/")
+            if not parts[0] or ".." in parts or ":" in parts[0]:
+                continue
+            dst = os.path.join(store, *parts)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with z.open(name) as fi, open(dst, "wb") as fo:
+                shutil.copyfileobj(fi, fo)
+    job_log("PuP Pack unpacked: nothing was converted or generated here")
 
 
 def assign_pup(folder, name):
@@ -631,13 +626,10 @@ def assign_pup(folder, name):
     dirs = sorted(pup_dirs(b))
     lib = os.path.join(C.PUPS, "installed", _pup_key(name, b))
     if not os.path.isdir(lib) or not os.listdir(lib):
-        ready = pup_ready(src)
-        if ready:
-            job_set(state="running", msg="Unpacking the PuP Pack (made when the game was built, a few minutes)")
-            install_ready_pup(src, b, ready, lib)
-        elif b["pup"].get("ready_only"):
-            raise JobError("this game takes only its pre-processed PuP Pack (pup_ready.json in the zip, made when the game was built): "
-                           "nothing is converted on this machine")
+        if b["pup"].get("extract_only"):
+            job_set(state="running", msg="Unpacking the PuP Pack (a few minutes)")
+            os.makedirs(lib, exist_ok=True)
+            extract_pup_zip(src, b, lib)
         else:
             job_set(state="running", msg="Installing the PuP Pack for this game (videos are checked, a few minutes)")
             for d in dirs:
