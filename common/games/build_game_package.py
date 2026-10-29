@@ -353,7 +353,7 @@ def main():
     values = {"python": sys.executable, "target": target, "version": version, "out": out, "platform": PLATFORM, "repo": repo}
     env = dict(os.environ, **dict(zip(recipe.get("env", {}), fill(recipe.get("env", {}).values(), values))))
     env["PYTHONPATH"] = PLATFORM + os.pathsep + env.get("PYTHONPATH", "")        # the game's builder may call this repository's mpf_godot
-    convention = recipe.get("generic") or not recipe.get("build")
+    convention = recipe.get("generic") or not (recipe.get("build") or recipe.get("spec"))
     setup = recipe.get("setup", [])
     if convention and not setup and os.path.isfile(os.path.join(repo, "scripts", "setup.py")):
         with open(os.path.join(repo, "scripts", "setup.py"), encoding="utf-8", errors="replace") as f:
@@ -369,7 +369,19 @@ def main():
         found = sorted(glob.glob(os.path.join(repo, "tools", "godot", "Godot_v*")))
         if found:
             env["GODOT"] = found[0]
-    if recipe.get("build"):
+    tmp_spec = ""
+    if recipe.get("spec"):
+        # the game brings no builder: this platform holds the list of what is packed (recipes/specs/), the game repository stays as it is
+        with open(os.path.join(RECIPES, recipe["spec"]), encoding="utf-8") as f:
+            spec = json.load(f)
+        for pattern in recipe.get("spec_globs", []):      # files named by pattern in the clone (generated or per-effect)
+            spec["copy"] += sorted(os.path.relpath(q, repo).replace(os.sep, "/") for q in glob.glob(os.path.join(repo, pattern)))
+        tmp_spec = os.path.join(repo, ".bundle_spec.build.json")
+        if not a.dry_run:
+            with open(tmp_spec, "w", encoding="utf-8") as f:
+                json.dump(spec, f, indent=1)
+        cmd = [sys.executable, "-m", "mpf_godot", "bundle", tmp_spec, "--target", target, "--out", out] + (["--version", version] if version else [])
+    elif recipe.get("build"):
         cmd = fill(recipe["build"], values)
         if not version:      # the game's builder chooses (date and commit)
             i = cmd.index("--version") if "--version" in cmd else -1
@@ -389,7 +401,11 @@ def main():
     else:
         die("the repository has no scripts/package/build_bundle.py and no bundle_spec.json, and no recipe says how to build it "
             "(for your own MPF code without a build step: common/games/make_bundle.py)")
-    run(cmd, repo, env, a.dry_run)
+    try:
+        run(cmd, repo, env, a.dry_run)
+    finally:
+        if tmp_spec and os.path.exists(tmp_spec):
+            os.remove(tmp_spec)
     if a.dry_run:
         say("dry run: nothing built")
         return
