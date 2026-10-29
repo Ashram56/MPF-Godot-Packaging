@@ -1,0 +1,61 @@
+Patch to GDE GoZen (applied last by build/gozen/build_gozen.sh): VAAPI hardware decoding on Linux x86_64 (Intel Quick
+Sync through intel-media-va-driver, AMD through Mesa). The same code path as Windows' Direct3D 11 Video / DXVA2
+(gozen.patch `_open_hwaccel()`): FFmpeg's own h264/hevc/vp9/vp8/mpeg4 decoder with a VAAPI device, the frames
+copied to memory as NV12 (`_hw_download()`), software when the GPU cannot decode the video. GOZEN_HWDEC=0 turns it
+off, GOZEN_HWDEC=vaapi asks for it only, GOZEN_VAAPI_DEVICE=/dev/dri/renderD129 picks another render node. The arm64
+builds have no VAAPI hardware config, so nothing changes there. SConstruct links libva and libva-drm on x86_64.
+
+diff --git a/SConstruct b/SConstruct
+index e5c9e50..c5a0209 100644
+--- a/SConstruct
++++ b/SConstruct
+@@ -39,6 +39,10 @@ if "linux" in platform:
+     # (and with FFmpeg's assembly, whose static objects need -Bsymbolic to link into a shared library)
+     if ARGUMENTS.get("lean", "no") == "yes":
+         env.Append(LINKFLAGS=["-Wl,-Bsymbolic"])
++        # x86_64: FFmpeg built with --enable-vaapi (Intel Quick Sync, AMD); libva2 and libva-drm2 are loaded when the
++        # extension is (the Linux install line installs them)
++        if arch == "x86_64":
++            env.Append(LIBS=["va", "va-drm"])
+     else:
+         env.Append(LIBS=["tls", "ssl", "crypto", "vpx", "aom"])
+ 
+diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
+index 6da6a57..b5b5255 100644
+--- a/src/gozen_video.cpp
++++ b/src/gozen_video.cpp
+@@ -15,7 +15,10 @@ static AVBufferRef* _hw_device(AVHWDeviceType type) {
+ 	if ((int)type < 0 || (int)type >= 32)
+ 		return nullptr;
+ 	std::lock_guard<std::mutex> lock(mutex);
+-	if (!devices[type] && !failed[type] && av_hwdevice_ctx_create(&devices[type], type, nullptr, nullptr, 0) < 0) {
++	// Linux VAAPI: the first render node by default, GOZEN_VAAPI_DEVICE=/dev/dri/renderD129 picks another
++	CharString vaapi_device = OS::get_singleton()->get_environment("GOZEN_VAAPI_DEVICE").utf8();
++	const char* device_name = (type == AV_HWDEVICE_TYPE_VAAPI && vaapi_device.length() > 0) ? vaapi_device.get_data() : nullptr;
++	if (!devices[type] && !failed[type] && av_hwdevice_ctx_create(&devices[type], type, device_name, nullptr, 0) < 0) {
+ 		devices[type] = nullptr;
+ 		failed[type] = true;
+ 		UtilityFunctions::print("GoZen: no ", av_hwdevice_get_type_name(type), " device on this PC");
+@@ -299,14 +302,20 @@ int GoZenVideo::open(const String& video_path) {
+ 		if (!av_codec && hw_tried)
+ 			UtilityFunctions::print("GoZen: using software decoder");
+ 	}
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__linux__)
+ 	// Windows: FFmpeg's own decoder with the GPU doing the decoding through Direct3D 11 Video, else DXVA2 (NVIDIA,
+-	// AMD, Intel). GOZEN_HWDEC=0 turns it off, GOZEN_HWDEC=d3d11va or dxva2 asks for one of them only. A GPU that
++	// AMD, Intel). Linux x86_64: VAAPI (Intel Quick Sync through intel-media-va-driver, AMD through Mesa); an FFmpeg
++	// without VAAPI (the arm64 builds) has no such hardware config, so this step does nothing there.
++	// GOZEN_HWDEC=0 turns it off, GOZEN_HWDEC=d3d11va, dxva2 or vaapi asks for one of them only. A GPU that
+ 	// cannot decode this video makes FFmpeg fall back to software by itself (_get_hw_format()).
+ 	String hwdec = OS::get_singleton()->get_environment("GOZEN_HWDEC");
+ 	if (!av_codec && hwdec != "0") {
+ 		const AVCodec* sw_codec = avcodec_find_decoder(av_stream->codecpar->codec_id);
++		#ifdef _WIN32
+ 		const AVHWDeviceType types[] = {AV_HWDEVICE_TYPE_D3D11VA, AV_HWDEVICE_TYPE_DXVA2};
++#else
++		const AVHWDeviceType types[] = {AV_HWDEVICE_TYPE_VAAPI};
++#endif
+ 		for (AVHWDeviceType type : types) {
+ 			if (!sw_codec || (!hwdec.is_empty() && hwdec != "1" && hwdec != av_hwdevice_get_type_name(type)))
+ 				continue;

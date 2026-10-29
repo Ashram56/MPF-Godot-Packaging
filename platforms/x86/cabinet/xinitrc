@@ -1,0 +1,9 @@
+#!/bin/sh
+# Edit to taste. Extend the desktop across all connected outputs (HDMI-1 + HDMI-2), left to right, no screen blanking:
+xset s off -dpms
+prev=""
+for out in $(xrandr | awk '/ connected/ {print $1}'); do
+    if [ -z "$prev" ]; then xrandr --output "$out" --auto --primary; else xrandr --output "$out" --auto --right-of "$prev"; fi
+    prev="$out"
+done
+exec openbox-session

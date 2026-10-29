@@ -56,7 +56,7 @@ python3 common/games/inject_image.py rpi4-image.img \
         --bundle dist/my-machine@1.0.tar.xz -o rpi4-with-games.img
 ```
 
-It copies the image and appends **one partition** (`mpfdata`, the read/write data partition of the read-only mode)
+It copies the image and appends **one partition** (`mpfdata`, the read/write data partition of the [read-only mode](../readonly/README.md))
 that holds an `inbox/` folder with the files. Nothing in the image's own partitions changes, and no root, loop device or network is
 needed. At the first boot the partition grows to the end of the card and `mpf-netconfig-inbox.service` installs the files before
 the game starts; if anything fails the file goes to `/data/inbox/failed/` with a log, visible from the page.
