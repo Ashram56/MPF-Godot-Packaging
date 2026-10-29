@@ -103,6 +103,19 @@ class BuildTest(unittest.TestCase):
         self.assertIn("dry run", text)
         self.assertFalse(os.path.exists(os.path.join(self.repo, "ready")))
 
+    def test_game_named_by_url_or_clone(self):
+        r, repo = B.load_recipe("https://github.com/Ashram56/Tron-Legacy-MPF", None)
+        self.assertEqual((r["id"], repo), ("tron-legacy-mpf", "https://github.com/Ashram56/Tron-Legacy-MPF"))
+        os.system(f"git -C {self.repo} init -q && git -C {self.repo} remote add origin git@x:y 2>/dev/null; git -C {self.repo} remote set-url origin https://github.com/ashram56/tron-legacy-mpf.git")
+        self.assertEqual(B.load_recipe(self.repo, None)[0]["id"], "tron-legacy-mpf")
+        with open(os.path.join(self.repo, "mpf-package.json"), "w") as f:
+            json.dump({"id": "mine", "setup": [], "build": ["true"]}, f)
+        os.system(f"git -C {self.repo} remote set-url origin https://example.com/other.git")
+        self.assertEqual(B.load_recipe(self.repo, None)[0]["id"], "mine")      # the game's own recipe
+        os.remove(os.path.join(self.repo, "mpf-package.json"))
+        r, _ = B.load_recipe(self.repo, None)
+        self.assertTrue(r.get("generic"))                                      # nothing known: bundle_spec.json is tried
+
     def test_unknown_recipe(self):
         with self.assertRaises(SystemExit):
             self.run_tool("nope-no-such-recipe")

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Build the installable package (bundle) of a game from its repository, and check it the way the page does.
 
-    build_game_package.py RECIPE [--repo PATH_OR_URL] [--ref BRANCH] [--workdir DIR] [--version V] [--target all|arm64|x86_64]
-                                 [--out DIR] [--skip-setup] [--publish WEBDAV_URL] [--dry-run]
+    build_game_package.py GAME [--ref BRANCH] [--workdir DIR] [--version V] [--target all|arm64|x86_64]
+                               [--out DIR] [--skip-setup] [--publish WEBDAV_URL] [--dry-run]
+    build_game_package.py --list
 
-RECIPE is a name in common/games/recipes/ (`tron-legacy-mpf`) or the path of a recipe file. A recipe says where the game's repository
-is, how to prepare its workspace and how to build; see common/games/README.md ("Building the package of a game"). Without a recipe
-command the game's `bundle_spec.json` is built with `python -m mpf_godot bundle` (platforms/game-bundles.md).
+GAME says which game, in any of these ways: a recipe name from `--list` (`tron-legacy-mpf`); the **git URL** of the game's repository
+(https://github.com/Ashram56/Transformers-MPF.git: a recipe made for that repository is used, else the repository's own
+`mpf-package.json`, else its `bundle_spec.json` is built); or a **folder** with a clone you already made (used as it is: your branch, your
+changes). A recipe (common/games/recipes/, or a file path) says how to prepare the workspace and how to build; common/games/README.md
+("Building the package of a game"). Without a recipe command the game's `bundle_spec.json` is built with `python -m mpf_godot bundle`
+(platforms/game-bundles.md).
 
 What it does: 1. get the repository (clone it, or use the folder given by --repo: a clone you already made is used as it is);
 2. run the recipe's `setup` commands there (skipped with --skip-setup: the workspace is ready); 3. run the `build` command;
@@ -47,15 +51,43 @@ def say(msg):
     print(msg, flush=True)
 
 
-def load_recipe(name):
-    path = name if os.path.isfile(name) else os.path.join(RECIPES, name + ".json")
-    if not os.path.isfile(path):
-        die(f"no recipe {name!r}: give the name of a file in {RECIPES} or the path of a recipe file")
-    with open(path, encoding="utf-8") as f:
-        r = json.load(f)
-    if not r.get("id"):
-        die(f"{path}: the recipe has no id")
-    return r
+def recipes():
+    out = {}
+    for n in sorted(os.listdir(RECIPES)):
+        if n.endswith(".json"):
+            with open(os.path.join(RECIPES, n), encoding="utf-8") as f:
+                out[n[:-5]] = json.load(f)
+    return out
+
+
+def norm(url):
+    return re.sub(r"(\.git)?/*$", "", url.strip().lower())
+
+
+def load_recipe(game, repo):
+    """(recipe, repo) from what the user named: a recipe name, a recipe file, a git URL or a folder."""
+    known = recipes()
+    if game in known:
+        return known[game], repo or None
+    if os.path.isfile(game) and game.endswith(".json"):
+        with open(game, encoding="utf-8") as f:
+            return json.load(f), repo or None
+    if os.path.isdir(game) or re.match(r"^(https?://|git@|ssh://)", game):
+        remote = game
+        if os.path.isdir(game):                       # a clone: its origin tells which game it is
+            got = subprocess.run(["git", "-C", game, "remote", "get-url", "origin"], capture_output=True, text=True)
+            remote = got.stdout.strip() if got.returncode == 0 else ""
+        for r in known.values():                      # a repository a recipe is made for
+            if r.get("repo") and remote and norm(r["repo"]) == norm(remote):
+                return r, game
+        folder = os.path.isdir(game)
+        own = os.path.join(game, "mpf-package.json") if folder else ""
+        if own and os.path.isfile(own):               # the game brings its own recipe
+            with open(own, encoding="utf-8") as f:
+                return json.load(f), game
+        rid = re.sub(r"[^a-z0-9._-]", "-", os.path.basename(norm(game)).lower()) or "game"
+        return {"id": rid, "repo": game, "target": "all", "setup": [], "generic": True}, game
+    die(f"{game!r} is not a recipe name, a recipe file, a folder or a git URL (--list shows the recipes)")
 
 
 def fill(items, values):
@@ -99,6 +131,17 @@ def sha256(path):
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def meta_id(archive, recipe):
+    """A recipe made on the fly (a URL or folder with no recipe) does not know the id: the bundle's own is taken."""
+    if not recipe.get("generic"):
+        return recipe["id"]
+    with tarfile.open(archive, "r:xz") as t:
+        for m in t:
+            if m.isfile() and m.name.count("/") == 1 and m.name.endswith("/bundle.json"):
+                return json.load(t.extractfile(m)).get("id", recipe["id"])
+    return recipe["id"]
 
 
 def verify(archive, recipe, target):
@@ -179,7 +222,8 @@ def publish(url, archive, folder):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], epilog="See the top of this file for details.")
-    ap.add_argument("recipe")
+    ap.add_argument("game", nargs="?", help="a recipe name (--list), a recipe file, a git URL or a folder with the game's repository")
+    ap.add_argument("--list", action="store_true", help="list the recipes and exit")
     ap.add_argument("--repo", help="the game's repository: a folder already cloned (used as it is) or a git URL")
     ap.add_argument("--ref", help="branch or tag to build (a cloned URL only)")
     ap.add_argument("--workdir", default=os.path.join(os.path.expanduser("~"), "mpf-game-builds"), help="where a URL is cloned")
@@ -191,7 +235,12 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
     a = ap.parse_args()
 
-    recipe = load_recipe(a.recipe)
+    if a.list or not a.game:
+        for n, r in recipes().items():
+            print(f"{n:24} {r.get('name', '')}  <{r.get('repo', '')}>")
+        return
+    recipe, found_repo = load_recipe(a.game, a.repo)
+    a.repo = a.repo or found_repo
     target = a.target or recipe.get("target", "all")
     out = os.path.abspath(a.out)
     for need in ("git",) if not os.path.isdir(a.repo or "") else ():
@@ -213,6 +262,7 @@ def main():
             if i >= 0:
                 del cmd[i:i + 2]
     elif os.path.isfile(os.path.join(repo, "bundle_spec.json")):
+        recipe.pop("generic", None)
         cmd = [sys.executable, "-m", "mpf_godot", "bundle", "bundle_spec.json", "--target", target, "--out", out] + (["--version", version] if version else [])
         env["PYTHONPATH"] = PLATFORM + os.pathsep + env.get("PYTHONPATH", "")
     else:
@@ -227,7 +277,7 @@ def main():
     if not new:
         die(f"the build produced no .tar.xz in {out}")
     archive = os.path.join(out, new[-1])
-    meta, digest = verify(archive, recipe, target)
+    meta, digest = verify(archive, dict(recipe, id=meta_id(archive, recipe)), target)
     say(f"\n{archive}\n  {os.path.getsize(archive) >> 20} MB, sha256 {digest}")
     if a.publish:
         publish(a.publish, archive, recipe.get("publish_folder", recipe["id"]))

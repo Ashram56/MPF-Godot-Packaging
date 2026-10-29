@@ -78,10 +78,20 @@ it the way the page will. Needs Linux or WSL, `git`, `python3` 3.10+ and an inte
 ```sh
 git clone https://github.com/Ashram56/MPF-Godot-Packaging && cd MPF-Godot-Packaging
 python3 common/games/build_game_package.py tron-legacy-mpf --out dist
+```
+
+**Which game?** The first argument says it, three ways: a recipe name (`--list` shows them), the **git URL of the game's repository**,
+or a **folder** holding a clone:
+
+```sh
+python3 common/games/build_game_package.py --list
+python3 common/games/build_game_package.py https://github.com/Ashram56/Tron-Legacy-MPF --out dist
+python3 common/games/build_game_package.py ~/Tron-Legacy-MPF --out dist      # your clone, your branch, as it is
+python3 common/games/build_game_package.py ~/Transformers-MPF --out dist     # no recipe here: the game's own mpf-package.json, else its bundle_spec.json
 # dist/tron-legacy-mpf-<date>-<commit>-linux-all.tar.xz  and  ...tar.xz.sha256      (about 235 MB)
 ```
 
-That clones the game's repository into `~/mpf-game-builds/tron-legacy-mpf` (`--workdir` changes it), runs its setup, builds, and checks.
+With a name or a URL it clones the game's repository into `~/mpf-game-builds/tron-legacy-mpf` (`--workdir` changes it), runs its setup, builds, and checks.
 Options: `--repo FOLDER` uses a clone you already made *as it is* (your branch, your changes: nothing is cloned or checked out),
 `--repo URL` another remote, `--ref BRANCH_OR_TAG`, `--version 2026.10.29` (default: the date and the commit), `--target arm64|x86_64|all`
 (default `all`: one archive for every machine, no binary inside), `--skip-setup` when the workspace is already prepared (rebuilds
@@ -103,7 +113,7 @@ Then put it on a machine: drop the file on the page (*Install and updates*), or 
 (`WEBDAV_USER` and `WEBDAV_PASS` in the environment) which uploads the archive and its `.sha256` to `<URL>/<folder>/`, the layout of the page's
 *Updates* card. The **PuP Pack is never in the archive**: it is the author's zip, uploaded separately (*Add a game or a PuP Pack*).
 
-**A recipe** is a small JSON file in `common/games/recipes/` (or any path): `id` (what `bundle.json` must say), `repo`, `ref`, `submodules`,
+**A recipe** is a small JSON file in `common/games/recipes/`, or `mpf-package.json` at the root of the game's repository (the tool finds it), or any path: `id` (what `bundle.json` must say), `repo`, `ref`, `submodules`,
 `setup` (commands, run in the clone), `build` (the command; `{python} {version} {target} {out} {platform}` are replaced), `env`, `target`,
 `publish_folder`, `needs` (shown in this document). To add a game: write its recipe, or give the game a `bundle_spec.json`; for plain MPF
 code use `make_bundle.py` above. `tests/test_build_game.py` runs the whole tool on a small game.
