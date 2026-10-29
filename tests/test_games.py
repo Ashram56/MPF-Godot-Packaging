@@ -324,6 +324,31 @@ class PupLibrary(Base):
         G.delete_pup(name)
         self.assertEqual(G.pup_library(), [])
 
+    def ready_zip(self, game="demo", name="ready.zip"):
+        import zipfile
+        p = os.path.join(C.UPLOADS, "pup.zip")
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("pup_ready.json", json.dumps({"game": game}))
+            z.writestr("pup_pack/p/a.mp4", "ready")
+            z.writestr("pup_media/p/m.json", "{}")
+        return G.pup_store(p, name)
+
+    def test_ready_pack_is_unpacked_and_nothing_runs(self):
+        """A pre-processed pack is only unpacked: the game's install command (which would write a marker) never runs; a game that
+        is ready_only refuses the author's raw zip."""
+        extra = {"pup": dict(self.PACK["pup"], ready_only=True)}
+        self.install(extra=extra)
+        with self.assertRaises(G.JobError):
+            G.assign_pup("demo@1.0", self.upload())
+        name = self.ready_zip()
+        G.assign_pup("demo@1.0", name)
+        game = os.path.join(C.GAMES, "demo@1.0")
+        self.assertEqual(open(os.path.join(game, "pup_pack/p/a.mp4")).read(), "ready")
+        self.assertTrue(os.path.exists(os.path.join(game, "pup_media/p/m.json")))
+        G.unassign_pup("demo@1.0")
+        with self.assertRaises(G.JobError):                                   # a pack made for another game
+            G.assign_pup("demo@1.0", self.ready_zip(game="other", name="other.zip"))
+
     def test_assign_needs_a_pack_and_pack_support(self):
         self.install(extra=self.PACK)
         with self.assertRaises(G.JobError):
