@@ -13,11 +13,13 @@ import pwd
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mpf_bundlecheck as BC  # noqa: E402
 import mpf_common as C  # noqa: E402
 from mpf_common import run  # noqa: E402
 
@@ -77,6 +79,32 @@ def game_python():
     venv = game_env().get("MPF_GAME_VENV")
     py = os.path.join(venv, "bin", "python") if venv else ""
     return py if py and os.path.exists(py) else "python3"
+
+
+def venv_python():
+    """The game's own venv Python, or None when the image has none (the system Python then cannot judge a game's packages)."""
+    py = game_python()
+    return py if os.path.isabs(py) else None
+
+
+def trial(root, b):
+    """What keeps the unpacked bundle in `root` from starting: its imports (common/netconfig/mpf_bundlecheck.py) and the game's own
+    `run.check`. [] when it can start. Nothing is installed yet: a failure leaves the game that was running as it was."""
+    bad = BC.problems(root, venv_python(), b)
+    cmd = BC.check_command(b)
+    if cmd and not bad:
+        pw = pwd.getpwnam(C.USER)
+        sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", root)
+        if cmd[0] in ("python3", "python"):
+            cmd[0] = game_python()
+        env = ["env"] + [f"{k}={v}" for k, v in game_env().items()] + ["MPF_BUNDLE_CHECK=1"]
+        try:
+            r = run("runuser", "-u", C.USER, "--", *env, *cmd, cwd=root, timeout=BC.check_timeout(b))
+        except subprocess.TimeoutExpired:
+            r = subprocess.CompletedProcess(cmd, 124, "", f"no answer after {BC.check_timeout(b)} s")
+        if r.returncode:
+            bad.append(f"the game's own check (run.check) failed ({r.returncode}): " + (r.stdout + r.stderr).strip()[-600:])
+    return bad
 
 
 def free_gb(path):
@@ -334,8 +362,13 @@ def copy_keep(src, dst, linked):
     """Carry a kept path from an installed version to a new one. A PuP Pack and its media are large and never rewritten in
     place, so the files under `linked` (absolute folders of the old version) are hard-linked (no second copy on the disk);
     settings and scores are copied (a game rewrites those in place)."""
+    if os.path.islink(dst) or os.path.isfile(dst):
+        os.remove(dst)
     shutil.rmtree(dst, ignore_errors=True) if os.path.isdir(dst) else None
     os.makedirs(os.path.dirname(dst), exist_ok=True)
+    if os.path.islink(src):          # a PuP Pack assigned from the library: the new version shares it
+        os.symlink(os.readlink(src), dst)
+        return
     if not os.path.isdir(src):
         shutil.copy2(src, dst)
         return
@@ -390,6 +423,10 @@ def install_game(archive, expect_sha, keep_old=True):
     if os.path.isfile(os.path.join(root, "SHA256SUMS")):
         job_set(msg="Verifying every file (sha256sum)")
         sh("sha256sum", "-c", "SHA256SUMS", "--quiet", cwd=root)
+    job_set(msg="Checking that the game can start")
+    bad = trial(root, b)
+    if bad:
+        raise JobError("this bundle cannot start, so it was not installed (the current game is untouched): " + " | ".join(bad[:6]))
     folder = folder_name(b)
     dest = os.path.join(C.GAMES, folder)
     old = dest + ".old"
@@ -458,7 +495,7 @@ def install_game(archive, expect_sha, keep_old=True):
     job_set(state="done", msg=f"{b.get('name')} {b.get('version')} installed{note}")
 
 
-def install_pup(zipfile, folder=None):
+def install_pup(zipfile, folder=None, remove=True):
     game = installed_game(folder)
     if not game:
         raise JobError("install the game first")
@@ -466,6 +503,15 @@ def install_pup(zipfile, folder=None):
     if not b.get("pup"):
         raise JobError("this game has no PuP Pack support")
     job_set(state="running", msg="Installing the PuP Pack (videos are checked, a few minutes)")
+    run_pup_installer(game, b, zipfile)
+    if remove:
+        os.remove(zipfile)
+    if options_tool(game):
+        tool(game, "set", "pup.enabled", "true")
+    job_set(state="done", msg="PuP Pack installed and enabled" + (" (restart the game)" if b["pup"].get("needs_restart") else ""))
+
+
+def run_pup_installer(game, b, zipfile):
     cmd = b["pup"].get("install", DEFAULT_PUP_INSTALL)
     args = [zipfile if a == "ZIP_PATH_OR_URL" else a for a in shlex.split(cmd)]
     if args[0] in ("python3", "python"):
@@ -477,10 +523,217 @@ def install_pup(zipfile, folder=None):
         install_platform_addons(game, b, C.ARCH.get(platform.machine(), platform.machine()))
         reimport_scripts(game, b)
         sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", os.path.join(game, "game", "addons"))
-    os.remove(zipfile)
+
+
+# ---------------------------------------------------------------- PuP Pack library
+# A pack is uploaded once into the library (`<PUPS>/zips/<name>.zip`) and then *assigned* to a game: the game's own pack installer
+# runs once per (pack, game id) and its folders move to `<PUPS>/installed/<pack>@<game id>/`; the game's pack and media folders become
+# links to them. Assigning the pack to another version of the same game, or taking it away, costs no install.
+
+def pup_zip(name):
+    return os.path.join(C.PUPS, "zips", name)
+
+
+def _du(path):
+    total = 0
+    for dp, _, names in os.walk(path):
+        for n in names:
+            try:
+                total += os.lstat(os.path.join(dp, n)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def pup_library():
+    """[{name, size, installed, zip, used_by}] of the packs: the zips in the library and the unpacked copies (`installed`, in bytes)
+    that remain without a zip or without a game using them (the leftover of a deleted game still takes room)."""
+    d = os.path.join(C.PUPS, "zips")
+    try:
+        names = {n for n in os.listdir(d) if n.lower().endswith(".zip")}
+    except OSError:
+        names = set()
+    copies = {}
+    root = os.path.join(C.PUPS, "installed")
+    try:
+        for n in os.listdir(root):
+            copies.setdefault(n.rsplit("@", 1)[0] + ".zip", []).append(os.path.join(root, n))
+    except OSError:
+        pass
+    names |= set(copies)
+    use = {}
+    for g in installed_games():
+        a = pup_assigned(g["path"], g["bundle"])
+        if a:
+            use.setdefault(a, []).append(f"{g['name']} {g['version']}")
+    out = []
+    for n in sorted(names):
+        z = os.path.join(d, n)
+        out.append({"name": n, "zip": os.path.isfile(z), "size": os.path.getsize(z) if os.path.isfile(z) else 0,
+                    "installed": sum(_du(c) for c in copies.get(n, [])), "used_by": use.get(n, [])})
+    return out
+
+
+def pup_store(path, name):
+    """Move an uploaded pack into the library; its name is kept (a second upload of the same name replaces it)."""
+    import zipfile as zf
+    name = re.sub(r"[^A-Za-z0-9._@+-]", "_", os.path.basename(name))[:120]
+    if not name.lower().endswith(".zip") or not zf.is_zipfile(path):
+        raise JobError("not a .zip PuP Pack")
+    os.makedirs(os.path.dirname(pup_zip(name)), exist_ok=True)
+    shutil.move(path, pup_zip(name))
+    return name
+
+
+def _pup_key(name, b):
+    return f"{name[:-4]}@{b['id']}"
+
+
+def _pup_store_name(d):
+    return d.replace("/", "__")
+
+
+def pup_assigned(game, b=None):
+    """Name of the library pack a game's pack folder links to; None when no pack (or one installed outside the library)."""
+    b = b or read_bundle(game) or {}
+    for d in sorted(pup_dirs(b)):
+        p = os.path.join(game, d)
+        if os.path.islink(p):
+            tgt = os.path.realpath(p)
+            root = os.path.realpath(os.path.join(C.PUPS, "installed")) + os.sep
+            if tgt.startswith(root):
+                return tgt[len(root):].split(os.sep)[0].rsplit("@", 1)[0] + ".zip"
+    return None
+
+
+def _drop(p):
+    if os.path.islink(p) or os.path.isfile(p):
+        os.remove(p)
+    elif os.path.isdir(p):
+        shutil.rmtree(p, ignore_errors=True)
+
+
+def extract_pup_zip(src, b, lib):
+    """`pup.extract_only` games: the author's zip is only unpacked, into the pack folder of the library (the folder holding triggers.pup,
+    at any depth). No script of the game runs: what the game derives from the pack (its media folder) is already in the bundle."""
+    import zipfile as zf
+    store = os.path.join(lib, _pup_store_name(os.path.normpath(b["pup"]["pack_dir"])))
+    try:
+        z = zf.ZipFile(src)
+    except zf.BadZipFile:
+        raise JobError("not a .zip PuP Pack")
+    with z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        tops = sorted((n for n in names if n.replace("\\", "/").rsplit("/", 1)[-1].lower() == "triggers.pup"), key=lambda n: n.count("/"))
+        if not tops:
+            raise JobError("no triggers.pup in this zip: not a PuP Pack")
+        prefix = tops[0].replace("\\", "/")[:-len("triggers.pup")]
+        shutil.rmtree(store, ignore_errors=True)
+        for name in names:
+            rel = name.replace("\\", "/")
+            if not rel.startswith(prefix):
+                continue
+            parts = rel[len(prefix):].split("/")
+            if not parts[0] or ".." in parts or ":" in parts[0]:
+                continue
+            dst = os.path.join(store, *parts)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with z.open(name) as fi, open(dst, "wb") as fo:
+                shutil.copyfileobj(fi, fo)
+    job_log("PuP Pack unpacked: nothing was converted or generated here")
+
+
+def assign_pup(folder, name):
+    game = installed_game(folder)
+    if not game:
+        raise JobError("unknown game")
+    b = read_bundle(game)
+    if not b.get("pup"):
+        raise JobError("this game has no PuP Pack support")
+    src = pup_zip(name)
+    if not os.path.isfile(src):
+        raise JobError("this pack is not in the library")
+    dirs = sorted(pup_dirs(b))
+    lib = os.path.join(C.PUPS, "installed", _pup_key(name, b))
+    if not os.path.isdir(lib) or not os.listdir(lib):
+        if b["pup"].get("extract_only"):
+            job_set(state="running", msg="Unpacking the PuP Pack (a few minutes)")
+            os.makedirs(lib, exist_ok=True)
+            extract_pup_zip(src, b, lib)
+        else:
+            job_set(state="running", msg="Installing the PuP Pack for this game (videos are checked, a few minutes)")
+            for d in dirs:
+                _drop(os.path.join(game, d))
+            run_pup_installer(game, b, src)
+            os.makedirs(lib, exist_ok=True)
+            for d in dirs:
+                p = os.path.join(game, d)
+                if os.path.isdir(p) and not os.path.islink(p):
+                    dst = os.path.join(lib, _pup_store_name(d))
+                    shutil.rmtree(dst, ignore_errors=True)
+                    shutil.move(p, dst)
+    job_set(state="running", msg="Linking the PuP Pack")
+    for d in dirs:
+        stored = os.path.join(lib, _pup_store_name(d))
+        if os.path.isdir(stored):
+            _drop(os.path.join(game, d))
+            os.makedirs(os.path.dirname(os.path.join(game, d)), exist_ok=True)
+            os.symlink(stored, os.path.join(game, d))
+    sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", lib)
     if options_tool(game):
         tool(game, "set", "pup.enabled", "true")
-    job_set(state="done", msg="PuP Pack installed and enabled" + (" (restart the game)" if b["pup"].get("needs_restart") else ""))
+    job_set(state="done", msg="PuP Pack assigned" + (" (restart the game)" if b["pup"].get("needs_restart") else ""))
+
+
+def unassign_pup(folder):
+    game = installed_game(folder)
+    if not game:
+        raise JobError("unknown game")
+    b = read_bundle(game)
+    for d in pup_dirs(b):
+        p = os.path.join(game, d)
+        if os.path.islink(p):
+            os.remove(p)
+    if options_tool(game):
+        tool(game, "set", "pup.enabled", "false")
+    job_set(state="done", msg="PuP Pack taken away from this game")
+
+
+def store_pup(path, name):
+    stored = pup_store(path, name)
+    job_set(state="done", msg=f"{stored} is in the PuP Pack library: assign it to a game")
+
+
+def delete_pup_job(name):
+    delete_pup(name)
+    job_set(state="done", msg=f"{name} removed from the library")
+
+
+def delete_pup(name):
+    """Remove a pack: its zip and its unpacked copies. Refused while a game uses it."""
+    name = os.path.basename(name)
+    for g in installed_games():
+        if pup_assigned(g["path"], g["bundle"]) == name:
+            raise JobError(f"in use by {g['name']} {g['version']}: take it away first")
+    found = False
+    try:
+        os.remove(pup_zip(name))
+        found = True
+    except OSError:
+        pass
+    for d in glob_installed(name[:-4]):
+        shutil.rmtree(d, ignore_errors=True)
+        found = True
+    if not found:
+        raise JobError("this pack is not in the library")
+
+
+def glob_installed(stem):
+    root = os.path.join(C.PUPS, "installed")
+    try:
+        return [os.path.join(root, n) for n in os.listdir(root) if n.rsplit("@", 1)[0] == stem]
+    except OSError:
+        return []
 
 
 def run_job(fn, *args):

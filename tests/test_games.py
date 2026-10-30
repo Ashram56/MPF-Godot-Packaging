@@ -33,8 +33,9 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.t = tempfile.TemporaryDirectory()
         t = self.t.name
-        self.saved = {k: getattr(C, k) for k in ("GAMES", "STATE_DIR", "UPLOADS", "INBOX", "USER", "JOB_FILE", "GAME_ENV", "READONLY")}
+        self.saved = {k: getattr(C, k) for k in ("GAMES", "STATE_DIR", "UPLOADS", "INBOX", "PUPS", "USER", "JOB_FILE", "GAME_ENV", "READONLY")}
         C.GAMES, C.STATE_DIR, C.UPLOADS, C.INBOX = (os.path.join(t, n) for n in ("games", "state", "up", "inbox"))
+        C.PUPS = os.path.join(t, "pups")
         C.JOB_FILE = os.path.join(t, "job.json")
         C.GAME_ENV = os.path.join(t, "mpf-game")
         C.USER, C.READONLY = pwd.getpwuid(os.getuid()).pw_name, False
@@ -229,6 +230,146 @@ class Inbox(Base):
         self.assertEqual(G.inbox_pup_target("a@1.pup.zip", games), "a@1")
         self.assertEqual(G.inbox_pup_target("b.pup.zip", games), "b@1")
         self.assertIsNone(G.inbox_pup_target("c.pup.zip", games))
+
+
+class StartCheck(Base):
+    """A bundle that cannot start is refused before it is installed, and the game that was running stays the active one."""
+    START = {"run": {"start": "python3 scripts/start.py"}}
+
+    def venv(self):
+        d = os.path.join(self.t.name, "venv", "bin")
+        os.makedirs(d)
+        os.symlink(sys.executable, os.path.join(d, "python"))
+        with open(C.GAME_ENV, "w") as f:
+            f.write(f"MPF_GAME_VENV={os.path.join(self.t.name, 'venv')}\n")
+
+    def refused(self, **kw):
+        arc = os.path.join(self.t.name, "bad.tar.xz")
+        make_bundle(arc, **kw)
+        G.JOB_LOCK.acquire()
+        G.run_job(G.install_game, arc, "")
+        return G.JOB["msg"]
+
+    def test_missing_module_is_refused_and_the_old_game_stays(self):
+        self.venv()
+        self.install(version="1.0", extra=self.START, files={"scripts/start.py": b"import helper\n", "scripts/helper.py": b"X = 1\n"})
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"])
+        msg = self.refused(version="2.0", extra=self.START, files={"scripts/start.py": b"import helper\nimport helper_missing_xyz\n", "scripts/helper.py": b""})
+        self.assertEqual(G.JOB["state"], "error")
+        self.assertIn("helper_missing_xyz", msg)
+        self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])             # nothing of 2.0 was installed
+        self.assertTrue(G.installed_games()[0]["active"])
+
+    def test_optional_imports_and_stdlib_pass(self):
+        self.venv()
+        src = b"import os, json\ntry:\n    import nothing_here_optional\nexcept ImportError:\n    pass\ndef f():\n    import also_missing\n"
+        self.install(extra=self.START, files={"scripts/start.py": src})
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"])
+
+    def test_script_launched_by_the_start_script_is_followed(self):
+        self.venv()
+        self.refused(extra=self.START, files={"scripts/start.py": b"import subprocess\nsubprocess.run(['python3', 'run.py'])\n",
+                                              "scripts/run.py": b"import lost_module_xyz\n"})
+        self.assertEqual(G.JOB["state"], "error")
+        self.assertIn("lost_module_xyz", G.JOB["msg"])
+
+    def test_run_check_decides(self):
+        self.venv()
+        ok = {"run": {"start": "echo hi", "check": "python3 scripts/check.py"}}
+        self.install(version="1.0", extra=ok, files={"scripts/check.py": b"import sys; sys.exit(0)\n"})
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"])
+        msg = self.refused(version="2.0", extra=ok, files={"scripts/check.py": b"import sys; print('no display'); sys.exit(3)\n"})
+        self.assertIn("run.check", msg)
+        self.assertIn("no display", msg)
+        self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])
+
+
+class PupLibrary(Base):
+    PACK = {"pup": {"pack_dir": "pup_pack/p", "media_dir": "pup_media/p",
+                    "install": "sh -c 'mkdir -p pup_pack/p pup_media/p && echo v > pup_pack/p/a.mp4 && echo m > pup_media/p/a.webm'"}}
+
+    def upload(self, name="pack.zip"):
+        import zipfile
+        p = os.path.join(C.UPLOADS, "pup.zip")
+        zipfile.ZipFile(p, "w").writestr("a.txt", "x")
+        return G.pup_store(p, name)
+
+    def test_store_and_refuse_a_non_zip(self):
+        self.assertEqual(self.upload("my pack.zip"), "my_pack.zip")
+        self.assertEqual([p["name"] for p in G.pup_library()], ["my_pack.zip"])
+        bad = os.path.join(C.UPLOADS, "pup.zip")
+        open(bad, "wb").write(b"nope")
+        with self.assertRaises(G.JobError):
+            G.pup_store(bad, "x.zip")
+
+    def test_assign_links_and_is_shared_by_versions(self):
+        self.install(extra=self.PACK)
+        name = self.upload()
+        G.assign_pup("demo@1.0", name)
+        game = os.path.join(C.GAMES, "demo@1.0")
+        self.assertTrue(os.path.islink(os.path.join(game, "pup_pack/p")))
+        self.assertEqual(open(os.path.join(game, "pup_pack/p/a.mp4")).read().strip(), "v")
+        self.assertEqual(G.pup_assigned(game), name)
+        self.assertTrue(G.pup_installed(game))
+        self.install(version="2.0", extra=self.PACK)                          # a new version inherits the link
+        self.assertEqual(G.pup_assigned(os.path.join(C.GAMES, "demo@2.0")), name)
+        with self.assertRaises(G.JobError):                                   # in use: cannot be deleted
+            G.delete_pup(name)
+        G.unassign_pup("demo@1.0")
+        G.unassign_pup("demo@2.0")
+        self.assertIsNone(G.pup_assigned(game))
+        self.assertFalse(G.pup_installed(game))
+        G.assign_pup("demo@1.0", name)                                        # again: no second install (the installer would add a marker)
+        G.unassign_pup("demo@1.0")
+        G.delete_pup(name)
+        self.assertEqual(G.pup_library(), [])
+
+    def test_leftover_unpacked_copy_is_listed_and_can_be_deleted(self):
+        """Deleting every game that used a pack leaves its unpacked copy (up to GBs): it is listed (with or without the zip) and removable."""
+        self.install(extra=self.PACK)
+        name = self.upload()
+        G.assign_pup("demo@1.0", name)
+        lib = G.pup_library()
+        self.assertEqual(lib[0]["used_by"], ["Demo 1.0"])
+        self.assertGreater(lib[0]["installed"], 0)
+        G.delete_game("demo@1.0")
+        self.assertEqual(G.pup_library()[0]["used_by"], [])
+        os.remove(G.pup_zip(name))                                            # zip gone, copy still there
+        lib = G.pup_library()
+        self.assertEqual((lib[0]["name"], lib[0]["zip"]), (name, False))
+        G.delete_pup(name)
+        self.assertEqual(G.pup_library(), [])
+        with self.assertRaises(G.JobError):
+            G.delete_pup(name)
+
+    def test_extract_only_unpacks_the_authors_zip_and_runs_nothing(self):
+        """pup.extract_only: the zip's pack folder (the one holding triggers.pup, at any depth) is only unpacked; the game's install command
+        (which would write a marker) never runs, and the media folder of the bundle is left alone."""
+        import zipfile
+        pup = {"pack_dir": "pup_pack/p", "extract_only": True, "install": "sh -c 'touch RAN'"}
+        self.install(extra={"pup": pup}, files={"pup_media/p/m.json": b"{}"})
+        p = os.path.join(C.UPLOADS, "pup.zip")
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("PUPVideos/p/triggers.pup", "t")
+            z.writestr("PUPVideos/p/Sub/a.mp4", "video")
+            z.writestr("PUPVideos/other/x.txt", "no")
+            z.writestr("PUPVideos/p/../evil.txt", "no")
+        name = G.pup_store(p, "author.zip")
+        G.assign_pup("demo@1.0", name)
+        game = os.path.join(C.GAMES, "demo@1.0")
+        self.assertEqual(open(os.path.join(game, "pup_pack/p/Sub/a.mp4")).read(), "video")
+        self.assertFalse(os.path.exists(os.path.join(game, "pup_pack/p/x.txt")))
+        self.assertFalse(os.path.exists(os.path.join(game, "RAN")))
+        self.assertTrue(os.path.exists(os.path.join(game, "pup_media/p/m.json")))
+        self.assertTrue(G.pup_installed(game))
+
+    def test_assign_needs_a_pack_and_pack_support(self):
+        self.install(extra=self.PACK)
+        with self.assertRaises(G.JobError):
+            G.assign_pup("demo@1.0", "missing.zip")
+        self.install(gid="plain", extra={"pup": None})
+        with self.assertRaises(G.JobError):
+            G.assign_pup("plain@1.0", self.upload())
 
 
 if __name__ == "__main__":

@@ -42,6 +42,7 @@ BOOT_MOUNT = RO.get("MPF_BOOT_MOUNT", "")
 # where this machine keeps what it writes: the data partition in read-only mode, ordinary folders otherwise
 STATE_DIR = os.environ.get("MPF_STATE_DIR") or (os.path.join(DATA, "mpf") if READONLY else "/var/lib/mpf-netconfig")
 UPLOADS = os.environ.get("MPF_UPLOAD_DIR") or (os.path.join(DATA, "uploads") if READONLY else "/var/lib/mpf-uploads")
+PUPS = os.environ.get("MPF_PUP_DIR") or (os.path.join(DATA, "pups") if READONLY else "/var/lib/mpf-pups")      # PuP Pack library: zips and installed packs
 INBOX = os.environ.get("MPF_INBOX_DIR") or (os.path.join(DATA, "inbox") if READONLY else "/var/lib/mpf-inbox")
 JOB_FILE = os.environ.get("MPF_JOB_FILE", "/run/mpf-job.json")
 VOLATILE_LOGS = "/var/log/mpf-game"              # the game's logs/ folder is a link to this folder in RAM

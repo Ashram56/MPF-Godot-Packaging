@@ -30,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -37,6 +38,8 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLATFORM = os.path.dirname(os.path.dirname(HERE))
+sys.path.insert(0, os.path.join(PLATFORM, "common", "netconfig"))
+import mpf_bundlecheck as BC  # noqa: E402
 TARGET_ARCH = {"arm64": "arm64", "x86_64": "x86_64", "all": "arm64+x86_64"}
 CABINET = re.compile(r"(^|/)(game/(data|audits|logs)(/|$)|[^/]*\.local\.cfg$|machine_vars\.yaml$|scorbit_device_key\.txt$)")
 
@@ -267,20 +270,53 @@ def verify(archive, recipe, target):
     return meta, digest
 
 
-def publish(url, archive, folder):
+MANIFEST = "mpf-games.json"
+
+
+def start_check(archive, repo, meta):
+    """The check the page makes before it installs (mpf_bundlecheck.py), made here on the extracted archive: a bundle that could not
+    start is a failed build. The game's own `run.check`, when it has one, runs in the extracted copy with the build's venv."""
+    venv = os.path.join(repo, ".venv", "bin", "python") if repo else ""
+    python = venv if os.path.exists(venv) else None
+    with tempfile.TemporaryDirectory(prefix="bundle-check-") as tmp:
+        with tarfile.open(archive, "r:xz") as t:
+            t.extractall(tmp)
+        roots = [d for d in os.listdir(tmp) if os.path.isdir(os.path.join(tmp, d))]
+        root = os.path.join(tmp, roots[0])
+        bad = BC.problems(root, python, meta, source=repo if repo and os.path.isdir(repo) else None)
+        cmd = BC.check_command(meta)
+        if cmd and not bad:
+            if cmd[0] in ("python3", "python"):
+                cmd[0] = python or sys.executable
+            env = dict(os.environ, MPF_BUNDLE_CHECK="1")
+            say(f"   $ {' '.join(cmd)}   (run.check, in the extracted archive)")
+            try:
+                r = subprocess.run(cmd, cwd=root, env=env, capture_output=True, text=True, timeout=BC.check_timeout(meta))
+                if r.returncode:
+                    bad.append(f"the game's own check (run.check) failed ({r.returncode}): " + (r.stdout + r.stderr).strip()[-800:])
+            except subprocess.TimeoutExpired:
+                bad.append(f"the game's own check (run.check) gave no answer in {BC.check_timeout(meta)} s")
+    if bad:
+        die("the archive could not start, it is not delivered:\n  - " + "\n  - ".join(bad))
+    say("checked: the start script's imports are all in the archive" + (" and run.check passed" if BC.check_command(meta) else ""))
+
+
+def publish(url, archive, folder, meta=None, digest=""):
     user, pw = os.environ.get("WEBDAV_USER", ""), os.environ.get("WEBDAV_PASS", "")
     if not user or not pw:
         die("--publish needs WEBDAV_USER and WEBDAV_PASS in the environment")
     auth = "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
-    base = url.rstrip("/") + "/" + (folder + "/" if folder else "")
+    if not folder:
+        die("a game is published in a sub-folder named by its id, never at the root")
+    base = url.rstrip("/") + "/" + folder + "/"
 
-    def req(method, target, data=None):
+    def req(method, target, data=None, want_body=False):
         r = urllib.request.Request(target, data=data, method=method, headers={"Authorization": auth})
         try:
             with urllib.request.urlopen(r, timeout=600) as resp:
-                return resp.status
+                return (resp.status, resp.read()) if want_body else resp.status
         except urllib.error.HTTPError as e:
-            return e.code
+            return (e.code, b"") if want_body else e.code
 
     if folder:
         code = req("MKCOL", base)
@@ -293,6 +329,30 @@ def publish(url, archive, folder):
         if code not in (200, 201, 204):
             die(f"upload of {name} failed: HTTP {code}")
         say(f"uploaded {base}{name}")
+    if meta:
+        write_manifest(req, url.rstrip("/") + "/", (folder + "/" if folder else "") + urllib.parse.quote(os.path.basename(archive)),
+                       archive, meta, digest)
+
+
+def write_manifest(req, root, rel, archive, meta, digest):
+    """`mpf-games.json` at the root of the updates folder: what the page's Updates card reads to offer only the updates that fit the
+    installed games. An entry per (game id, version, architecture); publishing the same one again replaces it."""
+    code, body = req("GET", root + MANIFEST, want_body=True)
+    try:
+        doc = json.loads(body) if code == 200 else {}
+    except ValueError:
+        doc = {}
+    arch = (meta.get("target") or {}).get("arch", "all")
+    entry = {"id": meta["id"], "name": meta.get("name", meta["id"]), "version": str(meta["version"]), "arch": arch,
+             "file": urllib.parse.unquote(rel), "size": os.path.getsize(archive), "sha256": digest,
+             "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    items = [i for i in doc.get("items", []) if (i.get("id"), i.get("version"), i.get("arch")) != (entry["id"], entry["version"], arch)]
+    items.append(entry)
+    out = json.dumps({"format": 1, "items": sorted(items, key=lambda i: (i["id"], i["published"]))}, indent=1).encode()
+    code = req("PUT", root + MANIFEST, out)
+    if code not in (200, 201, 204):
+        die(f"upload of {MANIFEST} failed: HTTP {code}")
+    say(f"updated {root}{MANIFEST} ({entry['id']} {entry['version']})")
 
 
 def main():
@@ -305,6 +365,8 @@ def main():
     ap.add_argument("--target", choices=sorted(TARGET_ARCH))
     ap.add_argument("--out", default="dist")
     ap.add_argument("--skip-setup", action="store_true")
+    ap.add_argument("--pup-zip", metavar="ZIP", help="the game's PuP Pack zip (a path or URL): the game's builder makes the media derived from it "
+                    "(clips, letters, HD DMD art) here, offline, and ships them in the bundle; the machine that runs the game makes nothing")
     ap.add_argument("--publish", metavar="WEBDAV_URL")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
     ap.add_argument("--install-deps", action="store_true", help="install a missing git / venv with apt (Debian, Ubuntu, Raspberry Pi OS; needs root or sudo)")
@@ -360,7 +422,11 @@ def main():
         py = venv_py if os.path.exists(venv_py) else sys.executable
         helptext = "" if a.dry_run else subprocess.run([py, script, "--help"], cwd=repo, env=env, capture_output=True, text=True).stdout
         cmd = [py, script, "--out", out]
-        for opt, val in (("--target", target), ("--version", version)):
+        if a.pup_zip and not a.dry_run:      # the build machine's tools for that media (rule 12): not the target's business
+            sys.path.insert(0, PLATFORM)
+            from mpf_godot import toolchain as tc
+            run([py, "-m", "pip", "install", "--quiet"] + tc.BUILD_REQUIREMENTS, repo, env, a.dry_run)
+        for opt, val in (("--target", target), ("--version", version), ("--pup-zip", a.pup_zip)):
             if val and (a.dry_run or opt in helptext):
                 cmd += [opt, val]
     elif description_of(repo):
@@ -378,9 +444,10 @@ def main():
         die(f"the build produced no .tar.xz in {out}")
     archive = os.path.join(out, new[-1])
     meta, digest = verify(archive, dict(recipe, id=meta_id(archive, recipe)), target)
+    start_check(archive, repo, meta)
     say(f"\n{archive}\n  {os.path.getsize(archive) >> 20} MB, sha256 {digest}")
     if a.publish:
-        publish(a.publish, archive, recipe.get("publish_folder", recipe["id"]))
+        publish(a.publish, archive, recipe.get("publish_folder", meta.get("id", recipe["id"])), meta, digest)
     say(f"\nPut it on a machine (common/games/README.md):\n"
         f"  - the setup page, Install tab: drop {os.path.basename(archive)} (and its .sha256)\n"
         f"  - before flashing: python3 common/games/inject_image.py IMAGE --bundle {archive}\n"

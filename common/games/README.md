@@ -173,8 +173,12 @@ what starts at power-on, what the page's settings card configures, and what a pa
 ## Updates over the air (WebDAV)
 
 The page's *Updates* card reads a WebDAV folder: one folder, or one sub-folder per game, holding `<id>@<version>.tar.xz` (+ `.sha256`)
-and packs named `<id>.pup.zip` or `<id>@<version>.pup.zip` (the name says which installed game a pack is for). Installing from the
-list follows the rules above (new version kept beside the old one, settings, scores and pack carried over).
+and PuP Pack `.zip` files. The page asks for the server address and the folder separately (default `MPF Games`). Installing a bundle from
+the list follows the rules above (new version kept beside the old one, settings, scores and pack carried over); a pack goes to the page's
+PuP Pack library and is given to a game in the grid (common/netconfig/README.md). The page reads a `.json` on the server that lists
+which updates fit which installed game, (`build_game_package.py --publish URL` writes it: `mpf-games.json` at the root of the folder: an entry
+per game id, version and architecture, with the file, size and sha256; publishing the same version again replaces its entry). Without
+it the file name or sub-folder (starting with the game's `id`) decides.
 
 ## The bundle
 
@@ -205,6 +209,7 @@ refused by a page that does not know it.
 | Field | Meaning |
 |---|---|
 | `run.start` | the command (default `python3 scripts/package/start.py`); `run.cwd` its folder, relative to the bundle (default the bundle); `needs_display` false: do not wait for the X session |
+| `run.check` | optional: a command (run in the bundle folder, `python3` meaning the game's venv Python) that exits 0 when the game can start, in a few seconds, with no display and nothing left running (`MPF_BUNDLE_CHECK=1` is set). The builder runs it on the extracted archive and the page before it installs; a failure refuses the bundle. `run.check_timeout`: seconds (default 90). Before it, both always check that every module the start script imports at the top of a file is in the bundle or importable by the game's Python (`common/netconfig/mpf_bundlecheck.py`) |
 | `run.game_args` | `true`: the board's Godot arguments (`MPF_GAME_ARGS` of `/etc/default/mpf-game`, for example `-- --rendering-driver opengl3`) are added to `run.start`. Default: only for a game started by `scripts/package/start.py` (which forwards them), never for another command (it would reject them). `make_bundle.py --game-args` sets it |
 | `keep_on_update` | paths (files or folders, relative to the bundle) carried from the previous version of the same game |
 | `options.tool` | a program that answers `list` (the settings schema as JSON), `get`, `set ID VALUE...`, `unset ID...`: the page builds its form from it. No tool, no settings card. The page never writes a game's files itself |

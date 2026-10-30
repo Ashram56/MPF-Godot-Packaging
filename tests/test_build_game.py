@@ -30,6 +30,18 @@ class Put(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def do_GET(self):
+        path = os.path.join(Put.root, self.path.strip("/").replace("%20", " "))
+        if not os.path.isfile(path):
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            return self.end_headers()
+        data = open(path, "rb").read()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_PUT(self):
         data = self.rfile.read(int(self.headers["Content-Length"]))
         with open(os.path.join(Put.root, self.path.strip("/")), "wb") as f:
@@ -86,6 +98,36 @@ class BuildTest(unittest.TestCase):
             self.run_tool(self.recipe(["--platform-addon", "no_such_addon"]), "--repo", self.repo, "--version", "1.3", "--out", self.out)
         self.assertIn("no_such_addon", str(e.exception))
 
+    def archive_of(self, files, run):
+        import tarfile
+        path = os.path.join(self.tmp, "x.tar.xz")
+        meta = {"format": 1, "id": "x", "version": "1", "target": {"os": "linux", "arch": "all"}, "run": run}
+        with tarfile.open(path, "w:xz") as tf:
+            for rel, data in dict(files, **{"bundle.json": json.dumps(meta).encode()}).items():
+                ti = tarfile.TarInfo("x/" + rel)
+                ti.size = len(data)
+                tf.addfile(ti, io.BytesIO(data))
+        return path, meta
+
+    def test_start_check_refuses_a_file_left_out(self):
+        os.makedirs(os.path.join(self.repo, "scripts"))
+        open(os.path.join(self.repo, "scripts", "helper.py"), "w").write("X = 1\n")
+        run = {"start": "python3 scripts/start.py"}
+        arc, meta = self.archive_of({"scripts/start.py": b"import helper\n"}, run)       # helper.py is in the source, not in the archive
+        with self.assertRaises(SystemExit) as e:
+            B.start_check(arc, self.repo, meta)
+        self.assertIn("left out of the bundle", str(e.exception))
+        arc, meta = self.archive_of({"scripts/start.py": b"import helper\n", "scripts/helper.py": b"X = 1\n"}, run)
+        with contextlib.redirect_stdout(io.StringIO()):
+            B.start_check(arc, self.repo, meta)
+
+    def test_start_check_runs_the_games_own_check(self):
+        run = {"start": "echo hi", "check": "python3 scripts/check.py"}
+        arc, meta = self.archive_of({"scripts/check.py": b"import sys; print('boom'); sys.exit(2)\n"}, run)
+        with self.assertRaises(SystemExit) as e:
+            B.start_check(arc, self.repo, meta)
+        self.assertIn("boom", str(e.exception))
+
     def test_publish(self):
         Put.root = os.path.join(self.tmp, "dav")
         os.makedirs(Put.root)
@@ -95,8 +137,17 @@ class BuildTest(unittest.TestCase):
         self.addCleanup(srv.shutdown)
         with mock.patch.dict(os.environ, {"WEBDAV_USER": "u", "WEBDAV_PASS": "p"}):
             self.run_tool(self.recipe(), "--repo", self.repo, "--version", "2.0", "--out", self.out, "--publish", f"http://127.0.0.1:{srv.server_address[1]}/games")
+        with mock.patch.dict(os.environ, {"WEBDAV_USER": "u", "WEBDAV_PASS": "p"}):      # a second version: the manifest keeps both
+            self.run_tool(self.recipe(), "--repo", self.repo, "--version", "2.1", "--out", self.out, "--publish", f"http://127.0.0.1:{srv.server_address[1]}/games")
+            self.run_tool(self.recipe(), "--repo", self.repo, "--version", "2.1", "--out", self.out, "--publish", f"http://127.0.0.1:{srv.server_address[1]}/games")
+        doc = json.load(open(os.path.join(Put.root, "games", "mpf-games.json")))
+        self.assertEqual(doc["format"], 1)
+        self.assertEqual(sorted(i["version"] for i in doc["items"]), ["2.0", "2.1"])         # 2.1 published twice: one entry
+        first = doc["items"][0]
+        self.assertTrue(first["file"].startswith("fake/") and first["file"].endswith(".tar.xz"))
+        self.assertEqual(len(first["sha256"]), 64)
         got = sorted(os.listdir(os.path.join(Put.root, "games", "fake")))
-        self.assertEqual(len(got), 2)
+        self.assertEqual(len(got), 4)
         self.assertTrue(got[1].endswith(".tar.xz.sha256") or got[0].endswith(".tar.xz.sha256"))
 
     def test_dry_run_changes_nothing(self):

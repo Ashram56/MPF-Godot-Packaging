@@ -10,6 +10,7 @@ Shared by every image (Raspberry Pi 4, Jetson Xavier NX, x86 mini PC). Standard 
 | `mpf_common.py` | Settings read from the environment and `/etc/mpf-readonly.conf`, the writable-window helper for read-only mode |
 | `mpf_games.py` | Everything about games: install, versions, the active game, PuP Packs, settings, start and stop, the inbox |
 | `mpf_monitor.py` | Switch monitor (BCP client of the running game) and saved log snapshots |
+| `mpf_bundlecheck.py` | Can this bundle start? Import check of the start chain and `run.check`, used by the builder and by the installer before anything is changed |
 | `mpf_ota.py` | Updates of games and PuP Packs from a WebDAV folder (list, download, install; address, user and password kept in `ota.json`, mode 0600) |
 | `mpf_web.py` | The page (one HTML file, English and French) and its HTTP routes |
 | `mpf-netconfig-*.service`, `mpf-game.service` | systemd units: apply, web, ap, inbox, and the game |
@@ -26,7 +27,7 @@ One screen, in the browser's language (English or French, a selector at the top)
 
 - **Status**: addresses, Wi-Fi network and signal, free space, mode (production or maintenance), the game running or not.
 - **Games**: every installed game and version with its name, version, size, the active one marked; *Activate at startup*, *Delete*, and the
-  upload of a new bundle or of a PuP Pack for the selected game. Start, stop, restart, start at power-on, the last lines of the log.
+  Start, stop, restart, start at power-on, the last lines of the log. Adding a bundle or a pack is on the *Install and updates* tab.
 - **Settings** of the active game, built from the bundle's own settings schema (`options.tool`, `options.schema`).
 - **Wi-Fi**: the networks in range (tap to choose), password, country. **SSH**: a public key, password logins on or off.
 - **Mode**: production or maintenance ([common/readonly](../readonly/README.md)).
@@ -83,12 +84,36 @@ Raspberry Pi 4 the DMD is an external panel or the 256x64 colour dots over the b
 ([platforms/raspberrypi.md](../../platforms/raspberrypi.md), "Platform limits"). Record each new limit there with its
 measurement, and in the game's profile.
 
+## Adding a game or a PuP Pack (*Install and updates* tab)
+
+Choosing or dropping a file only **selects** it; nothing is sent until the button. For a game: pick the `.tar.xz`, optionally its
+`.sha256` file (the upload is refused when the hash differs), then *Upload and install*. For a PuP Pack: pick the `.zip`, then
+*Add to the library*. A pack belongs to no game when it is uploaded, so it can never land on the wrong one.
+
+**PuP Pack library and grid.** The *PuP Packs* card lists the packs of the library (delete one that no game uses) and, for every game
+that has pack support, a menu *Pack of each game*. Choosing a pack runs the game's own pack installer once for that pack and game
+(a few minutes: the videos are checked), moves the result to `<data>/pups/installed/<pack>@<game id>/` and makes the game's pack and
+media folders **links** to it. Giving the same pack to another version of the game costs nothing, a new version of a game keeps the link
+(`keep_on_update`), and *No pack* only removes the links. A pack installed before this (a real folder in the game) shows as *installed
+with the game* until you choose another.
+
 ## Updates from a WebDAV server (*Updates* card)
 
-Type the folder's address, user and password once (kept on this machine only, in `ota.json` of the state folder, never shown again;
-an empty password field keeps the saved one; redirects are refused). *Check for updates* lists the bundles (`*.tar.xz`, with a
-`.sha256` beside) and PuP Packs in the folder and its sub-folders; *Install* downloads one and installs it exactly like an upload.
-The list says *installed* or *changed on the server* (size or date differ from what was installed). The engine itself (the base
+Type the server address (the server only, `https://host`), the **folder on the server** (default `MPF Games`; sub-folders are written
+`MPF Games/my-game`), user and password once (kept on this machine only, in `ota.json` of the state folder, never shown again; an empty
+password field keeps the saved one; redirects are refused). The fields keep what you type until you save. *Check for updates* lists
+the bundles (`*.tar.xz`, with a `.sha256` beside) and `.zip` PuP Packs in the folder and its sub-folders. Each bundle says which
+installed game it **updates** (its file name or sub-folder starts with the game's id) or *new game*; *Install* downloads it and installs
+it exactly like an upload, and a pack is downloaded **into the library** (then given to a game in the grid).
+The list says *installed* or *changed on the server* (size or date differ from what was installed).
+
+**The manifest `mpf-games.json`.** When the folder holds this file (written by `build_game_package.py --publish`, you never edit it),
+the page lists the bundles it names instead of every `.tar.xz` it finds: only the ones for this machine's architecture, each as
+*game name + version*, with the sha256 taken from the manifest (no `.sha256` file needed), marked *updates <game and installed
+versions>* when a newer version of an installed game is offered, *new game* otherwise, and *installed* when that version is already here.
+Format: `{"format": 1, "items": [{"id", "name", "version", "arch", "file", "size", "sha256", "published"}]}`, `file` relative to the
+folder. Without the file the folder is listed as before, so a hand-made folder still works. PuP Pack `.zip` files are always listed
+from the folder itself. The engine itself (the base
 system) is not updated this way yet.
 
 ## Tabs: switch monitor and saved logs
@@ -96,7 +121,7 @@ system) is not updated this way yet.
 The page has four tabs (*Games*, *Install and updates*, *Configuration*, *Switch monitor*; the address keeps the tab: `#monitor`).
 
 - **Game tile** (top of the page): its round button starts or stops the game.
-- **Monitor** (tab, also a button in *Configuration > Diagnostics*): like MPF Monitor, in the page. The **playfield picture with the
+- **Monitor** (tab; the ⛶ button shows it full screen, Esc leaves; the picture is as big as the zoom says and the page scrolls, there is no inner frame; also a button in *Configuration > Diagnostics*): like MPF Monitor, in the page. The **playfield picture with the
   switches, lamps (inserts, in their real colour), flippers, autofires, ball devices and coils** at the places the game's own layout gives,
   or a plain list of switches when the game has none. Mouse as in MPF Monitor: a short press closes and opens the switch, a long press keeps it closed while held, a right click flips it; the filter
   dims the others. Zoom (slider, Ctrl + wheel) and a size slider for the points are kept in the browser. The page asks for changes every 100 ms
@@ -109,3 +134,10 @@ The page has four tabs (*Games*, *Install and updates*, *Configuration*, *Switch
   and of this page, the game's log files, latest switch changes) to `/data/logs` (`/var/lib/mpf-logs` on an ordinary image,
   `MPF_SAVED_LOGS_DIR`), keeps the latest 20 and lists them for download: in read-only mode the live logs are in RAM, this keeps them.
 How a game builds a bundle for this page: [platforms/game-bundles.md](../../platforms/game-bundles.md).
+
+## Scenarios (Monitor tab)
+
+*Record a scenario* on the Monitor tab saves what you click (switch, time) under the game's id; ▶ replays it on the machine with the same timing.
+The download button gives `{"format": 1, "events": [[seconds, switch, "on|off|toggle|tap"], ...]}`, which `common/games/replay_scenario.py`
+plays into any MPF started in simulation through its BCP server (for qualification after a change of the game's code; exit 1 when the game
+no longer has a switch of the scenario).
