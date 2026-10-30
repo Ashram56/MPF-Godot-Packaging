@@ -23,6 +23,7 @@ import mpf_common as C  # noqa: E402
 import mpf_games as G  # noqa: E402
 import mpf_netconfig as N  # noqa: E402
 import mpf_monitor as MON  # noqa: E402
+import mpf_audio as AU  # noqa: E402
 import mpf_ota as O  # noqa: E402
 from mpf_common import run  # noqa: E402
 
@@ -279,6 +280,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(G.job_state())
         if p == "/api/state":
             return self._json(state())
+        if p == "/api/audio":
+            return self._json(AU.state())
         if p == "/api/ota/list":
             try:
                 return self._json(O.list_remote())
@@ -406,6 +409,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/monitor/switch":
             MON.MON.set_switch(form.get("name", ""), form.get("do", "toggle"))
             return "ok"
+        if path == "/api/audio":
+            do = form.get("do", "set")
+            if do == "test":
+                return AU.test_tone()
+            if do == "reboot":
+                r = run("systemctl", "reboot", "--no-block")
+                if r.returncode:
+                    raise ValueError((r.stderr or r.stdout).strip() or "reboot failed")
+                return "Rebooting."
+            msg, restart = AU.choose(form.get("output", "auto"), form.get("dac", ""))
+            if restart and G.game_running():
+                G.game_restart()
+                msg += " The game restarts."
+            return msg
         if path == "/api/ssh":
             if form.get("key"):
                 N.add_ssh_key(form["key"].strip())
@@ -590,6 +607,14 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
  <div id="modeBox" class="mt hide"></div>
  </div></section>
 </div>
+<section data-tab="config" id="audioSec"><h2><svg stroke="currentColor"><use href="#i-play"/></svg><span data-t="audTitle"></span></h2><div class="card">
+ <p class="muted" id="audPlat"></p>
+ <div id="audBanner"></div>
+ <form class="form" id="audForm"><label><span data-t="audOut"></span><select name="output" id="audOut"></select></label>
+ <label id="audDacRow" class="hide"><span data-t="audDac"></span><select name="dac" id="audDac"></select></label>
+ <p class="muted" id="audHint"></p>
+ <div class="row"><button class="pri" type="submit"><span data-t="audApply"></span></button><button type="button" id="audTest"><span data-t="audTest"></span></button><button type="button" id="audScan"><svg><use href="#i-redo"/></svg><span data-t="scan"></span></button></div></form>
+</div></section>
 <section data-tab="config"><h2><svg stroke="currentColor"><use href="#i-term"/></svg><span data-t="diag"></span></h2><div class="card">
  <div class="row"><button id="logsBtn"><svg><use href="#i-term"/></svg><span data-t="logs"></span></button><button id="saveLogBtn" class="pri"><svg><use href="#i-disk"/></svg><span data-t="saveLog"></span></button><button id="monBtn"><svg><use href="#i-cpu"/></svg><span data-t="monitor"></span></button></div>
  <p class="muted mt" data-t="saveLogHint"></p><div class="nets" id="savedLogs"></div></div></section>
@@ -728,7 +753,7 @@ $('#otaList').onclick=async e=>{const b=e.target.closest('button[data-k]');if(!b
 async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);packs(S);otaFill(S.ota)}catch(e){}}
 const TABS=['games','install','config','monitor'];let TAB=(location.hash||'').slice(1);if(!TABS.includes(TAB))TAB='games';
 function showTab(){if(TAB==='monitor')monStart();else monStop();document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('hide',e.dataset.tab!==TAB));document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.go===TAB))}
-$('#tabs').onclick=e=>{const b=e.target.closest('button[data-go]');if(!b)return;TAB=b.dataset.go;history.replaceState(null,'','#'+TAB);showTab();if(TAB==='config')savedList()};
+$('#tabs').onclick=e=>{const b=e.target.closest('button[data-go]');if(!b)return;TAB=b.dataset.go;history.replaceState(null,'','#'+TAB);showTab();if(TAB==='config'){savedList();audLoad()}};
 async function savedList(){try{const l=await (await fetch('/api/logs/saved')).json();$('#savedLogs').innerHTML=l.map(n=>`<a class="net" href="/api/logs/saved/${encodeURIComponent(n)}" download>${ico('disk')}<b class="grow">${esc(n)}</b></a>`).join('')}catch(e){}}
 $('#saveLogBtn').onclick=async()=>{const b=$('#saveLogBtn');b.disabled=true;await post('/api/logs/save',{});b.disabled=false;savedList()};
 let monT=null,monSince=0,monLast='',monLog=[],monLay=null,monRev=0,monEpoch=0,monSw={},monOrder=[],monDev={},monBusy=false,monQ=Promise.resolve();
@@ -798,6 +823,30 @@ $('#monFull').onclick=()=>{const c=$('#monCard'),on=!c.classList.contains('fsx')
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)fsOff()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')fsOff()});
 scDraw();scLoad();monBind($('#pfw'),'.sp.switch');monBind($('#monGrid'),'button[data-n]');monApply();
-applyLang();showTab();if(TAB==="config")savedList();refresh();poll();setInterval(refresh,4000);
+
+/* ---- sound output (mpf_audio.py): the devices come from the kernel, the choice is kept on the data partition ---- */
+Object.assign(T.en,{audTitle:"Sound output",audOut:"Output",audDac:"I2S DAC",audApply:"Apply",audTest:"Test tone",audAuto:"Automatic (the image's default)",audI2s:"I2S DAC…",audNoMon:"no monitor",audMissing:"The saved output is not present: the image's default is used.",audReboot:"Reboot to load the I2S overlay.",audRebootBtn:"Reboot",audNone:"none found",audPlat:"Machine",audHintI2s:"An I2S DAC is read at boot: the choice is saved, then the machine must restart.",audPending:"I2S DAC saved, waiting for the reboot.",audRescanHint:"Plug a USB sound card, then Scan."});
+Object.assign(T.fr,{audTitle:"Sortie audio",audOut:"Sortie",audDac:"DAC I2S",audApply:"Appliquer",audTest:"Son de test",audAuto:"Automatique (défaut de l'image)",audI2s:"DAC I2S…",audNoMon:"pas d'écran",audMissing:"La sortie enregistrée est absente : le défaut de l'image est utilisé.",audReboot:"Redémarrez pour charger l'overlay I2S.",audRebootBtn:"Redémarrer",audNone:"aucune",audPlat:"Machine",audHintI2s:"Un DAC I2S est lu au démarrage : le choix est enregistré, puis la machine doit redémarrer.",audPending:"DAC I2S enregistré, en attente du redémarrage.",audRescanHint:"Branchez une carte son USB, puis Rechercher."});
+const PLATS={rpi4:'Raspberry Pi 4',rpi5:'Raspberry Pi 5',jetson:'Jetson',x86:'x86 PC',other:'?'};
+let AUD=null,audBusy=false;
+function audRender(){const a=AUD;if(!a||audBusy)return;
+ $('#audPlat').textContent=t('audPlat')+': '+(PLATS[a.platform]||a.platform);
+ let o=`<option value="auto">${esc(t('audAuto'))}</option>`;
+ for(const k of a.kinds){const d=a.devices.filter(x=>x.kind===k.id&&x.offered);
+  o+=`<optgroup label="${esc(k.label)}">`+(d.length?d.map(x=>`<option value="${esc(x.id)}">${esc(x.label)}${x.connected===false?' ('+esc(t('audNoMon'))+')':''}</option>`).join(''):(k.id==='i2s'?'':`<option disabled>${esc(t('audNone'))}</option>`))+(k.id==='i2s'?`<option value="i2s">${esc(t('audI2s'))}</option>`:'')+`</optgroup>`}
+ const sel=$('#audOut'),cur=a.output==='i2s-pending'?'i2s':a.output;sel.innerHTML=o;
+ if([...sel.options].some(x=>x.value===cur))sel.value=cur;
+ $('#audDac').innerHTML=a.dacs.map(x=>`<option value="${esc(x.id)}">${esc(x.label)}</option>`).join('');if(a.dac)$('#audDac').value=a.dac;
+ audShowDac();
+ $('#audBanner').innerHTML=(a.missing?`<div class="banner bad">${esc(t('audMissing'))}</div>`:'')+(a.reboot?`<div class="banner">${esc(t('audReboot'))} <button type="button" id="audReb">${esc(t('audRebootBtn'))}</button></div>`:'');
+ const rb=$('#audReb');if(rb)rb.onclick=()=>{if(confirm(t('audRebootBtn')+'?'))post('/api/audio',{do:'reboot'})}}
+function audShowDac(){const i=$('#audOut').value==='i2s';$('#audDacRow').classList.toggle('hide',!i);$('#audHint').textContent=i?t('audHintI2s'):t('audRescanHint')}
+async function audLoad(){try{AUD=await (await fetch('/api/audio')).json();audRender()}catch(e){}}
+$('#audOut').onchange=audShowDac;$('#audOut').onfocus=()=>{audBusy=true};$('#audOut').onblur=()=>{audBusy=false};
+$('#audForm').onsubmit=async e=>{e.preventDefault();const r=await post('/api/audio',{do:'set',...Object.fromEntries(new FormData(e.target))});audBusy=false;audLoad()};
+$('#audTest').onclick=async()=>{const b=$('#audTest');b.disabled=true;await post('/api/audio',{do:'test'});b.disabled=false};
+$('#audScan').onclick=()=>{audBusy=false;audLoad()};
+const _applyLang=applyLang;applyLang=function(){_applyLang();audRender()};
+applyLang();showTab();if(TAB==="config"){savedList();audLoad()}refresh();poll();setInterval(refresh,4000);
 </script></body></html>
 """
