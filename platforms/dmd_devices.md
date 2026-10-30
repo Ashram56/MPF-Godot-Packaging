@@ -95,3 +95,8 @@ game's DMD must draw the ROM's shades at the same dots; a frame the file does no
 `ff730d`). Colour rotations run on libserum's timer. The colourisation file is its author's: it is never part of this
 repository; a game's bundle or install page brings it. Checked on a fake ZeDMD against a native Serum decoder on 21 PinMAME
 frames (19 identical, the other 2 not looked into); **not run on a real ZeDMD**.
+
+**Build tools (the builder only, never the machine that plays; declared here for every game)**: git, CMake >= 3.25, a C++17 compiler, and
+`zig` (`zig cc` / `zig c++`, 0.13 or later) to build for another CPU than the builder's (an arm64 Raspberry Pi 4 or Jetson from an x86_64 PC).
+A game's bundle build puts one feeder per CPU in the bundle (`game/native/bin/<arch>/zedmd_feed_serum`) and its launcher only runs it:
+nothing is compiled or generated on the target.

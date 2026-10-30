@@ -7,6 +7,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 OUT=$1; shift || true
 CC=${CC:-cc}; CXX=${CXX:-c++}
 if [ "${1:-}" != "--serum" ]; then $CC -O2 -Wall -o "$OUT" "$HERE/zedmd_feed.c"; exit 0; fi
+for t in git cmake; do command -v $t >/dev/null || { echo "build.sh --serum needs $t on the build box (build tools: git, CMake >= 3.25, a C++17 compiler; zig for another CPU)" >&2; exit 1; }; done
 W=${2:-$HERE/../../.cache/libserum}; mkdir -p "$W"; W=$(cd "$W" && pwd)
 LIBSERUM_REF=v2.8.0
 FRAMEUTIL_SHA=711ab21dcf9ad33d8db8339dfd3b1548bcc34cdb       # libserum's platforms/config.sh
