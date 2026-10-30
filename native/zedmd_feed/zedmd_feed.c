@@ -7,10 +7,6 @@
  *
  *   zedmd_feed [--port DEV] [--size WxH] [--brightness 0-15] [--probe]     exits when stdin closes; messages on stderr
  *   --probe: connect, say what the ZeDMD is, exit 0 (2 when none answers)
- *   --shades [--color RRGGBB]: frames are w x h bytes, one shade 0-15 per dot (a DMD's 16 shades), drawn as that colour
- *       (default ff730d) scaled by the shade
- *   --serum DIR --rom NAME (--shades, built with build.sh --serum): colour every frame with libserum from
- *       DIR/NAME/NAME.cROMc; a frame the file does not know stays in the plain colour; colour rotations run on libserum's timer
  *
  * Exit code 2: no ZeDMD found or the handshake failed (the caller then falls back to the Python platform).
  */
@@ -24,11 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <termios.h>
-#include <time.h>
 #include <unistd.h>
-#ifdef WITH_SERUM
-#include "serum_glue.h"
-#endif
 
 #define ZONE_W 8
 #define ZONE_H 4
@@ -207,16 +199,8 @@ static int connect_port(const char *named) {
 int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);       /* a closed stderr (Godot's pipe) must not kill the feeder; writes just fail */
     const char *port = NULL;
-    int brightness = -1, probe = 0, shades = 0;
-    const char *serum_dir = NULL, *serum_rom = NULL;
-    uint8_t ramp[16 * 3];
-    unsigned rgb0 = 0xff730d;
+    int brightness = -1, probe = 0;
     for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--shades")) shades = 1;
-        else if (!strcmp(argv[i], "--color") && i + 1 < argc) rgb0 = strtoul(argv[++i], NULL, 16);
-        else if (!strcmp(argv[i], "--serum") && i + 1 < argc) serum_dir = argv[++i];
-        else if (!strcmp(argv[i], "--rom") && i + 1 < argc) serum_rom = argv[++i];
-        else
         if (!strcmp(argv[i], "--port") && i + 1 < argc) port = argv[++i];
         else if (!strcmp(argv[i], "--size") && i + 1 < argc) sscanf(argv[++i], "%dx%d", &width, &height);
         else if (!strcmp(argv[i], "--probe")) probe = 1;
@@ -226,21 +210,6 @@ int main(int argc, char **argv) {
         fprintf(stderr, "bad size %dx%d\n", width, height);
         return 1;
     }
-    for (int n = 0; n < 16; n++) {
-        ramp[n * 3] = (rgb0 >> 16 & 255) * n / 15;
-        ramp[n * 3 + 1] = (rgb0 >> 8 & 255) * n / 15;
-        ramp[n * 3 + 2] = (rgb0 & 255) * n / 15;
-    }
-    if (serum_dir && (!shades || !serum_rom)) {
-        fprintf(stderr, "--serum needs --shades and --rom\n");
-        return 1;
-    }
-#ifndef WITH_SERUM
-    if (serum_dir) {
-        fprintf(stderr, "this zedmd_feed was built without Serum (build.sh --serum)\n");
-        return 1;
-    }
-#endif
     if (!connect_port(port)) {
         fprintf(stderr, "no ZeDMD found\n");
         return 2;
@@ -250,78 +219,32 @@ int main(int argc, char **argv) {
         uint8_t b = brightness > 15 ? 15 : brightness;
         command_block(CMD_BRIGHTNESS, &b, 1);
     }
-    size_t fsize = (size_t)width * height * 3;                  /* the RGB frame sent to the ZeDMD */
-    size_t isize = shades ? (size_t)width * height : fsize;     /* one input frame */
-    uint8_t *in = malloc(isize * 8), *src = malloc(isize), *last = malloc(fsize), *prev_ok = NULL;
-    int rotate_ms = 0, serum_on = 0;
-    (void)serum_on;
-    struct timespec rot_at = {0, 0};
-#ifdef WITH_SERUM
-    if (serum_dir) {
-        if (!serum_open(serum_dir, serum_rom, width, height)) return 1;
-        serum_on = 1;
-    }
-#endif
+    size_t fsize = (size_t)width * height * 3;
+    uint8_t *in = malloc(fsize * 8), *last = malloc(fsize), *prev_ok = NULL;
     size_t have = 0;
     int ok = 1;
     for (;;) {
         /* read what is there; while more waits, keep reading so that only the newest complete frame is sent */
         struct pollfd p = {0, POLLIN, 0};
-        int wait = 3000, rotate = 0;
-        if (rotate_ms > 0) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            wait = (rot_at.tv_sec - now.tv_sec) * 1000 + (rot_at.tv_nsec - now.tv_nsec) / 1000000;
-            if (wait < 0) wait = 0;
-        }
-        if (poll(&p, 1, wait) == 0) {
-            if (rotate_ms <= 0) continue;
-            rotate = 1;                         /* libserum's colour rotation is due */
-        }
+        if (poll(&p, 1, 3000) == 0) continue;
         int eof = 0;
-        while (!rotate) {
-            ssize_t r = read(0, in + have, isize * 8 - have);
+        do {
+            ssize_t r = read(0, in + have, fsize * 8 - have);
             if (r <= 0) { eof = 1; break; }
             have += r;
-            size_t whole = have / isize * isize;
+            size_t whole = have / fsize * fsize;
             if (whole) {
-                memcpy(src, in + whole - isize, isize);
-                prev_ok = src;
+                memcpy(last, in + whole - fsize, fsize);
+                prev_ok = last;
                 memmove(in, in + whole, have - whole);
                 have -= whole;
             }
             p.revents = 0;
-            if (!(poll(&p, 1, 0) > 0 && have < isize * 8)) break;
-        }
+        } while (poll(&p, 1, 0) > 0 && have < fsize * 8);
         if (eof && !prev_ok) break;
-        if (prev_ok || rotate) {
+        if (prev_ok) {
             static uint8_t *sent = NULL;
-            int black = 1, known = 0;
-            if (rotate) {
-#ifdef WITH_SERUM
-                serum_rotate(last, &rotate_ms);
-                known = 1;
-#endif
-            } else if (!shades) {
-                memcpy(last, src, fsize);
-            } else {
-                known = 0;
-#ifdef WITH_SERUM
-                if (serum_on) {
-                    int r = serum_colorize(src, last, &rotate_ms);
-                    known = r;                  /* 1 coloured, 2 the same frame as before: last stands */
-                    if (r == 0) rotate_ms = 0;
-                }
-#endif
-                if (known == 0)
-                    for (size_t i = 0; i < isize; i++) memcpy(last + i * 3, ramp + (src[i] & 15) * 3, 3);
-            }
-            if (rotate_ms > 0) {
-                clock_gettime(CLOCK_MONOTONIC, &rot_at);
-                rot_at.tv_nsec += (long)rotate_ms * 1000000L;
-                rot_at.tv_sec += rot_at.tv_nsec / 1000000000L;
-                rot_at.tv_nsec %= 1000000000L;
-            }
+            int black = 1;
             for (size_t i = 0; i < fsize && black; i++) black = last[i] == 0;
             if (!sent) sent = calloc(1, fsize), ok = 0;
             if (black) {

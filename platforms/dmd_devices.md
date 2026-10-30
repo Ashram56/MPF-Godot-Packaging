@@ -77,26 +77,6 @@ it wants:
 MPF's pin2dmd platform takes 128x32, 192x64 and 256x64. The native ZeDMD feeder is 128x32 only. Colour stays the game's
 business: without it the add-on sends one colour scaled by brightness. Not run on a device.
 
-## Colour with Serum on a ZeDMD (native feeder)
+## Colourising a game's DMD (the game's job)
 
-`zedmd_feed` can colour the classic 128x32 DMD with [libserum](https://github.com/PPUC/libserum) (the library the PinMAME,
-VPX and ZeDMD tools use; GPL v2, so a feeder built with it is GPL v2), with no Python and no MPF in the picture path:
-
-```sh
-native/zedmd_feed/build.sh zedmd_feed --serum         # clones libserum v2.8.0 + libframeutil (pinned), CMake, links; ~20 s on 4 cores
-# cross compiling on the build box (never on a Raspberry Pi): CC="zig cc -target aarch64-linux-gnu" CXX="zig c++ -target aarch64-linux-gnu" ...
-godot --path GAME -- --zedmd --zedmd-feed=$PWD/zedmd_feed --zedmd-shades      # (the feeder is started by the add-on)
-zedmd_feed --shades --serum ALTCOLOR_DIR --rom NAME [--color 2a6cff]
-```
-
-`--zedmd-shades` makes the add-on pipe one shade (0-15) per dot instead of RGB; `--serum DIR --rom NAME` loads
-`DIR/NAME/NAME.cROMc`. libserum identifies a frame by the dots its comparison mask keeps (not by the whole picture), so the
-game's DMD must draw the ROM's shades at the same dots; a frame the file does not know stays in `--color` (default
-`ff730d`). Colour rotations run on libserum's timer. The colourisation file is its author's: it is never part of this
-repository; a game's bundle or install page brings it. Checked on a fake ZeDMD against a native Serum decoder on 21 PinMAME
-frames (19 identical, the other 2 not looked into); **not run on a real ZeDMD**.
-
-**Build tools (the builder only, never the machine that plays; declared here for every game)**: git, CMake >= 3.25, a C++17 compiler, and
-`zig` (`zig cc` / `zig c++`, 0.13 or later) to build for another CPU than the builder's (an arm64 Raspberry Pi 4 or Jetson from an x86_64 PC).
-A game's bundle build puts one feeder per CPU in the bundle (`game/native/bin/<arch>/zedmd_feed_serum`) and its launcher only runs it:
-nothing is compiled or generated on the target.
+The DMD is part of the game, so a colourisation (Serum or any other) belongs to the game, not to this platform. `zedmd_feed` stays the plain feeder: 12288-byte RGB frames of 128x32 on stdin, nothing else. A game puts its own colouriser in front of it: a program the game builds, that reads the add-on's frames (`--zedmd-feed=PROGRAM`), colours them and pipes RGB frames to the `zedmd_feed` it starts itself. Tron Legacy's is `game/native/dmd_serum` (libserum, GPL v2; Tron-Legacy-MPF docs/hardware.md, "Serum colour on a ZeDMD"). Like every native tool, it is built offline per CPU with the game's bundle; nothing is compiled on the machine that plays.
