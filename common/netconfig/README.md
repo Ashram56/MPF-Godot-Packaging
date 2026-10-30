@@ -10,6 +10,7 @@ Shared by every image (Raspberry Pi 4, Jetson Xavier NX, x86 mini PC). Standard 
 | `mpf_common.py` | Settings read from the environment and `/etc/mpf-readonly.conf`, the writable-window helper for read-only mode |
 | `mpf_games.py` | Everything about games: install, versions, the active game, PuP Packs, settings, start and stop, the inbox |
 | `mpf_monitor.py` | Switch monitor (BCP client of the running game) and saved log snapshots |
+| `mpf_contract.py` | Bundle format 2: refuses a bundle that carries a command, detects the board, keeps a game's settings (`.platform/settings.json`), composes its start (MPF configs, Godot arguments, ini keys, `MPF_PUP_PACK`, `MPF_ADDONS`) from the bundle's facts |
 | `mpf_bundlecheck.py` | Can this bundle start? Import check of the start chain and `run.check`, used by the builder and by the installer before anything is changed |
 | `mpf_dmd.py` | DMD output (auto, LCD, PIN2DMD, ZeDMD via dmd_bridge) and the Serum colourisation library, assignable per game; the launcher arguments the game gets (`dmd.json` in the state folder, files in `/data/serum/<rom>/`) |
 | `mpf_ota.py` | Updates of games and PuP Packs from a WebDAV folder (list, download, install; address, user and password kept in `ota.json`, mode 0600) |

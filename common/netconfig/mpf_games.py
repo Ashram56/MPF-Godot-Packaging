@@ -1,6 +1,8 @@
 """Games on an MPF image: install a bundle, keep several, pick the active one, install a PuP Pack, start it. Standard library only.
 
-A game is a *bundle* (common/games/README.md): a folder with a bundle.json that says what it is and how to start it. Any number can
+A game is a *bundle* (common/games/README.md): a folder with a bundle.json that says what it is. A format 2 bundle (mpf_contract.py,
+platforms/game-bundles.md) holds files and facts only and the platform starts it; format 1 bundles (`run.start`, `options.tool`,
+`pup.install`: commands of the game run by the platform) still start until they are rebuilt. Any number can
 be installed side by side, each in `<MPF_GAMES_DIR>/<id>@<version>/`; one of them is *active* (the one mpf-game.service starts).
 Nothing here knows a particular game: what a bundle needs from the base system, how it starts, where its PuP Pack goes and what
 the operator can set are all read from its bundle.json.
@@ -22,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpf_audio as AU  # noqa: E402
 import mpf_bundlecheck as BC  # noqa: E402
 import mpf_common as C  # noqa: E402
+import mpf_contract as K  # noqa: E402
 import mpf_dmd as DMD  # noqa: E402
 from mpf_common import run  # noqa: E402
 
@@ -92,6 +95,10 @@ def venv_python():
 def trial(root, b):
     """What keeps the unpacked bundle in `root` from starting: its imports (common/netconfig/mpf_bundlecheck.py) and the game's own
     `run.check`. [] when it can start. Nothing is installed yet: a failure leaves the game that was running as it was."""
+    if K.is_v2(b):
+        bad = K.problems(b, root)
+        game_dir = os.path.join(root, b.get("game_dir") or "game")
+        return bad or BC.problems(root, venv_python(), b, starts=BC.python_files(game_dir))
     bad = BC.problems(root, venv_python(), b)
     cmd = BC.check_command(b)
     if cmd and not bad:
@@ -204,9 +211,26 @@ def delete_game(folder):
 
 
 # ---------------------------------------------------------------- settings of a game (the bundle's own tool)
-def options_tool(game):
-    """Path of the bundle's settings tool, or None when the bundle has none."""
+def has_settings(game):
     b = read_bundle(game) or {}
+    if K.is_v2(b):
+        return bool((b.get("settings") or {}).get("schema"))
+    return bool(options_tool(game))
+
+
+def settings_values(game):
+    """{option: value} saved for a game (format 2: by the platform; format 1: by the bundle's tool)."""
+    b = read_bundle(game) or {}
+    if K.is_v2(b):
+        return K.saved(game)
+    return json.loads(tool(game, "get").stdout or "{}")
+
+
+def options_tool(game):
+    """Path of the bundle's settings tool (format 1), or None when the bundle has none."""
+    b = read_bundle(game) or {}
+    if K.is_v2(b):
+        return None
     rel = (b.get("options") or {}).get("tool", DEFAULT_OPTIONS_TOOL)
     p = os.path.join(game, rel)
     return p if os.path.isfile(p) else None
@@ -222,7 +246,10 @@ def tool(game, *args):
 
 def settings_schema(game):
     """The bundle's settings schema as this board sees it: its tool narrows the choices the board's profile limits
-    (platforms/README.md, Platform limits); the file itself if the tool cannot run."""
+    (platforms/README.md, Platform limits); the file itself if the tool cannot run. Format 2: the platform narrows it (mpf_contract)."""
+    b = read_bundle(game) or {}
+    if K.is_v2(b):
+        return K.schema(game, b)
     try:
         return json.loads(tool(game, "list").stdout)
     except ValueError:
@@ -232,7 +259,7 @@ def settings_schema(game):
 
 def settings_save(game, form):
     schema = settings_schema(game)
-    cur = json.loads(tool(game, "get").stdout or "{}")
+    cur = settings_values(game)
     sets, unsets = [], []
     for o in schema["options"]:
         v = form.get("o." + o["id"], "").strip()
@@ -240,6 +267,9 @@ def settings_save(game, form):
             sets += [o["id"], v]
         elif o["id"] in cur and not o.get("secret"):
             unsets.append(o["id"])
+    if K.is_v2(read_bundle(game) or {}):
+        K.set_values(game, read_bundle(game), list(zip(sets[::2], sets[1::2])), unsets)
+        return
     if sets:
         r = tool(game, "set", *sets)
         if r.returncode:
@@ -251,17 +281,25 @@ def settings_save(game, form):
 def pup_dirs(b):
     """Folders of a bundle that hold a PuP Pack and its converted media (written once, then only read)."""
     pup = b.get("pup") or {}
+    if K.is_v2(b):
+        return {os.path.normpath(K.PUP_LINK)} if pup else set()
     return {os.path.normpath(p) for p in (pup.get("pack_dir"), pup.get("media_dir")) if p}
+
+
+def pack_dir(b):
+    """The folder of a game that holds its PuP Pack (format 2: the platform's link)."""
+    return K.PUP_LINK if K.is_v2(b) else (b.get("pup") or {}).get("pack_dir")
 
 
 def pup_installed(game, b=None):
     b = b or read_bundle(game) or {}
-    d = (b.get("pup") or {}).get("pack_dir")
+    d = pack_dir(b)
     return bool(d) and os.path.isdir(os.path.join(game, d))
 
 
 def first_run_defaults(game, b):
-    """No PuP until a pack is installed, and start at power-on: only for what nobody set yet."""
+    """No PuP until a pack is installed, and start at power-on: only for what nobody set yet. Format 2: nothing to set (the game sees
+    MPF_PUP_PACK or not)."""
     if options_tool(game) and b.get("pup"):
         try:
             have = json.loads(tool(game, "get").stdout or "{}")
@@ -278,6 +316,8 @@ def first_run_defaults(game, b):
 def board_profile(game, b):
     """The bundle's settings for this board (bundle.json "profiles", picked from the device tree by the bundle's own
     tool): applied once, only to what nobody set; the tool's lines go to the job log."""
+    if K.is_v2(b):
+        return              # format 2: the platform applies the profile of this board at each start (mpf_contract.plan)
     cmd = b.get("profiles", {}).get("apply")
     if not cmd:
         return
@@ -413,7 +453,7 @@ def install_game(archive, expect_sha, keep_old=True):
         raise JobError("not a game bundle: no bundle.json in the archive")
     root = os.path.join(stage, dirs[0])
     b = json.load(open(os.path.join(root, "bundle.json")))
-    if b.get("format", 1) > 1:
+    if b.get("format", 1) > K.FORMAT:
         raise JobError(f"bundle format {b.get('format')} is newer than this page understands")
     check_identity(b)
     tgt, me = b.get("target", {}), C.ARCH.get(platform.machine(), platform.machine())
@@ -433,7 +473,7 @@ def install_game(archive, expect_sha, keep_old=True):
     dest = os.path.join(C.GAMES, folder)
     old = dest + ".old"
     shutil.rmtree(old, ignore_errors=True)
-    keep = b.get("keep_on_update", [])
+    keep = b.get("keep_on_update", []) + ([K.PLATFORM_DIR] if K.is_v2(b) else [])
     if os.path.isdir(dest):         # the same version again: it is replaced, what it kept moves to the new copy
         job_set(msg="Keeping settings, scores and PuP Pack")
         for rel in keep:
@@ -504,6 +544,11 @@ def install_pup(zipfile, folder=None, remove=True):
     b = read_bundle(game)
     if not b.get("pup"):
         raise JobError("this game has no PuP Pack support")
+    if K.is_v2(b):          # format 2: the pack goes to the library and is assigned, nothing of the game runs
+        name = pup_store(zipfile, os.path.basename(zipfile)) if remove else os.path.basename(zipfile)
+        if not remove:
+            shutil.copy(zipfile, pup_zip(name))
+        return assign_pup(folder or os.path.basename(game), name)
     job_set(state="running", msg="Installing the PuP Pack (videos are checked, a few minutes)")
     run_pup_installer(game, b, zipfile)
     if remove:
@@ -619,7 +664,7 @@ def extract_pup_zip(src, b, lib):
     """`pup.extract_only` games: the author's zip is only unpacked, into the pack folder of the library (the folder holding triggers.pup,
     at any depth). No script of the game runs: what the game derives from the pack (its media folder) is already in the bundle."""
     import zipfile as zf
-    store = os.path.join(lib, _pup_store_name(os.path.normpath(b["pup"]["pack_dir"])))
+    store = os.path.join(lib, _pup_store_name(os.path.normpath(pack_dir(b))))
     try:
         z = zf.ZipFile(src)
     except zf.BadZipFile:
@@ -658,7 +703,7 @@ def assign_pup(folder, name):
     dirs = sorted(pup_dirs(b))
     lib = os.path.join(C.PUPS, "installed", _pup_key(name, b))
     if not os.path.isdir(lib) or not os.listdir(lib):
-        if b["pup"].get("extract_only"):
+        if b["pup"].get("extract_only") or K.is_v2(b):
             job_set(state="running", msg="Unpacking the PuP Pack (a few minutes)")
             os.makedirs(lib, exist_ok=True)
             extract_pup_zip(src, b, lib)
@@ -684,7 +729,7 @@ def assign_pup(folder, name):
     sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", lib)
     if options_tool(game):
         tool(game, "set", "pup.enabled", "true")
-    job_set(state="done", msg="PuP Pack assigned" + (" (restart the game)" if b["pup"].get("needs_restart") else ""))
+    job_set(state="done", msg="PuP Pack assigned" + (" (restart the game)" if b["pup"].get("needs_restart") or K.is_v2(b) else ""))
 
 
 def unassign_pup(folder):
@@ -897,9 +942,41 @@ def platform_command(game, b, env):
     return argv, game
 
 
+def contract_command(game, b, env):
+    """Format 2: the platform starts the game from the bundle's facts (mpf_contract.plan): Godot then MPF through mpf_godot/launcher.py,
+    with the board's Godot arguments (MPF_GAME_ARGS), the DMD output's and the settings'. Returns (argv, cwd, extra environment)."""
+    P = K.plan(game, b)
+    K.apply_ini(game, P["ini"])
+    os.makedirs(P["env"]["MPF_GAME_DATA"], exist_ok=True)
+    if os.geteuid() == 0:           # composed as root, before the service drops to the game user: what it wrote is the game user's
+        pw = pwd.getpwnam(C.USER)
+        for rel in [os.path.join(K.PLATFORM_DIR, "data")] + list(P["ini"]):
+            if os.path.exists(os.path.join(game, rel)):
+                os.chown(os.path.join(game, rel), pw.pw_uid, pw.pw_gid)
+    argv = [game_python(), "-m", "mpf_godot", "run", P["game_dir"], "-c", ",".join(P["configs"])]
+    pre, dmd = DMD.plan(os.path.basename(game).split("@")[0], b)
+    head, engine, user = split_board_args(shlex.split(env.get("MPF_GAME_ARGS", "")))
+    argv += head + ["--"] + engine + ["--"] + user + P["godot_args"] + pre + dmd
+    return argv, game, P["env"]
+
+
+def split_board_args(args):
+    """MPF_GAME_ARGS is `[launcher options] -- [Godot engine options] [-- Godot user arguments]`: the three parts."""
+    if "--" not in args:
+        return args, [], []
+    i = args.index("--")
+    head, rest = args[:i], args[i + 1:]
+    if "--" not in rest:
+        return head, rest, []
+    j = rest.index("--")
+    return head, rest[:j], rest[j + 1:]
+
+
 def game_command(game, b, env):
     """(argv, cwd) that starts a bundle: its run.start (default: the game package's start.py) plus MPF_GAME_ARGS from /etc/default/mpf-game."""
     run_ = b.get("run") or {}
+    if K.is_v2(b):
+        return contract_command(game, b, env)[:2]
     if run_.get("mode") == "platform":
         return platform_command(game, b, env)
     argv = shlex.split(run_.get("start") or DEFAULT_START)
@@ -946,7 +1023,11 @@ def game_exec():
     volatile_game_dirs(game)
     xdg = ram_xdg_env()
     audio = AU.prepare()          # the sound output chosen on the page (root: it writes in /run)
-    argv, cwd = game_command(game, b, env)
+    extra = {}
+    if K.is_v2(b):
+        argv, cwd, extra = contract_command(game, b, env)
+    else:
+        argv, cwd = game_command(game, b, env)
     os.chdir(cwd)
     os.setgroups(os.getgrouplist(C.USER, pw.pw_gid))
     os.setgid(pw.pw_gid)
@@ -956,7 +1037,8 @@ def game_exec():
     child = dict(os.environ, HOME=pw.pw_dir, USER=C.USER, DISPLAY=env.get("DISPLAY", ":0"),
                  XAUTHORITY=env.get("XAUTHORITY", xauth), **xdg, **audio, **game_environment(b, env))
     child["MPF_DMD_OUTPUT"] = DMD.LAST       # lcd | pin2dmd | zedmd: a game hides its on-screen DMD when it is not lcd
-    if (b.get("run") or {}).get("mode") == "platform":
+    child.update(extra)                      # format 2: MPF_BOARD, MPF_GAME_DATA, MPF_PUP_PACK, MPF_ADDONS
+    if K.is_v2(b) or (b.get("run") or {}).get("mode") == "platform":
         root = C.PLATFORM_DIR or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         child["PYTHONPATH"] = root + (os.pathsep + child["PYTHONPATH"] if child.get("PYTHONPATH") else "")
         child.update({str(k): str(v) for k, v in ((b.get("launch") or {}).get("env") or {}).items()})

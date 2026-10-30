@@ -93,7 +93,7 @@ def cover_file(g):
         found = icon
     if not found:
         found = inside(str((b.get("monitor") or {}).get("image") or "game/monitor/playfield.jpg"))
-    pack = (b.get("pup") or {}).get("pack_dir")
+    pack = G.pack_dir(b) if b.get("pup") else None
     if not found and pack and os.path.isdir(os.path.join(g["path"], pack)):
         best, vids = (0, None), []
         for f in _walk_files(os.path.join(g["path"], pack)):
@@ -144,7 +144,7 @@ def state():
             "folder": g["folder"], "id": g["id"], "name": g["name"], "version": g["version"], "active": g["active"],
             "description": str(b.get("description", ""))[:300], "icon": game_icon(g),
             "pup": {"supported": bool(b.get("pup")), "installed": G.pup_installed(g["path"], b), "assigned": G.pup_assigned(g["path"], b)},
-            "settings": bool(G.options_tool(g["path"])),
+            "settings": G.has_settings(g["path"]),
             "installed": int(g["mtime"]), "built": str(b.get("built") or ""),
         })
     for g in games:         # the newest of each game (by build date, else by install date): the others are older versions
@@ -173,7 +173,7 @@ def settings_form(game):
     """The settings of a game as a form, built from the bundle's own schema (the board's limits already applied)."""
     try:
         schema = G.settings_schema(game)
-        cur = json.loads(G.tool(game, "get").stdout or "{}")
+        cur = G.settings_values(game)
     except (OSError, ValueError):
         return "<p>Settings unavailable.</p>"
     out = []

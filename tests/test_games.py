@@ -19,6 +19,7 @@ def make_bundle(path, gid="demo", version="1.0", name="Demo", extra=None, files=
     b = {"format": 1, "id": gid, "name": name, "version": version, "target": {"os": "linux", "arch": arch},
          "run": {"start": "echo hi"}, "keep_on_update": ["game/data", "pup_pack"], "pup": {"pack_dir": "pup_pack/p", "media_dir": "pup_media/p"}}
     b.update(extra or {})
+    b = {k: v for k, v in b.items() if v is not None}      # None: a key the test wants left out
     with tarfile.open(path, "w:xz") as tf:
         def add(rel, data):
             ti = tarfile.TarInfo(f"{gid}/{rel}")
