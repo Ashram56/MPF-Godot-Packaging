@@ -11,6 +11,7 @@ Shared by every image (Raspberry Pi 4, Jetson Xavier NX, x86 mini PC). Standard 
 | `mpf_games.py` | Everything about games: install, versions, the active game, PuP Packs, settings, start and stop, the inbox |
 | `mpf_monitor.py` | Switch monitor (BCP client of the running game) and saved log snapshots |
 | `mpf_bundlecheck.py` | Can this bundle start? Import check of the start chain and `run.check`, used by the builder and by the installer before anything is changed |
+| `mpf_dmd.py` | DMD output (auto, LCD, PIN2DMD, ZeDMD via dmd_bridge) and the Serum colourisation library, assignable per game; the launcher arguments the game gets (`dmd.json` in the state folder, files in `/data/serum/<rom>/`) |
 | `mpf_ota.py` | Updates of games and PuP Packs from a WebDAV folder (list, download, install; address, user and password kept in `ota.json`, mode 0600) |
 | `mpf_web.py` | The page (one HTML file, English and French) and its HTTP routes |
 | `mpf-netconfig-*.service`, `mpf-game.service` | systemd units: apply, web, ap, inbox, and the game |

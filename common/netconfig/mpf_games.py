@@ -21,6 +21,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpf_bundlecheck as BC  # noqa: E402
 import mpf_common as C  # noqa: E402
+import mpf_dmd as DMD  # noqa: E402
 from mpf_common import run  # noqa: E402
 
 JOB = {"state": "idle", "msg": "", "log": ""}      # one install at a time; the page polls /job
@@ -878,7 +879,7 @@ def game_command(game, b, env):
     argv = shlex.split(run_.get("start") or DEFAULT_START)
     argv[0] = resolve_program(argv[0])
     if wants_game_args(b):
-        argv += shlex.split(env.get("MPF_GAME_ARGS", ""))
+        argv += DMD.merge_args(shlex.split(env.get("MPF_GAME_ARGS", "")), os.path.basename(game).split("@")[0], b)
     return argv, os.path.normpath(os.path.join(game, run_.get("cwd") or "."))
 
 
