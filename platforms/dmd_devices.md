@@ -43,8 +43,60 @@ godot --path GAME -- --zedmd --zedmd-feed=$PWD/zedmd_feed # MPF with examples/dm
    virtual platform, and the game must not also send `--proc-dmd`-style frames.
 4. To check on hardware: the PIN2DMD's colour order (`panel: rbg` swaps green and blue) and its firmware's "virtual
    pinball" mode; the ZeDMD's port, firmware 5.x, colour order, and the brightness command's payload (a guess).
-5. Colour pictures (a colourisation) are out of scope here: this add-on only ever sends one colour scaled by
+5. A ZeDMD on a Raspberry Pi Pico 2 (firmware 6.1.3) announces a write size of 512 and reads everything in 512-byte blocks,
+   the handshake included: one 64-byte handshake is answered only after the eighth (leftovers stay buffered between opens), so
+   a probe succeeded about one time in four. Observed on a real one. The handshake is sent eight times in one write now
+   (native feeder, `zedmd_native.py`, `dmd_panel.py`); a 64-byte-block firmware answers the first and the rest is dropped.
+6. Godot's `OS.execute_with_pipe` returns stdio, stderr and pid: a caller that keeps only stdio lets the stderr pipe close, and the
+   feeder's first message ended it with SIGPIPE ("zedmd_feed stopped" right after the start, seen on the x86 mini PC). The
+   add-on keeps stderr open and the feeder ignores SIGPIPE.
+7. Colour pictures (a colourisation) are out of scope here: this add-on only ever sends one colour scaled by
    brightness.
+
+## Serum colour (ZeDMD, native feeder)
+
+A game's 128x32 DMD can be coloured by a Serum colourisation (a `.cRZ` or `.cROM` file, made with the Serum tools; the
+file is the colourisation author's, never part of this repository). The platform loads **libserum as it is**, without
+any change, in the native feeder:
+
+```
+game (Godot, addons/dmd_out)  --4096 shades (0-15)-->  native/zedmd_feed --serum LIB DIR ROM  -->  libserum  -->  ZeDMD
+```
+
+| Step | What |
+|---|---|
+| `native/serum/build_libserum.sh [OUT]` | fetches PPUC/libserum (tag v2.8.2, GPL-2.0) and libframeutil's header and builds the library untouched; prints its path (`libserum64.so`, `.dylib` on a Mac). Needs git, cmake, a C++ compiler. |
+| `dmd_out` with `--zedmd-shades` | sends the classic 128x32 picture as one byte (the shade 0-15) a dot; `--zedmd-feed-arg=X` passes `X` to the feeder, once per argument. `--zedmd=#RRGGBB` is the single colour. |
+| `zedmd_feed --shades [--color RRGGBB] --serum LIB DIR ROM` | `LIB` libserum's shared library (loaded with dlopen), `DIR` the folder that holds `ROM/ROM.cRZ` (or `.cROM`), `ROM` the colourisation's name. Each frame goes through `Serum_Colorize`; version 2 pictures (RGB565, 32p) and version 1 pictures (palette) are sent, colour rotations run on libserum's timer. A frame that Serum does not know (or a colourisation that is missing) keeps the single colour. |
+
+Example (a game whose colourisation is `DIR/rom/rom.cRZ`):
+
+```sh
+godot --path GAME -- --zedmd=#2a6cff --zedmd-shades --zedmd-feed=$PWD/zedmd_feed \
+    --zedmd-feed-arg=--serum --zedmd-feed-arg=$PWD/libserum64.so --zedmd-feed-arg=DIR --zedmd-feed-arg=rom
+```
+
+Checked: the feeder's tests use a stand-in library with libserum's C names (`tests/test_zedmd_feed.py`) and, with
+`LIBSERUM=<built library>`, the real library for a colourisation that is not there. **Not checked with a real
+colourisation file or on a real ZeDMD yet.** 256x64 (extra) pictures are not used: the feeder asks libserum for 32p
+frames; a ZeDMD HD needs another step. A Serum file keyed on the ROM's own frames needs the game to show exactly the
+ROM's pictures (a game whose DMD differs from the ROM's, for example an HD or changed font, gets no match).
+
+## PPUC's libzedmd and libserum: `dmd_bridge`
+
+Preferred over `zedmd_feed`'s own copy of the ZeDMD protocol (owner's choice, 2026-10-30: the lighter library, `libzedmd`, not
+`libdmdutil`). Both PPUC libraries are used **unmodified**; the bridge only reads frames and hands them over.
+
+| Step | What |
+|---|---|
+| `native/libzedmd/build_libzedmd.sh [OUT]` | clones PPUC/libzedmd at the pinned commit (`LIBZEDMD_SHA`) and runs its own `platforms/<os>/<arch>/external.sh` (cargs, libserialport, libframeutil, sockpp). A shim makes PPUC's `curl` archive downloads work through `git` (networks that only allow git). Needs git, cmake, a C++ compiler, autoconf/automake/libtool. One build per CPU (x64, aarch64, arm64 on a Mac); about half a minute. |
+| `native/serum/build_libserum.sh [OUT]` | libserum v2.8.2, loaded by the bridge at run time (`dlopen`). |
+| `native/dmd_bridge/build.sh [DIR]` | builds `dmd_bridge`: it reads 128x32 frames of shades (one byte, 0-15) on stdin and draws them with `ZeDMD::RenderRgb888`; with `--serum-lib LIB --rom NAME --altcolor DIR` (`DIR/NAME/NAME.cRZ`, `.cROM` or `.cROMc`) libserum colours the frames it knows (v1 palette, v2 RGB565 32p), the others keep `--color RRGGBB`, rotations run on libserum's timer. `--probe`, `--device PORT`, `--wifi ADDR`, `--brightness`, `--rgb-out FILE` (tests, no ZeDMD). |
+| `dmd_out` | `--zedmd=#RRGGBB --zedmd-shades --zedmd-feed=DIR/dmd_bridge --zedmd-feed-arg=--serum-lib --zedmd-feed-arg=LIB --zedmd-feed-arg=--rom --zedmd-feed-arg=NAME --zedmd-feed-arg=--altcolor --zedmd-feed-arg=DIR` |
+
+Checked: built on x86_64; `tests/test_dmd_bridge.py` (`LIBZEDMD_DIR=<output>`, optionally `LIBSERUM`, `SERUM_ALTCOLOR`, `SERUM_ROM`) and
+a manual run that loads a real `.cROMc` (5211 frames, Serum v2). Not checked on a real ZeDMD with this bridge yet, nor built for aarch64.
+The PIN2DMD is not covered (libzedmd drives the ZeDMD only): MPF's `pin2dmd` platform stays for it.
 
 ## Choosing the device
 
@@ -76,3 +128,7 @@ it wants:
 
 MPF's pin2dmd platform takes 128x32, 192x64 and 256x64. The native ZeDMD feeder is 128x32 only. Colour stays the game's
 business: without it the add-on sends one colour scaled by brightness. Not run on a device.
+
+## Choosing the output on a machine
+
+On the images the output is a setting of the setup page ("Sortie DMD", `common/netconfig/mpf_dmd.py`): auto (a PIN2DMD or ZeDMD when one answers at the game's start, else the screen), LCD, PIN2DMD (128x32 monochrome from Godot) or ZeDMD (dmd_bridge, libzedmd; colour with a Serum colourisation uploaded on the page and assigned per game). One output at a time. What a game bundle must do for it: `game-bundles.md`, "Who launches the game, and the DMD output".

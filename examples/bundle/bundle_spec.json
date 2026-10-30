@@ -1,21 +1,27 @@
 {
+  "format": 2,
   "id": "mygame",
   "name": "My Game (Stern 20xx), MPF recreation",
   "game_dir": "game",
   "git_tracked": ["game"],
   "git_exclude": ["game/addons/"],
   "copy": [
-    "scripts/run.py",
     "game/config/rom", "game/sounds", "game/media", "game/fonts_ttf/baked",
-    "assets/rom_data/io", "assets/rom_data/settings"
+    "settings.json", "pup/manifest.json", "addons/pup_art"
   ],
-  "never": ["game/data", "game/audits", "game/logs", "game/options.json", "game/.godot"],
+  "optional": ["pup/manifest.json", "addons/pup_art"],
+  "never": ["game/data", "game/audits", "game/logs", "game/.godot"],
   "never_names": ["*.local.cfg", "machine_vars.yaml"],
   "import_seed": [
     {"dir": "game/media/dmd_hd", "template": "game/media/hd_frame.import.template", "skip_prefixes": ["solid", "hollow"]}
   ],
-  "platform_addons": ["gde_gozen"],
-  "requires": {"python": ">=3.10", "programs": ["ffmpeg"]},
-  "run": {"start": "python3 scripts/run.py", "cwd": "."},
-  "keep_on_update": ["game/data", "game/audits", "game/logs", "game/options.json", "game/pup.local.cfg"]
+  "platform_addons": ["gde_gozen", "mpf-gmc", "dmd_out"],
+  "requires": {"python": ">=3.10"},
+  "mpf": {"configs": ["config"], "hardware": {"virtual": ["hw_virtual"], "proc": ["hw_proc"]}},
+  "dmd": {"rom": "mygame_100", "size": "128x32"},
+  "pup": {"rom": "mygame_100", "manifest": "pup/manifest.json"},
+  "addons": [{"id": "pup_art", "dir": "addons/pup_art", "setting": "dmd.mode", "when": "hd"}],
+  "settings": {"schema": "settings.json"},
+  "profiles": {"rpi4": {"limits": {"dmd.mode": ["classic"]}, "defaults": {"dmd.mode": "classic"}}},
+  "keep_on_update": ["game/data", "game/audits"]
 }
