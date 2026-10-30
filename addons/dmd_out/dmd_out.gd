@@ -33,6 +33,7 @@ var _last := PackedByteArray()
 var _elapsed := 0.0
 var _feed: FileAccess = null           # the feeder's stdin
 var _feed_pid := 0
+var _feed_err: FileAccess = null       # the feeder's stderr
 
 
 func _ready() -> void:
@@ -85,6 +86,7 @@ func _start_feed(path: String) -> void:
 		push_warning("zedmd_feed did not start: " + path)
 		return
 	_feed = run["stdio"]
+	_feed_err = run["stderr"]          # kept open: a closed pipe would end the feeder with SIGPIPE at its first message
 	_feed_pid = run["pid"]
 
 

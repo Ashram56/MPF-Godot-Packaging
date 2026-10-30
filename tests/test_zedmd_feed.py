@@ -165,6 +165,18 @@ class TestFeed(unittest.TestCase):
         got = self.run_shades(["--color", "ff0000", "--serum", os.environ["LIBSERUM"], self.dir, "nothing"], self.shades([(9, 5, 15)]))
         self.assertEqual(b"".join(wire(pk) for pk in z.zone_packets(frame([(9, 5, (255, 0, 0))]), None, W, H)), got)
 
+    def test_survives_a_closed_stderr(self):
+        """Godot's OS.execute_with_pipe may drop the stderr pipe: the first message must not end the feeder (SIGPIPE)."""
+        p = subprocess.Popen([self.exe, "--port", self.port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        p.stderr.close()
+        try:
+            self.serve(lambda: len(self.writes) >= 8, 3)                        # handshake; "ZeDMD 128x32 ..." is printed
+            self.serve(lambda: False, 0.5)
+            self.assertIsNone(p.poll())
+        finally:
+            p.stdin.close()
+            p.wait(5)
+
     def test_no_zedmd_exits_2(self):
         r = subprocess.run([self.exe, "--port", "/dev/null"], stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
         self.assertEqual(2, r.returncode)

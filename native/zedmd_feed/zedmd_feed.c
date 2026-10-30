@@ -20,6 +20,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -290,6 +291,7 @@ static int load_serum(const char *lib, const char *dir, const char *rom) {
 }
 
 int main(int argc, char **argv) {
+    signal(SIGPIPE, SIG_IGN);                   /* a caller that closes our stderr must not kill us on a message */
     const char *port = NULL;
     int brightness = -1, probe = 0, shades = 0;
     const char *lib = NULL, *serum_dir = NULL, *serum_rom = NULL;

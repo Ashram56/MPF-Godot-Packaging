@@ -47,7 +47,10 @@ godot --path GAME -- --zedmd --zedmd-feed=$PWD/zedmd_feed # MPF with examples/dm
    the handshake included: one 64-byte handshake is answered only after the eighth (leftovers stay buffered between opens), so
    a probe succeeded about one time in four. Observed on a real one. The handshake is sent eight times in one write now
    (native feeder, `zedmd_native.py`, `dmd_panel.py`); a 64-byte-block firmware answers the first and the rest is dropped.
-6. Colour pictures (a colourisation) are out of scope here: this add-on only ever sends one colour scaled by
+6. Godot's `OS.execute_with_pipe` returns stdio, stderr and pid: a caller that keeps only stdio lets the stderr pipe close, and the
+   feeder's first message ended it with SIGPIPE ("zedmd_feed stopped" right after the start, seen on the x86 mini PC). The
+   add-on keeps stderr open and the feeder ignores SIGPIPE.
+7. Colour pictures (a colourisation) are out of scope here: this add-on only ever sends one colour scaled by
    brightness.
 
 ## Serum colour (ZeDMD, native feeder)
