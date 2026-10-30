@@ -5,6 +5,9 @@ extends Node
 ##   godot --path GAME -- --pin2dmd[=#RRGGBB]                          frames to MPF as "rgb_dmd_frame"
 ##   godot --path GAME -- --zedmd[=#RRGGBB]                            the same, for the zedmd_native platform
 ##   godot --path GAME -- --zedmd --zedmd-feed=/path/to/zedmd_feed    frames piped to the native feeder, not to MPF
+##   ... --zedmd-shades --zedmd-feed-arg=--serum --zedmd-feed-arg=LIB ...   the feeder gets the 128x32 DMD as 4096 shades (0-15),
+##       one byte a dot, and the feeder's own arguments (--zedmd-feed-arg=, repeated): native/zedmd_feed colours it with
+##       Serum (platforms/dmd_devices.md, "Serum colour")
 ## MPF needs the matching overlay (examples/dmd_devices/). Each changed frame (up to FPS a second) is 12288 bytes, three
 ## per dot, row by row, rgb_dmds "default". Monochrome: the picture's brightness (0-15, as a DMD's 16 shades) scales
 ## one colour (16 shades for the 128x32 classic dots, 8 bits for 192x64, 256x64 and the HD picture), #RRGGBB (default #ff730d, a DMD's orange). platforms/dmd_devices.md.
@@ -19,6 +22,10 @@ var _feed_name := "classic"
 const FPS := 30.0
 const DEFAULT_COLOR := "#ff730d"
 const FEED_ARG := "--zedmd-feed="
+const FEED_ARG_ARG := "--zedmd-feed-arg="
+var _shades := false                   # --zedmd-shades: the feeder gets one byte (0-15) a dot, 128x32 only
+var _feed_args: Array[String] = []
+var _feed_path := ""
 
 var _color := Color(DEFAULT_COLOR)
 var _palette := PackedByteArray()      # 16 shades x 3 bytes
@@ -40,13 +47,23 @@ func _ready() -> void:
 				HEIGHT = int(wh[1])
 		elif a.begins_with(FEED_NAME_ARG):
 			_feed_name = a.trim_prefix(FEED_NAME_ARG)
+		elif a == "--zedmd-shades":
+			_shades = true
+		elif a.begins_with(FEED_ARG_ARG):
+			_feed_args.append(a.trim_prefix(FEED_ARG_ARG))
 		elif a.begins_with(FEED_ARG):
-			_start_feed(a.trim_prefix(FEED_ARG))
+			_feed_path = a.trim_prefix(FEED_ARG)
 		elif a.begins_with("--pin2dmd=") or a.begins_with("--zedmd="):
 			on = true
 			var v := a.substr(a.find("=") + 1).strip_edges().to_lower()
 			if Color.html_is_valid(v):
 				_color = Color(v)
+	if _feed_path != "":
+		if _shades:
+			_feed_args.insert(0, _color.to_html(false))      # the single colour (unknown frames, no Serum); before the user's
+			_feed_args.insert(0, "--color")
+			_feed_args.append("--shades")
+		_start_feed(_feed_path)
 	set_process(on)
 	_palette = shade_palette(_color)
 
@@ -63,7 +80,7 @@ func _source() -> Viewport:
 
 
 func _start_feed(path: String) -> void:
-	var run := OS.execute_with_pipe(path, [])
+	var run := OS.execute_with_pipe(path, PackedStringArray(_feed_args))
 	if run.is_empty():
 		push_warning("zedmd_feed did not start: " + path)
 		return
@@ -113,6 +130,17 @@ func rgb_frame(image: Image, palette: PackedByteArray) -> PackedByteArray:
 	return frame
 
 
+## The 4096-byte frame of a 128x32 image: each dot's brightness as a shade 0-15 (a DMD's 16 levels).
+func shade_frame(image: Image) -> PackedByteArray:
+	var frame := PackedByteArray()
+	frame.resize(WIDTH * HEIGHT)
+	for y in HEIGHT:
+		for x in WIDTH:
+			var dot := image.get_pixel(x, y)
+			frame[y * WIDTH + x] = clampi(roundi(maxf(dot.r, maxf(dot.g, dot.b)) * 15.0), 0, 15)
+	return frame
+
+
 func _process(delta: float) -> void:
 	_elapsed += delta
 	if _elapsed < 1.0 / FPS:
@@ -125,7 +153,7 @@ func _process(delta: float) -> void:
 	if image.get_width() != WIDTH or image.get_height() != HEIGHT:
 		var classic := WIDTH == 128 and HEIGHT == 32
 		image.resize(WIDTH, HEIGHT, Image.INTERPOLATE_NEAREST if classic else Image.INTERPOLATE_LANCZOS)
-	var frame := rgb_frame(image, _palette)
+	var frame := shade_frame(image) if _shades and _feed else rgb_frame(image, _palette)
 	if frame == _last:
 		return
 	_last = frame

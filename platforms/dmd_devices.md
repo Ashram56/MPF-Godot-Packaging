@@ -46,6 +46,35 @@ godot --path GAME -- --zedmd --zedmd-feed=$PWD/zedmd_feed # MPF with examples/dm
 5. Colour pictures (a colourisation) are out of scope here: this add-on only ever sends one colour scaled by
    brightness.
 
+## Serum colour (ZeDMD, native feeder)
+
+A game's 128x32 DMD can be coloured by a Serum colourisation (a `.cRZ` or `.cROM` file, made with the Serum tools; the
+file is the colourisation author's, never part of this repository). The platform loads **libserum as it is**, without
+any change, in the native feeder:
+
+```
+game (Godot, addons/dmd_out)  --4096 shades (0-15)-->  native/zedmd_feed --serum LIB DIR ROM  -->  libserum  -->  ZeDMD
+```
+
+| Step | What |
+|---|---|
+| `native/serum/build_libserum.sh [OUT]` | fetches PPUC/libserum (tag v2.8.2, GPL-2.0) and libframeutil's header and builds the library untouched; prints its path (`libserum64.so`, `.dylib` on a Mac). Needs git, cmake, a C++ compiler. |
+| `dmd_out` with `--zedmd-shades` | sends the classic 128x32 picture as one byte (the shade 0-15) a dot; `--zedmd-feed-arg=X` passes `X` to the feeder, once per argument. `--zedmd=#RRGGBB` is the single colour. |
+| `zedmd_feed --shades [--color RRGGBB] --serum LIB DIR ROM` | `LIB` libserum's shared library (loaded with dlopen), `DIR` the folder that holds `ROM/ROM.cRZ` (or `.cROM`), `ROM` the colourisation's name. Each frame goes through `Serum_Colorize`; version 2 pictures (RGB565, 32p) and version 1 pictures (palette) are sent, colour rotations run on libserum's timer. A frame that Serum does not know (or a colourisation that is missing) keeps the single colour. |
+
+Example (a game whose colourisation is `DIR/rom/rom.cRZ`):
+
+```sh
+godot --path GAME -- --zedmd=#2a6cff --zedmd-shades --zedmd-feed=$PWD/zedmd_feed \
+    --zedmd-feed-arg=--serum --zedmd-feed-arg=$PWD/libserum64.so --zedmd-feed-arg=DIR --zedmd-feed-arg=rom
+```
+
+Checked: the feeder's tests use a stand-in library with libserum's C names (`tests/test_zedmd_feed.py`) and, with
+`LIBSERUM=<built library>`, the real library for a colourisation that is not there. **Not checked with a real
+colourisation file or on a real ZeDMD yet.** 256x64 (extra) pictures are not used: the feeder asks libserum for 32p
+frames; a ZeDMD HD needs another step. A Serum file keyed on the ROM's own frames needs the game to show exactly the
+ROM's pictures (a game whose DMD differs from the ROM's, for example an HD or changed font, gets no match).
+
 ## Choosing the device
 
 Which display a machine uses (a PIN2DMD, a ZeDMD, or the screen) depends on the board and on what is plugged in, not

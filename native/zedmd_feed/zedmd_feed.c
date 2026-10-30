@@ -7,10 +7,16 @@
  *
  *   zedmd_feed [--port DEV] [--size WxH] [--brightness 0-15] [--probe]     exits when stdin closes; messages on stderr
  *   --probe: connect, say what the ZeDMD is, exit 0 (2 when none answers)
+ *   --shades [--color RRGGBB] [--serum LIB DIR ROM]
+ *       the input is the game's DMD as one byte per dot, 0-15 (a DMD's 16 shades), not RGB888. Without --serum the shades
+ *       scale --color (default ff730d). With --serum the colour comes from a Serum colourisation: LIB is libserum's
+ *       shared library, loaded as it is (dlopen, unmodified), DIR the folder holding ROM/ROM.cRZ (or .cROM), ROM the
+ *       colourisation's name. A frame that Serum does not know keeps the single colour; colour rotations run on a timer.
  *
  * Exit code 2: no ZeDMD found or the handshake failed (the caller then falls back to the Python platform).
  */
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -31,6 +37,33 @@
 #define CMD_BRIGHTNESS 0x16
 
 static int fd = -1, width = 128, height = 32, write_size = 64;
+
+/* Serum (https://github.com/PPUC/libserum), loaded with dlopen: only the C functions and the frame struct are used, as
+ * declared in its serum.h; the part of the struct read here (up to nocolors) is copied below. */
+typedef struct {
+    uint8_t *frame, *palette, *rotations;
+    uint16_t *frame32;
+    uint32_t width32;
+    uint16_t *rotations32, *rotationsinframe32;
+    uint8_t *modifiedelements32;
+    uint16_t *frame64;
+    uint32_t width64;
+    uint16_t *rotations64, *rotationsinframe64;
+    uint8_t *modifiedelements64;
+    uint32_t SerumVersion;
+    uint8_t flags;
+    uint32_t nocolors;
+} SerumFrame;
+#define SERUM_FLAG_32P 1
+#define SERUM_NO_FRAME 0xffffffffu
+#define SERUM_SAME_FRAME 0xfffffffeu
+static SerumFrame *(*serum_load)(const char *, const char *, uint8_t);
+static uint32_t (*serum_colorize)(uint8_t *);
+static uint32_t (*serum_rotate)(void);
+static void (*serum_dispose)(void);
+static SerumFrame *serum;
+static int serum_known;                         /* 1 once a frame of the colourisation was matched */
+static uint8_t mono[16 * 3];                    /* shade -> colour when Serum does not colour the frame */
 static const char CTRL[5] = {'Z', 'e', 'D', 'M', 'D'};
 static const char FRAMEH[5] = {'F', 'R', 'A', 'M', 'E'};
 
@@ -195,10 +228,69 @@ static int connect_port(const char *named) {
     return 0;
 }
 
+/* The monochrome picture: each shade scales the colour. */
+static void mono_frame(const uint8_t *shades, uint8_t *rgb) {
+    for (int i = 0; i < width * height; i++) memcpy(rgb + i * 3, mono + (shades[i] & 15) * 3, 3);
+}
+
+/* The RGB picture Serum returned (RGB565 for version 2, a palette for version 1). 1 = taken. */
+static int serum_picture(uint8_t *rgb) {
+    int n = width * height;
+    if (serum->SerumVersion >= 2) {
+        if (!serum->frame32 || (int)serum->width32 != width) return 0;
+        for (int i = 0; i < n; i++) {
+            uint16_t c = serum->frame32[i];
+            rgb[i * 3] = ((c >> 11) & 31) * 255 / 31;
+            rgb[i * 3 + 1] = ((c >> 5) & 63) * 255 / 63;
+            rgb[i * 3 + 2] = (c & 31) * 255 / 31;
+        }
+        return 1;
+    }
+    if (!serum->frame || !serum->palette) return 0;
+    for (int i = 0; i < n; i++) memcpy(rgb + i * 3, serum->palette + serum->frame[i] * 3, 3);
+    return 1;
+}
+
+/* Colour a frame of shades. Returns the rotation timer in ms (0: none). */
+static int colorize(const uint8_t *shades, uint8_t *rgb, uint8_t *held) {
+    if (!serum) { mono_frame(shades, rgb); return 0; }
+    static uint8_t in[256 * 64];
+    int four = serum->nocolors == 4;
+    for (int i = 0; i < width * height; i++) in[i] = four ? (shades[i] * 3 + 7) / 15 : shades[i];
+    uint32_t r = serum_colorize(in);
+    if (r == SERUM_SAME_FRAME) { memcpy(rgb, held, (size_t)width * height * 3); return 0; }
+    if (r == SERUM_NO_FRAME) {                  /* not a frame of the colourisation */
+        mono_frame(shades, rgb);
+        return 0;
+    }
+    if (!serum_picture(rgb)) mono_frame(shades, rgb);
+    else serum_known = 1;
+    return (int)(r & 0xffff);
+}
+
+static int load_serum(const char *lib, const char *dir, const char *rom) {
+    void *h = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
+    if (!h) { fprintf(stderr, "serum: %s\n", dlerror()); return 0; }
+    serum_load = dlsym(h, "Serum_Load");
+    serum_colorize = dlsym(h, "Serum_Colorize");
+    serum_rotate = dlsym(h, "Serum_Rotate");
+    serum_dispose = dlsym(h, "Serum_Dispose");
+    if (!serum_load || !serum_colorize || !serum_rotate) { fprintf(stderr, "serum: %s is not libserum\n", lib); return 0; }
+    serum = serum_load(dir, rom, SERUM_FLAG_32P);
+    if (!serum) { fprintf(stderr, "serum: no colourisation %s in %s, single colour\n", rom, dir); return 0; }
+    fprintf(stderr, "serum: %s loaded (version %u, %u shades)\n", rom, serum->SerumVersion, serum->nocolors);
+    return 1;
+}
+
 int main(int argc, char **argv) {
     const char *port = NULL;
-    int brightness = -1, probe = 0;
+    int brightness = -1, probe = 0, shades = 0;
+    const char *lib = NULL, *serum_dir = NULL, *serum_rom = NULL;
+    unsigned colour = 0xff730d;
     for (int i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "--shades")) { shades = 1; continue; }
+        if (!strcmp(argv[i], "--color") && i + 1 < argc) { colour = strtoul(argv[++i], NULL, 16); continue; }
+        if (!strcmp(argv[i], "--serum") && i + 3 < argc) { lib = argv[++i]; serum_dir = argv[++i]; serum_rom = argv[++i]; continue; }
         if (!strcmp(argv[i], "--port") && i + 1 < argc) port = argv[++i];
         else if (!strcmp(argv[i], "--size") && i + 1 < argc) sscanf(argv[++i], "%dx%d", &width, &height);
         else if (!strcmp(argv[i], "--probe")) probe = 1;
@@ -217,14 +309,38 @@ int main(int argc, char **argv) {
         uint8_t b = brightness > 15 ? 15 : brightness;
         command_block(CMD_BRIGHTNESS, &b, 1);
     }
-    size_t fsize = (size_t)width * height * 3;
+    for (int n = 0; n < 16; n++) {
+        mono[n * 3] = (colour >> 16 & 255) * n / 15;
+        mono[n * 3 + 1] = (colour >> 8 & 255) * n / 15;
+        mono[n * 3 + 2] = (colour & 255) * n / 15;
+    }
+    if (lib) { shades = 1; load_serum(lib, serum_dir, serum_rom); }
+    size_t rsize = (size_t)width * height * 3;          /* the RGB picture sent to the ZeDMD */
+    size_t fsize = shades ? (size_t)width * height : rsize;     /* one input frame */
+    uint8_t *rgb = malloc(rsize), *held = calloc(1, rsize);
+    int rotate_ms = 0;
+    uint8_t *sent = NULL;
     uint8_t *in = malloc(fsize * 8), *last = malloc(fsize), *prev_ok = NULL;
     size_t have = 0;
     int ok = 1;
     for (;;) {
         /* read what is there; while more waits, keep reading so that only the newest complete frame is sent */
         struct pollfd p = {0, POLLIN, 0};
-        if (poll(&p, 1, 3000) == 0) continue;
+        int idle = poll(&p, 1, rotate_ms > 0 ? rotate_ms : 3000);
+        if (idle == 0 && rotate_ms > 0 && serum) {      /* a colour rotation step: same frame, new colours */
+            uint32_t r = serum_rotate();
+            rotate_ms = (int)(r & 0xffff);
+            if (serum_picture(rgb)) {
+                memcpy(held, rgb, rsize);
+                int s2 = send_frame(rgb, NULL);
+                if (s2 < 0) { fprintf(stderr, "ZeDMD lost\n"); return 3; }
+                if (!sent) sent = calloc(1, rsize);
+                ok = s2 == 1;
+                if (ok) memcpy(sent, rgb, rsize);
+            }
+            continue;
+        }
+        if (idle == 0) continue;
         int eof = 0;
         do {
             ssize_t r = read(0, in + have, fsize * 8 - have);
@@ -241,19 +357,24 @@ int main(int argc, char **argv) {
         } while (poll(&p, 1, 0) > 0 && have < fsize * 8);
         if (eof && !prev_ok) break;
         if (prev_ok) {
-            static uint8_t *sent = NULL;
             int black = 1;
-            for (size_t i = 0; i < fsize && black; i++) black = last[i] == 0;
-            if (!sent) sent = calloc(1, fsize), ok = 0;
+            const uint8_t *picture = last;
+            if (shades) {
+                rotate_ms = colorize(last, rgb, held);
+                memcpy(held, rgb, rsize);
+                picture = rgb;
+            }
+            for (size_t i = 0; i < rsize && black; i++) black = picture[i] == 0;
+            if (!sent) sent = calloc(1, rsize), ok = 0;
             if (black) {
-                if (!ok || memcmp(sent, last, fsize)) command_block(CMD_CLEAR, NULL, 0);
+                if (!ok || memcmp(sent, picture, rsize)) command_block(CMD_CLEAR, NULL, 0);
                 ok = 1;
-                memcpy(sent, last, fsize);
+                memcpy(sent, picture, rsize);
             } else {
-                int r = send_frame(last, ok ? sent : NULL);
+                int r = send_frame(picture, ok ? sent : NULL);
                 if (r < 0) { fprintf(stderr, "ZeDMD lost\n"); return 3; }
                 ok = r == 1;
-                if (ok) memcpy(sent, last, fsize);
+                if (ok) memcpy(sent, picture, rsize);
             }
             prev_ok = NULL;
         }
