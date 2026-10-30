@@ -6,6 +6,8 @@
 #   native/libzedmd/build_libzedmd.sh [OUT_DIR]     default OUT_DIR native/bin/libzedmd: lib/ (libzedmd.so and its libraries),
 #                                                   include/ (ZeDMD.h); prints OUT_DIR
 #
+# TARGET_ARCH=aarch64 with CC/CXX=aarch64-linux-gnu-gcc/g++ and QEMU_LD_PREFIX=/usr/aarch64-linux-gnu builds for a Pi/Jetson on an x86 machine
+# (qemu-user registered in binfmt_misc, so the dependencies' configure tests run).
 # LIBZEDMD_SHA pins the commit (default: the one PPUC's libdmdutil builds with). PPUC's external.sh downloads GitHub archives with
 # curl; on a network that only lets git through (the cloud sandbox's proxy) the curl function below makes the same files with git.
 set -euo pipefail
@@ -13,7 +15,8 @@ LIBZEDMD_SHA="${LIBZEDMD_SHA:-ed69d499d87d4d328bd328773cc6bbd3dadd64c3}"
 here="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$here/../bin/libzedmd}"
 case "$(uname -s)" in Linux) os=linux;; Darwin) os=macos;; *) echo "unsupported OS" >&2; exit 1;; esac
-case "$(uname -m)" in x86_64|amd64) arch=x64;; aarch64) arch=aarch64;; arm64) arch=arm64;; *) echo "unsupported CPU $(uname -m)" >&2; exit 1;; esac
+case "${TARGET_ARCH:-$(uname -m)}" in x86_64|amd64) arch=x64;; aarch64) arch=aarch64;; arm64) arch=arm64;; *) echo "unsupported CPU $(uname -m)" >&2; exit 1;; esac
+if [ -n "${TARGET_ARCH:-}" ] && [ "$TARGET_ARCH" != "$(uname -m)" ]; then export ac_cv_host="$TARGET_ARCH-unknown-linux-gnu"; fi    # libtool of the dependencies builds shared libraries for the target
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
