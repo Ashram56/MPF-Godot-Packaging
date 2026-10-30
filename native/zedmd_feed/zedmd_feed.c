@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -196,6 +197,7 @@ static int connect_port(const char *named) {
 }
 
 int main(int argc, char **argv) {
+    signal(SIGPIPE, SIG_IGN);       /* a closed stderr (Godot's pipe) must not kill the feeder; writes just fail */
     const char *port = NULL;
     int brightness = -1, probe = 0;
     for (int i = 1; i < argc; i++) {

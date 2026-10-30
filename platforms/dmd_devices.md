@@ -76,3 +76,7 @@ it wants:
 
 MPF's pin2dmd platform takes 128x32, 192x64 and 256x64. The native ZeDMD feeder is 128x32 only. Colour stays the game's
 business: without it the add-on sends one colour scaled by brightness. Not run on a device.
+
+## Colourising a game's DMD (the game's job)
+
+The DMD is part of the game, so a colourisation (Serum or any other) belongs to the game, not to this platform. `zedmd_feed` stays the plain feeder: 12288-byte RGB frames of 128x32 on stdin, nothing else. A game puts its own colouriser in front of it: a program the game builds, that reads the add-on's frames (`--zedmd-feed=PROGRAM`), colours them and pipes RGB frames to the `zedmd_feed` it starts itself. Tron Legacy's is `game/native/dmd_serum` (libserum, GPL v2; Tron-Legacy-MPF docs/hardware.md, "Serum colour on a ZeDMD"). Like every native tool, it is built offline per CPU with the game's bundle; nothing is compiled on the machine that plays.
