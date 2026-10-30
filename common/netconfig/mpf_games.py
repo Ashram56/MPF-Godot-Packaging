@@ -874,9 +874,34 @@ def wants_game_args(b):
     return "scripts/package/start.py" in (run_.get("start") or DEFAULT_START)
 
 
+def launch_args_from_tool(game, tool_rel):
+    """Extra Godot user arguments a game's own settings produce: the tool prints them one a line (never composes DMD, audio or board arguments)."""
+    t = os.path.join(game, tool_rel)
+    if not os.path.isfile(t):
+        return []
+    r = run(game_python(), t, cwd=game)
+    return [x.strip() for x in r.stdout.splitlines() if x.strip()] if r.returncode == 0 else []
+
+
+def platform_command(game, b, env):
+    """The platform starts the game itself (`run.mode: "platform"`): Godot then MPF through mpf_godot/launcher.py, from the facts the bundle
+    declares in `launch` (project, configs, godot_args, env, args_tool). Every DMD, audio and board argument is composed here."""
+    L = b.get("launch") or {}
+    project = os.path.normpath(os.path.join(game, L.get("project", "game")))
+    argv = [game_python(), "-m", "mpf_godot", "run", project, "-c", ",".join(L.get("configs") or ["config"])]
+    engine = [str(a) for a in L.get("godot_args", [])]
+    pre, user = DMD.plan(os.path.basename(game).split("@")[0], b)
+    user = pre + user + (launch_args_from_tool(game, L["args_tool"]) if L.get("args_tool") else [])
+    if engine or user:
+        argv += ["--"] + engine + (["--"] + user if user else [])
+    return argv, game
+
+
 def game_command(game, b, env):
     """(argv, cwd) that starts a bundle: its run.start (default: the game package's start.py) plus MPF_GAME_ARGS from /etc/default/mpf-game."""
     run_ = b.get("run") or {}
+    if run_.get("mode") == "platform":
+        return platform_command(game, b, env)
     argv = shlex.split(run_.get("start") or DEFAULT_START)
     argv[0] = resolve_program(argv[0])
     if wants_game_args(b):
@@ -930,6 +955,11 @@ def game_exec():
     xauth = f"/tmp/.Xauthority-{C.USER}" if C.READONLY else os.path.join(pw.pw_dir, ".Xauthority")
     child = dict(os.environ, HOME=pw.pw_dir, USER=C.USER, DISPLAY=env.get("DISPLAY", ":0"),
                  XAUTHORITY=env.get("XAUTHORITY", xauth), **xdg, **audio, **game_environment(b, env))
+    child["MPF_DMD_OUTPUT"] = DMD.LAST       # lcd | pin2dmd | zedmd: a game hides its on-screen DMD when it is not lcd
+    if (b.get("run") or {}).get("mode") == "platform":
+        root = C.PLATFORM_DIR or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        child["PYTHONPATH"] = root + (os.pathsep + child["PYTHONPATH"] if child.get("PYTHONPATH") else "")
+        child.update({str(k): str(v) for k, v in ((b.get("launch") or {}).get("env") or {}).items()})
     os.execve(argv[0] if os.path.isabs(argv[0]) else (shutil.which(argv[0]) or argv[0]), argv, child)
 
 

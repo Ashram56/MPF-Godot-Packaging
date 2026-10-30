@@ -114,6 +114,42 @@ declares in `bundle.json` how to install it; the setup page's "PuP Pack" upload 
 from `options.tool`, the start command from `run.start` and the environment names to forward from `requires.env`
 (`MPF_GAME_VENV` names the game's Python venv), so nothing in the page is specific to a game.
 
+## Who launches the game, and the DMD output (since `mpf_dmd.py`)
+
+The platform chooses the DMD display (setup page > Configuration > "Sortie DMD": auto, LCD, PIN2DMD, ZeDMD) and the Serum
+colourisation of each game (a library of `<rom>.cROMc|.cRZ|.cROM` files in `/data/serum/<rom>/`, one chosen per game, default the one named
+like the game's ROM, or none). **A game composes no DMD-device argument and ships no ZeDMD, Serum or feeder code**: libzedmd,
+libserum (both unmodified PPUC) and `dmd_bridge` belong to the platform and the image.
+
+What a bundle declares:
+
+```json
+"dmd": {"rom": "trn_174h"},
+"run": {"mode": "platform"},
+"launch": {"project": "game", "configs": ["config", "hw_virtual"], "godot_args": [], "env": {}, "args_tool": "scripts/package/launch_args.py"},
+"platform_addons": ["dmd_out"]
+```
+
+- `dmd.rom`: the PinMAME set name, the default colourisation. Without it the page only finds a colourisation assigned by hand.
+- `run.mode: "platform"`: the platform starts the game itself, through `python -m mpf_godot run` (Godot, then MPF), with `launch.project`
+  (Godot project), `launch.configs` (MPF config files), `launch.godot_args` (engine arguments), `launch.env` (extra environment) and,
+  optional, `launch.args_tool`: a script of the game that prints extra Godot user arguments, one a line, from the game's own settings.
+  The platform adds, as Godot user arguments, `--zedmd=#RRGGBB` or `--pin2dmd=#RRGGBB` and `--zedmd-shades --zedmd-feed=<dmd_bridge>
+  --zedmd-feed-arg=...`. Without `run.mode`, the old route stays: `run.start` (default `scripts/package/start.py`) gets the same arguments
+  (launcher part before `--`, Godot user arguments after `-- --`) and must pass them through unchanged. It must **not** add its own
+  `--zedmd-feed=`: `dmd_out` keeps the last one, so a game's feeder would win over the platform's.
+- The game's own `run.py` (Mac/PC install) is for the one-line installers; it shares no argument with the platform's launcher.
+- MPF overlay: with `--zedmd-feed=` MPF must not open the ZeDMD port (overlay `zedmd_feed.yaml`: DMD to virtual); `zedmd.yaml` (MPF's
+  Python ZeDMD) only for `--zedmd` without a feed. Otherwise MPF and dmd_bridge both open the same serial port.
+- Godot: load the platform's `addons/dmd_out` (copied at launch). With `--zedmd` or `--pin2dmd` the game renders its exact classic 128x32
+  DMD in the root viewport, 16 shades identical to the ROM (Serum matches the ROM's frames; HD or redrawn text does not).
+- On-screen DMD: the platform sets `MPF_DMD_OUTPUT` (`lcd`, `pin2dmd` or `zedmd`) in the game's environment. The game shows its DMD
+  on the screen only for `lcd`, whatever its own DMD-window setting says; no game setting needs changing by hand.
+- Remove from the game: native Serum code, any `--zedmd-serum`/feeder option, prebuilt `zedmd_feed` binaries, ZeDMD or Serum entries in the
+  settings schema.
+- Test on a machine: output ZeDMD, colourisation assigned, restart the game: `ps` shows dmd_bridge `--color ... --serum-lib ... --rom <rom>
+  --altcolor /data/serum --shades` and "serum: <rom> loaded (version 2, 16 shades)"; "no colour" gives `--color ... --shades` only.
+
 ## Platform or game
 
 | Platform (this repository, the same for every game) | Game (its repository, built with `bundle_spec.json`) |

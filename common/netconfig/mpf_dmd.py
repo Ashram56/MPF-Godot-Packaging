@@ -189,10 +189,15 @@ def resolve(s=None, detected=None):
     return {"pin2dmd": "pin2dmd", "zedmd": "zedmd"}.get(detected if detected is not None else detect(), "lcd")
 
 
+LAST = "lcd"        # the output of the last plan(): exported to the game as MPF_DMD_OUTPUT
+
+
 def plan(game_id, bundle, detected=None):
     """(launcher_args, godot_user_args) for the game packaged launcher: the part before `--` and the part after `-- --`."""
+    global LAST
     s = load()
     out = resolve(s, detected)
+    LAST = out if out == "pin2dmd" or (out == "zedmd" and bridge_dir()) else "lcd"
     if out == "pin2dmd":
         return [f"--pin2dmd={s['color']}"], []
     if out != "zedmd":

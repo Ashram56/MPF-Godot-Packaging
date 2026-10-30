@@ -87,3 +87,29 @@ class DmdOutput(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlatformLaunch(Base):
+    def test_platform_mode_composes_everything(self):
+        import mpf_games as G
+        bd = os.path.join(self.t.name, "bridge")
+        os.makedirs(bd)
+        open(os.path.join(bd, "dmd_bridge"), "w").close()
+        D.bridge_dir = lambda: bd
+        D.set_output("zedmd")
+        b = {"run": {"mode": "platform", "start": "never used"},
+             "launch": {"project": "game", "configs": ["config", "hw_virtual"], "godot_args": ["--fullscreen"]}}
+        game = os.path.join(self.t.name, "games", "demo@1")
+        os.makedirs(game)
+        argv, cwd = G.game_command(game, b, {"MPF_GAME_ARGS": "--ignored"})
+        i = argv.index("run")
+        self.assertEqual(argv[i - 2:i], ["-m", "mpf_godot"])
+        self.assertEqual(argv[i + 1], os.path.join(game, "game"))
+        self.assertEqual(argv[i + 3], "config,hw_virtual")
+        tail = argv[i + 4:]
+        self.assertEqual(tail[:3], ["--", "--fullscreen", "--"])
+        self.assertIn("--zedmd=#2a6cff", tail)
+        self.assertNotIn("--ignored", argv)
+        D.set_output("lcd")
+        argv, _ = G.game_command(game, {"run": {"mode": "platform"}}, {})
+        self.assertNotIn("--", argv)

@@ -128,3 +128,7 @@ it wants:
 
 MPF's pin2dmd platform takes 128x32, 192x64 and 256x64. The native ZeDMD feeder is 128x32 only. Colour stays the game's
 business: without it the add-on sends one colour scaled by brightness. Not run on a device.
+
+## Choosing the output on a machine
+
+On the images the output is a setting of the setup page ("Sortie DMD", `common/netconfig/mpf_dmd.py`): auto (a PIN2DMD or ZeDMD when one answers at the game's start, else the screen), LCD, PIN2DMD (128x32 monochrome from Godot) or ZeDMD (dmd_bridge, libzedmd; colour with a Serum colourisation uploaded on the page and assigned per game). One output at a time. What a game bundle must do for it: `game-bundles.md`, "Who launches the game, and the DMD output".
