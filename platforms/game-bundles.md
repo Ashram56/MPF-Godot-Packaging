@@ -158,6 +158,11 @@ in `platform_addons` from this platform's `addons/<name>`, only the binaries of 
 (`MPF_PLATFORM_DIR`, default found from the netconfig file or from `MPF_GOZEN_SO`); replace the Pi's GoZen with a
 board-specific build when `MPF_GOZEN_SO` is set. Format 2 has nothing more to run: the board profile is applied at each start.
 
+**On the images** (x86, Raspberry Pi 4 and 5, Jetson) the page's modules are `common/netconfig/mpf_*.py` copied to `/usr/local/bin`
+(so `mpf_contract.py` comes with them) and the platform's checkout is `~/MPF-Godot` of the game user: the page finds it without
+`MPF_PLATFORM_DIR` (`mpf_common.find_platform_dir`) and starts format 2 games with its `mpf_godot` package. An image built before
+format 2 needs the page updated (`common/netconfig/update_page.sh`) or a new image to install a format 2 bundle; it still runs format 1.
+
 Same thing by hand: `python -m mpf_godot addons GAME --video` copies the patched GMC and GoZen into a game folder.
 
 ## The game's PuP Pack

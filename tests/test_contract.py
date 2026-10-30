@@ -52,6 +52,21 @@ class Contract(unittest.TestCase):
         self.assertEqual((m["format"], m["game_dir"], m["addons"]), (2, "game", V2["addons"]))
         self.assertNotIn("run", m)
 
+    def test_platform_dir_found_on_an_image_without_the_variable(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as t:
+            os.makedirs(os.path.join(t, "mpf_godot"))
+            open(os.path.join(t, "mpf_godot", "__init__.py"), "w").close()
+            saved = os.environ.pop("MPF_PLATFORM_DIR", None)
+            try:
+                self.assertEqual(C.find_platform_dir(user="nobody-here", here=t), t)
+                os.environ["MPF_PLATFORM_DIR"] = "/x"
+                self.assertEqual(C.find_platform_dir(user="nobody-here", here=t), "/x")
+            finally:
+                os.environ.pop("MPF_PLATFORM_DIR", None)
+                if saved is not None:
+                    os.environ["MPF_PLATFORM_DIR"] = saved
+
     def test_board_from_the_device_tree(self):
         saved, env = K.DT_MODEL, os.environ.pop("MPF_BOARD", None)
         try:
