@@ -76,3 +76,22 @@ it wants:
 
 MPF's pin2dmd platform takes 128x32, 192x64 and 256x64. The native ZeDMD feeder is 128x32 only. Colour stays the game's
 business: without it the add-on sends one colour scaled by brightness. Not run on a device.
+
+## Colour with Serum on a ZeDMD (native feeder)
+
+`zedmd_feed` can colour the classic 128x32 DMD with [libserum](https://github.com/PPUC/libserum) (the library the PinMAME,
+VPX and ZeDMD tools use; GPL v2, so a feeder built with it is GPL v2), with no Python and no MPF in the picture path:
+
+```sh
+native/zedmd_feed/build.sh zedmd_feed --serum         # clones libserum v2.8.0 + libframeutil (pinned), CMake, links; ~20 s on 4 cores
+# cross compiling on the build box (never on a Raspberry Pi): CC="zig cc -target aarch64-linux-gnu" CXX="zig c++ -target aarch64-linux-gnu" ...
+godot --path GAME -- --zedmd --zedmd-feed=$PWD/zedmd_feed --zedmd-shades      # (the feeder is started by the add-on)
+zedmd_feed --shades --serum ALTCOLOR_DIR --rom NAME [--color 2a6cff]
+```
+
+`--zedmd-shades` makes the add-on pipe one shade (0-15) per dot instead of RGB; `--serum DIR --rom NAME` loads
+`DIR/NAME/NAME.cROMc`. libserum identifies a frame by the dots its comparison mask keeps (not by the whole picture), so the
+game's DMD must draw the ROM's shades at the same dots; a frame the file does not know stays in `--color` (default
+`ff730d`). Colour rotations run on libserum's timer. The colourisation file is its author's: it is never part of this
+repository; a game's bundle or install page brings it. Checked on a fake ZeDMD against a native Serum decoder on 21 PinMAME
+frames (19 identical, the other 2 not looked into); **not run on a real ZeDMD**.

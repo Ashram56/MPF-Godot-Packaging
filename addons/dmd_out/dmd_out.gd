@@ -5,6 +5,8 @@ extends Node
 ##   godot --path GAME -- --pin2dmd[=#RRGGBB]                          frames to MPF as "rgb_dmd_frame"
 ##   godot --path GAME -- --zedmd[=#RRGGBB]                            the same, for the zedmd_native platform
 ##   godot --path GAME -- --zedmd --zedmd-feed=/path/to/zedmd_feed    frames piped to the native feeder, not to MPF
+##   ... --zedmd-shades                                                the pipe carries one shade 0-15 per dot (4096 bytes) instead of RGB:
+##        the feeder (zedmd_feed --shades [--serum DIR --rom NAME]) then draws the colour, or Serum's colourisation (classic 128x32 only)
 ## MPF needs the matching overlay (examples/dmd_devices/). Each changed frame (up to FPS a second) is 12288 bytes, three
 ## per dot, row by row, rgb_dmds "default". Monochrome: the picture's brightness (0-15, as a DMD's 16 shades) scales
 ## one colour (16 shades for the 128x32 classic dots, 8 bits for 192x64, 256x64 and the HD picture), #RRGGBB (default #ff730d, a DMD's orange). platforms/dmd_devices.md.
@@ -19,6 +21,7 @@ var _feed_name := "classic"
 const FPS := 30.0
 const DEFAULT_COLOR := "#ff730d"
 const FEED_ARG := "--zedmd-feed="
+const SHADES_ARG := "--zedmd-shades"
 
 var _color := Color(DEFAULT_COLOR)
 var _palette := PackedByteArray()      # 16 shades x 3 bytes
@@ -26,6 +29,7 @@ var _last := PackedByteArray()
 var _elapsed := 0.0
 var _feed: FileAccess = null           # the feeder's stdin
 var _feed_pid := 0
+var _shades := false                   # the feeder gets shades 0-15, one byte per dot, not RGB
 
 
 func _ready() -> void:
@@ -40,6 +44,8 @@ func _ready() -> void:
 				HEIGHT = int(wh[1])
 		elif a.begins_with(FEED_NAME_ARG):
 			_feed_name = a.trim_prefix(FEED_NAME_ARG)
+		elif a == SHADES_ARG:
+			_shades = true
 		elif a.begins_with(FEED_ARG):
 			_start_feed(a.trim_prefix(FEED_ARG))
 		elif a.begins_with("--pin2dmd=") or a.begins_with("--zedmd="):
@@ -90,6 +96,17 @@ static func shade_palette(color: Color) -> PackedByteArray:
 	return out
 
 
+## The 4096 shades (0-15) of a 128x32 image, one byte per dot: the brightest channel, as a DMD's 16 levels.
+static func shades_frame(image: Image) -> PackedByteArray:
+	var frame := PackedByteArray()
+	frame.resize(128 * 32)
+	for y in 32:
+		for x in 128:
+			var dot := image.get_pixel(x, y)
+			frame[y * 128 + x] = clampi(roundi(maxf(dot.r, maxf(dot.g, dot.b)) * 15.0), 0, 15)
+	return frame
+
+
 ## The 12288-byte RGB frame of a 128x32 image: each dot's brightness as a shade, through the palette.
 ## Any other size (and the HD picture) keeps the full 8 bits: the brightness scales the colour smoothly.
 func rgb_frame(image: Image, palette: PackedByteArray) -> PackedByteArray:
@@ -125,7 +142,7 @@ func _process(delta: float) -> void:
 	if image.get_width() != WIDTH or image.get_height() != HEIGHT:
 		var classic := WIDTH == 128 and HEIGHT == 32
 		image.resize(WIDTH, HEIGHT, Image.INTERPOLATE_NEAREST if classic else Image.INTERPOLATE_LANCZOS)
-	var frame := rgb_frame(image, _palette)
+	var frame := shades_frame(image) if _shades and _feed and WIDTH == 128 and HEIGHT == 32 else rgb_frame(image, _palette)
 	if frame == _last:
 		return
 	_last = frame

@@ -96,6 +96,34 @@ class TestFeed(unittest.TestCase):
             p.stdin.close()
             p.wait(5)
 
+    def test_shades_are_drawn_in_the_colour(self):
+        """--shades: a frame is 4096 shades 0-15, shown as --color scaled by the shade (the zones equal those of the RGB frame)."""
+        p = subprocess.Popen([self.exe, "--port", self.port, "--shades", "--color", "2a6cff"], stdin=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        try:
+            shades = bytearray(W * H)
+            shades[5 * W + 9] = 15
+            shades[30 * W + 100] = 7
+            rgb = frame([(9, 5, (0x2a, 0x6c, 0xff)), (100, 30, (0x2a * 7 // 15, 0x6c * 7 // 15, 0xff * 7 // 15))])
+            self.serve(lambda: len(self.writes) >= 1, 3)
+            p.stdin.write(bytes(shades))
+            p.stdin.flush()
+            want = b"".join(wire(pk) for pk in z.zone_packets(rgb, None, W, H))
+            self.serve(lambda: len(b"".join(self.writes[1:])) >= len(want), 5)
+            self.assertEqual(want, b"".join(self.writes[1:]))
+        finally:
+            p.stdin.close()
+            p.wait(5)
+
+    def test_serum_needs_shades_and_a_build_with_serum(self):
+        r = subprocess.run([self.exe, "--port", "/dev/null", "--serum", "x", "--rom", "y"], stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=10)
+        self.assertEqual(1, r.returncode)                       # needs --shades
+        r = subprocess.run([self.exe, "--port", "/dev/null", "--shades", "--serum", "x", "--rom", "y"],
+                           stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+        self.assertEqual(1, r.returncode)                       # built without Serum
+        self.assertIn(b"without Serum", r.stderr)
+
     def test_no_zedmd_exits_2(self):
         r = subprocess.run([self.exe, "--port", "/dev/null"], stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
         self.assertEqual(2, r.returncode)
