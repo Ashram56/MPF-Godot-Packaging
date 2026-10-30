@@ -1,0 +1,22 @@
+# /etc/mpf-readonly.conf: read-only production mode of the MPF images (common/readonly/README.md).
+# Read by mpf-persist, mpf-mode, mpf-ro-check and mpf_netconfig.py (KEY=VALUE, shell quoting).
+
+# Label of the one read/write partition (created in the free space at the end of the disk at the first boot) and its mount point
+MPF_DATA_LABEL=mpfdata
+MPF_DATA_MOUNT=/data
+# Smallest data partition worth creating, in MB (less free space: the data lives in RAM and a warning is logged)
+MPF_DATA_MIN_MB=512
+
+# Mount point of the boot partition (FAT: mpf-network.txt), empty when the board has none. Read-only too, writable in maintenance mode.
+MPF_BOOT_MOUNT=
+
+# The user of the cabinet (owner of the persistent folders)
+MPF_USER=mpf
+
+# Folders (or single files) that keep their content across reboots: "name:target ...". The content lives in
+# <MPF_DATA_MOUNT>/persist/<name>, seeded from the image's own target the first time, and is bind-mounted over the target.
+# Each target must exist in the image. Add one here for any new thing that has to be written (the build scripts add theirs).
+MPF_PERSIST="games:/opt/games ssh:/etc/ssh wpa:/etc/wpa_supplicant"
+
+# Folders that live in RAM (tmpfs, lost at power-off): "path:size". Used by the build to write /etc/fstab.
+MPF_VOLATILE="/tmp:128m /var/log:64m /var/tmp:32m /var/cache:64m /var/lib/systemd:16m /var/spool:8m"

@@ -30,7 +30,7 @@ One screen, in the browser's language (English or French, a selector at the top)
   Start, stop, restart, start at power-on, the last lines of the log. Adding a bundle or a pack is on the *Install and updates* tab.
 - **Settings** of the active game, built from the bundle's own settings schema (`options.tool`, `options.schema`).
 - **Wi-Fi**: the networks in range (tap to choose), password, country. **SSH**: a public key, password logins on or off.
-- **Mode**: production or maintenance (read-only image mode).
+- **Mode**: production or maintenance ([common/readonly](../readonly/README.md)).
 
 ## Games: several versions, several games
 
@@ -71,7 +71,7 @@ A file that fails goes to `inbox/failed/` with a `.log` that says why; the page'
 
 ## Read-only production mode
 
-On an image built with the read-only mode (`/etc/mpf-readonly.conf` exists) the page shows a *Mode*
+On an image built with the read-only mode ([common/readonly](../readonly/README.md), `/etc/mpf-readonly.conf` exists) the page shows a *Mode*
 section (production or maintenance), uploads go to the data partition, the game's `logs/` and Godot's user folders to RAM,
 the Wi-Fi password is erased from `mpf-network.txt` in a short writable window of the boot partition, and `MODE=maintenance|production`
 in that file switches the mode at the next boot. Without that file nothing changes.
