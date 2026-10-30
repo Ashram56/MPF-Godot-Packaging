@@ -39,7 +39,9 @@ def find_platform_dir(user=None, here=None):
     if os.environ.get("MPF_PLATFORM_DIR"):
         return os.environ["MPF_PLATFORM_DIR"]
     here = here or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    for d in (os.path.join("/home", user or USER, "MPF-Godot"), "/opt/MPF-Godot", here):
+    import glob
+    others = sorted(glob.glob("/home/*/MPF-Godot"))       # a shell without MPF_USER (the services set it): any user's copy
+    for d in [os.path.join("/home", user or USER, "MPF-Godot"), "/opt/MPF-Godot"] + others + [here]:
         if os.path.isfile(os.path.join(d, "mpf_godot", "__init__.py")):
             return d
     return ""
