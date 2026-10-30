@@ -30,6 +30,7 @@
 #define ZONE_W 8
 #define ZONE_H 4
 #define ZONES_BYTE_LIMIT (128 * 3 * 3)
+#define HANDSHAKES 8
 #define CMD_HANDSHAKE 0x0c
 #define CMD_ZONES_RGB888 0x04
 #define CMD_RENDER 0x06
@@ -132,13 +133,19 @@ static int control(uint8_t *out, uint8_t cmd, const uint8_t *payload, int len) {
 }
 
 static int handshake(void) {
-    uint8_t buf[64], reply[64];
+    uint8_t buf[HANDSHAKES * 64], reply[64];
     tcflush(fd, TCIFLUSH);
     memset(buf, 0, sizeof buf);
     memcpy(buf, FRAMEH, 5);
     control(buf + 5, CMD_HANDSHAKE, NULL, 0);
-    if (write(fd, buf, 64) != 64) return 0;
+    for (int i = 1; i < HANDSHAKES; i++) memcpy(buf + i * 64, buf, 64);
+    /* A ZeDMD on a Pico 2 (firmware 6.1.3) reads in blocks of its write size, 512 bytes, the handshake included, and
+     * answers only when the block is complete; one 64-byte handshake is answered at random. Eight in one write fill
+     * a 512-byte block, and a firmware with 64-byte blocks answers the first and ignores the others. */
+    if (write(fd, buf, sizeof buf) != (ssize_t)sizeof buf) return 0;
     if (read_timeout(reply, 64, 500) != 64 || memcmp(reply, CTRL, 4) != 0 || reply[57] != 'R') return 0;
+    usleep(150000);                                 /* the answers to the other handshakes, if any */
+    tcflush(fd, TCIFLUSH);
     int w = reply[4] + reply[5] * 256, h = reply[6] + reply[7] * 256, ws = reply[11] + reply[12] * 256;
     write_size = (ws >= 32 && ws <= 1920) ? ws : 64;
     fprintf(stderr, "ZeDMD %dx%d firmware %d.%d.%d\n", w, h, reply[8], reply[9], reply[10]);

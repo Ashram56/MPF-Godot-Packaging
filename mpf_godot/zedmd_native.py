@@ -27,6 +27,7 @@ import asyncio
 import logging
 import os
 import threading
+import time
 
 from mpf.core.platform import RgbDmdPlatform
 from mpf.platforms.interfaces.dmd_platform import DmdPlatformInterface
@@ -49,6 +50,7 @@ USB_IDS = {(0x303A, 0x1001), (0x1A86, 0x55D3), (0x1A86, 0x7523), (0x10C4, 0xEA60
 ZONES_BYTE_LIMIT = 128 * 3 * 3
 ZONE_W, ZONE_H = 8, 4
 DEFAULT_WRITE = 64
+HANDSHAKES = 8
 
 
 def control(command, payload=b"", flag=0):
@@ -172,10 +174,14 @@ class ZedmdNativeDevice(DmdPlatformInterface):
 
     def _handshake(self):
         self._serial.reset_input_buffer()
-        self._serial.write((FRAME + control(HANDSHAKE)).ljust(self.write_size, b"\0"))
+        # Eight handshakes in one write fill a 512-byte block: a Pico 2's firmware (6.1.3) reads in blocks of its write size
+        # and answers only a complete block; one with 64-byte blocks answers the first and ignores the rest.
+        self._serial.write((FRAME + control(HANDSHAKE)).ljust(64, b"\0") * HANDSHAKES)
         reply = self._serial.read(64)
         if len(reply) < 64 or reply[:4] != CTRL[:4] or reply[57:58] != b"R":
             return False
+        time.sleep(0.15)                            # the answers to the other handshakes, if any
+        self._serial.reset_input_buffer()
         width, height = reply[4] + reply[5] * 256, reply[6] + reply[7] * 256
         write = reply[11] + reply[12] * 256
         self.write_size = write if 32 <= write <= 1920 else DEFAULT_WRITE

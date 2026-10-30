@@ -93,12 +93,12 @@ class TestFeed(unittest.TestCase):
         p = subprocess.Popen([self.exe, "--port", self.port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             a = frame([(9, 5, (9, 8, 7)), (100, 30, (255, 255, 255))])
-            self.serve(lambda: len(self.writes) >= 1, 3)                        # the handshake
+            self.serve(lambda: len(self.writes) >= 8, 3)                        # the handshake
             p.stdin.write(a)
             p.stdin.flush()
             want = b"".join(wire(pk) for pk in z.zone_packets(a, None, W, H))
-            self.serve(lambda: len(b"".join(self.writes[1:])) >= len(want), 5)
-            self.assertEqual(want, b"".join(self.writes[1:]))
+            self.serve(lambda: len(b"".join(self.writes[8:])) >= len(want), 5)
+            self.assertEqual(want, b"".join(self.writes[8:]))
             b = frame([(9, 5, (9, 8, 7)), (100, 30, (255, 0, 0))])             # one zone changes
             n = len(self.writes)
             p.stdin.write(b)
@@ -115,13 +115,13 @@ class TestFeed(unittest.TestCase):
         """Feed one frame of shades with the given feeder arguments; the zone packets written for it."""
         p = subprocess.Popen([self.exe, "--port", self.port, "--shades"] + args, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            self.serve(lambda: len(self.writes) >= 1, 3)
+            self.serve(lambda: len(self.writes) >= 8, 3)
             p.stdin.write(shades)
             p.stdin.flush()
             n = len(self.writes)
             self.serve(lambda: len(self.writes) > n + 1, seconds)
             self.serve(lambda: False, 0.5)
-            return b"".join(self.writes[1:])
+            return b"".join(self.writes[8:])
         finally:
             p.stdin.close()
             p.wait(5)

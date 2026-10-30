@@ -43,7 +43,11 @@ godot --path GAME -- --zedmd --zedmd-feed=$PWD/zedmd_feed # MPF with examples/dm
    virtual platform, and the game must not also send `--proc-dmd`-style frames.
 4. To check on hardware: the PIN2DMD's colour order (`panel: rbg` swaps green and blue) and its firmware's "virtual
    pinball" mode; the ZeDMD's port, firmware 5.x, colour order, and the brightness command's payload (a guess).
-5. Colour pictures (a colourisation) are out of scope here: this add-on only ever sends one colour scaled by
+5. A ZeDMD on a Raspberry Pi Pico 2 (firmware 6.1.3) announces a write size of 512 and reads everything in 512-byte blocks,
+   the handshake included: one 64-byte handshake is answered only after the eighth (leftovers stay buffered between opens), so
+   a probe succeeded about one time in four. Observed on a real one. The handshake is sent eight times in one write now
+   (native feeder, `zedmd_native.py`, `dmd_panel.py`); a 64-byte-block firmware answers the first and the rest is dropped.
+6. Colour pictures (a colourisation) are out of scope here: this add-on only ever sends one colour scaled by
    brightness.
 
 ## Serum colour (ZeDMD, native feeder)
