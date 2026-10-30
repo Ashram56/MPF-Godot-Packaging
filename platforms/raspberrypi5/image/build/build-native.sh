@@ -31,7 +31,7 @@ KIT="$(cd "$(dirname "$0")" && pwd)"
 WORK="${WORK:-$PWD/work}"
 SUITE=trixie
 MIRROR="http://deb.debian.org/debian"
-RPI_MIRROR="http://archive.raspberrypi.com/debian"
+RPI_MIRROR="https://archive.raspberrypi.com/debian"
 RPI_KEY_FPR=CF8A1AF502A2AA2D763BAE7E82B129927FA3303E   # Raspberry Pi Archive Signing Key
 IMG_NAME="rpi5-debian13-sd.img"
 PI_PASSWORD="${PI_PASSWORD:-raspberry}"
@@ -46,7 +46,8 @@ FWDIR="$WORK/firmware"      # bind-mounted on $R/boot/firmware while packages in
 OUT="$WORK/out"
 
 log() { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
-in_chroot() { LC_ALL=C DEBIAN_FRONTEND=noninteractive chroot "$R" /usr/bin/env bash -c "$*"; }
+CHROOT_ENV=()   # set by proxy_in
+in_chroot() { LC_ALL=C DEBIAN_FRONTEND=noninteractive chroot "$R" /usr/bin/env "${CHROOT_ENV[@]}" bash -c "$*"; }
 
 mount_chroot() {
     mkdir -p "$R/boot/firmware" "$FWDIR"
@@ -74,6 +75,23 @@ umount_chroot() {
     fi
     return 0
 }
+# Behind a TLS-inspecting proxy (CI sandboxes): give the chroot the proxy and its CA while the installers run. /etc/environment
+# is read by `su -`. Both are removed again afterwards, the image never carries them.
+proxy_in() {
+    [ -n "${HTTPS_PROXY:-}" ] && [ -f "${CURL_CA_BUNDLE:-}" ] || return 0
+    cp "$CURL_CA_BUNDLE" "$R/usr/local/share/ca-certificates/build-proxy.crt"
+    CHROOT_ENV=(SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+                PIP_CERT=/etc/ssl/certs/ca-certificates.crt UV_NATIVE_TLS=1)
+    in_chroot "update-ca-certificates >/dev/null 2>&1"
+    printf 'HTTPS_PROXY=%s\nhttps_proxy=%s\nNO_PROXY=%s\nno_proxy=%s\nSSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt\nCURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt\nREQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt\nPIP_CERT=/etc/ssl/certs/ca-certificates.crt\nUV_NATIVE_TLS=1\n' \
+        "$HTTPS_PROXY" "$HTTPS_PROXY" "${NO_PROXY:-}" "${NO_PROXY:-}" > "$R/etc/environment"
+}
+proxy_out() {
+    rm -f "$R/usr/local/share/ca-certificates/build-proxy.crt" "$R/etc/environment"
+    CHROOT_ENV=()
+    in_chroot "update-ca-certificates --fresh >/dev/null 2>&1"
+}
+
 trap 'umount_chroot || true' EXIT
 
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
@@ -142,6 +160,7 @@ printf '127.0.0.1\tlocalhost\n127.0.1.1\tmpf-pi5\n::1\tlocalhost ip6-localhost i
 printf 'LABEL=firmware /boot/firmware vfat defaults 0 2\nLABEL=rootfs / ext4 defaults,noatime 0 1\n' > "$R/etc/fstab"
 
 mount_chroot
+proxy_in
 in_chroot "apt-get update -qq && apt-get -y -qq upgrade"
 # Kernel, Pi bootloader files and device trees (raspi-firmware fills /boot/firmware), Wi-Fi firmware
 SYSTEM_PKGS="systemd systemd-sysv systemd-timesyncd systemd-resolved dbus udev kmod sudo locales openssh-server
@@ -219,6 +238,8 @@ install -m 644 "$CAB/mpf-netconfig.env" "$R/etc/default/mpf-netconfig"
 # Game bundle uploaded from the web page (common/games/README.md): GODOT / MPF_GAME_VENV point at what the base system provides
 mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"
 install -m 644 "$CAB/mpf-game.env" "$R/etc/default/mpf-game"
+# default sound on HDMI output 0 (the Pi 5 has no jack)
+install -m 644 "$CAB/asound.conf" "$R/etc/asound.conf"
 in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service mpf-netconfig-inbox.service >/dev/null 2>&1"
 
 in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
@@ -293,6 +314,7 @@ WantedBy=multi-user.target
 UNIT
 in_chroot "systemctl enable ssh-hostkeys.service >/dev/null 2>&1"
 
+proxy_out
 # Package manifest for review (before the chroot is torn down)
 LC_ALL=C chroot "$R" dpkg-query -W -f='${Package}\t${Version}\t${Installed-Size}\n' > "$OUT/packages.tsv"
 umount_chroot
