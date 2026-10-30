@@ -247,7 +247,7 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(u.query)
             return self._json(MON.MON.snapshot(*(float(q.get(k, ["0"])[0] or 0) for k in ("since",)), *(int(q.get(k, ["0"])[0] or 0) for k in ("rev", "epoch"))))
         if p.startswith("/api/settings/"):
-            game = G.installed_game(p.rsplit("/", 1)[1])
+            game = G.installed_game(unquote(p.rsplit("/", 1)[1]))
             return self._json({"html": settings_form(game)}) if game else self._json({"error": "no such game"}, 404)
         if p.startswith("/media/"):
             for g in G.installed_games():
@@ -347,7 +347,7 @@ class Handler(BaseHTTPRequestHandler):
             G.delete_game(form.get("folder", ""))
             return "Game removed."
         if path.startswith("/api/settings/"):
-            game = G.installed_game(path.rsplit("/", 1)[1])
+            game = G.installed_game(unquote(path.rsplit("/", 1)[1]))
             if not game:
                 raise ValueError("no such game")
             G.settings_save(game, form)
