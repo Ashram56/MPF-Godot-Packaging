@@ -19,6 +19,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mpf_audio as AU  # noqa: E402
 import mpf_bundlecheck as BC  # noqa: E402
 import mpf_common as C  # noqa: E402
 import mpf_dmd as DMD  # noqa: E402
@@ -919,6 +920,7 @@ def game_exec():
         time.sleep(3)           # let the window manager settle
     volatile_game_dirs(game)
     xdg = ram_xdg_env()
+    audio = AU.prepare()          # the sound output chosen on the page (root: it writes in /run)
     argv, cwd = game_command(game, b, env)
     os.chdir(cwd)
     os.setgroups(os.getgrouplist(C.USER, pw.pw_gid))
@@ -927,7 +929,7 @@ def game_exec():
     # the X cookie: where /etc/profile.d/mpf-readonly.sh puts it in read-only mode, else in the home folder
     xauth = f"/tmp/.Xauthority-{C.USER}" if C.READONLY else os.path.join(pw.pw_dir, ".Xauthority")
     child = dict(os.environ, HOME=pw.pw_dir, USER=C.USER, DISPLAY=env.get("DISPLAY", ":0"),
-                 XAUTHORITY=env.get("XAUTHORITY", xauth), **xdg, **game_environment(b, env))
+                 XAUTHORITY=env.get("XAUTHORITY", xauth), **xdg, **audio, **game_environment(b, env))
     os.execve(argv[0] if os.path.isabs(argv[0]) else (shutil.which(argv[0]) or argv[0]), argv, child)
 
 
