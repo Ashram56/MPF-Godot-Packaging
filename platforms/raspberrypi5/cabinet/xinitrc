@@ -1,0 +1,10 @@
+#!/bin/sh
+# ~/.xinitrc, multi-screen like the Jetson image: every connected output is switched on and placed left to right, the
+# first one primary. A Pi 5 has two micro-HDMI outputs (e.g. backglass and the full LCD DMD); the game places its windows
+# by screen (PuP Pack: backglass, DMD, topper). Edit to taste (xrandr --output HDMI-A-2 --mode 1920x1080 ...).
+prev=""
+for out in $(xrandr | awk '/ connected/ {print $1}'); do
+    if [ -z "$prev" ]; then xrandr --output "$out" --auto --primary; else xrandr --output "$out" --auto --right-of "$prev"; fi
+    prev="$out"
+done
+exec openbox-session
