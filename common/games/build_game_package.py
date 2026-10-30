@@ -306,7 +306,9 @@ def publish(url, archive, folder, meta=None, digest=""):
     if not user or not pw:
         die("--publish needs WEBDAV_USER and WEBDAV_PASS in the environment")
     auth = "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
-    base = url.rstrip("/") + "/" + (folder + "/" if folder else "")
+    if not folder:
+        die("a game is published in a sub-folder named by its id, never at the root")
+    base = url.rstrip("/") + "/" + folder + "/"
 
     def req(method, target, data=None, want_body=False):
         r = urllib.request.Request(target, data=data, method=method, headers={"Authorization": auth})

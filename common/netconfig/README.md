@@ -134,3 +134,10 @@ The page has four tabs (*Games*, *Install and updates*, *Configuration*, *Switch
   and of this page, the game's log files, latest switch changes) to `/data/logs` (`/var/lib/mpf-logs` on an ordinary image,
   `MPF_SAVED_LOGS_DIR`), keeps the latest 20 and lists them for download: in read-only mode the live logs are in RAM, this keeps them.
 How a game builds a bundle for this page: [platforms/game-bundles.md](../../platforms/game-bundles.md).
+
+## Scenarios (Monitor tab)
+
+*Record a scenario* on the Monitor tab saves what you click (switch, time) under the game's id; ▶ replays it on the machine with the same timing.
+The download button gives `{"format": 1, "events": [[seconds, switch, "on|off|toggle|tap"], ...]}`, which `common/games/replay_scenario.py`
+plays into any MPF started in simulation through its BCP server (for qualification after a change of the game's code; exit 1 when the game
+no longer has a switch of the scenario).

@@ -33,6 +33,7 @@ Options of the common cases:
   --description T / --icon FILE   text and picture shown on the page's game list (icon relative to `game/`)
 """
 import argparse
+import datetime
 import fnmatch
 import hashlib
 import json
@@ -179,6 +180,7 @@ def main():
         "format": 1, "id": a.id, "name": a.name or a.id, "version": a.version,
         "description": a.description,
         "target": {"os": "linux", "arch": a.arch},
+        "built": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "run": {"start": a.start, "cwd": "game", "needs_display": not a.no_display, "game_args": a.game_args},
         "keep_on_update": ["game/" + k for k in a.keep],
     }

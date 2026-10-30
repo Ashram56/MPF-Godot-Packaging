@@ -324,6 +324,24 @@ class PupLibrary(Base):
         G.delete_pup(name)
         self.assertEqual(G.pup_library(), [])
 
+    def test_leftover_unpacked_copy_is_listed_and_can_be_deleted(self):
+        """Deleting every game that used a pack leaves its unpacked copy (up to GBs): it is listed (with or without the zip) and removable."""
+        self.install(extra=self.PACK)
+        name = self.upload()
+        G.assign_pup("demo@1.0", name)
+        lib = G.pup_library()
+        self.assertEqual(lib[0]["used_by"], ["Demo 1.0"])
+        self.assertGreater(lib[0]["installed"], 0)
+        G.delete_game("demo@1.0")
+        self.assertEqual(G.pup_library()[0]["used_by"], [])
+        os.remove(G.pup_zip(name))                                            # zip gone, copy still there
+        lib = G.pup_library()
+        self.assertEqual((lib[0]["name"], lib[0]["zip"]), (name, False))
+        G.delete_pup(name)
+        self.assertEqual(G.pup_library(), [])
+        with self.assertRaises(G.JobError):
+            G.delete_pup(name)
+
     def test_extract_only_unpacks_the_authors_zip_and_runs_nothing(self):
         """pup.extract_only: the zip's pack folder (the one holding triggers.pup, at any depth) is only unpacked; the game's install command
         (which would write a marker) never runs, and the media folder of the bundle is left alone."""
