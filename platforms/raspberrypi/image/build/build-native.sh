@@ -229,7 +229,7 @@ printf 'MPF_GAME_ARGS=-- --rendering-driver opengl3 --max-fps 30 --audio-output-
 install -m 644 "$CAB/asound.conf" "$R/etc/asound.conf"
 in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service mpf-netconfig-inbox.service >/dev/null 2>&1"
 
-in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
+in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty,dialout -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
 if [ "$READONLY" = 1 ]; then
     . "$REPO_ROOT/common/readonly/install-readonly.sh"
     mpf_readonly_install "$R" pi /boot/firmware ""
@@ -264,6 +264,10 @@ if [ -n "$EXTRAS" ]; then
             tar -C "$REPO_ROOT" --exclude=.git --exclude=.cache --exclude=.venv --exclude=toolchain \
                 --exclude='platforms/*/image/build/work' -cf - . | tar -C "$R/home/pi/MPF-Godot" -xf -
         fi
+        # dmd_bridge for a ZeDMD (unmodified libzedmd ed69d49, libgpiod, libserum): where the setup page looks for it
+        (cd "$KIT/files" && sha256sum -c dmd_bridge-aarch64-libzedmd-ed69d49.tar.gz.sha256)
+        mkdir -p "$R/home/pi/MPF-Godot/native/bin"
+        tar -xzf "$KIT/files/dmd_bridge-aarch64-libzedmd-ed69d49.tar.gz" -C "$R/home/pi/MPF-Godot/native/bin"
         in_chroot "chown -R pi:pi /home/pi"
         in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
         # sudo cannot work in the chroot (qemu-user binfmt without the C flag ignores setuid), so the installer

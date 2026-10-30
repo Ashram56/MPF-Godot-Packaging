@@ -50,3 +50,5 @@ The cabinet files in [../cabinet](../cabinet/) hold the measured settings; the i
 | Screen EDID, `video=HDMI-A-2:1920x1080@60D` in `cmdline.txt`, timezone | **no**: they depend on the screen and the owner; edit `cmdline.txt` (FAT partition) |
 
 To switch the hardware decoder on once the module and the patched Godot are installed: add `GOZEN_HWDEC=1` to `/etc/default/mpf-netconfig`, `--render-thread separate` to `MPF_GAME_ARGS`, `GODOT=` to the patched binary, and restart `mpf-game`.
+
+**ZeDMD:** `dmd_bridge` (libzedmd ed69d49 unmodified, libgpiod 2.2.4, libserum 2.8.2; tarball in `build/files/`) is installed in `/home/pi/MPF-Godot/native/bin/dmd_bridge/`, where the setup page's *DMD output* looks for it; `pi` is in `dialout` for the serial port. It has only run under emulation: test it with a real ZeDMD.
