@@ -3,7 +3,7 @@
 # (--serum LIB DIR ROM), which loads it with dlopen. Needs git, cmake and a C++ compiler.
 #
 #   native/serum/build_libserum.sh [OUT_DIR]      prints the path of the library, default OUT_DIR native/bin; also OUT_DIR/libserum.a
-#                                                 and OUT_DIR/include/serum.h (LIBSERUM_DIR=OUT_DIR for a game that links it)
+#                                                 and OUT_DIR/include/*.h (LIBSERUM_DIR=OUT_DIR for a game that links it)
 #
 # SERUM_VERSION (default v2.8.2, the stable line) and FRAMEUTIL_VERSION (default main, a header only) pin what is fetched.
 set -euo pipefail
@@ -22,11 +22,11 @@ mkdir -p "$OUT"
 lib="$(find "$work/build" -maxdepth 1 \( -name 'libserum*.so' -o -name 'libserum*.dylib' \) | head -1)"
 [ -n "$lib" ] || { echo "libserum was not built" >&2; exit 1; }
 cp -L "$lib" "$OUT/"
-# for a game that links libserum itself (a LIBSERUM_DIR with serum.h and libserum.a): the static library and the header
+# for a game that links libserum itself (a LIBSERUM_DIR with serum.h and libserum.a): the static library and the headers
 static="$(find "$work/build" -maxdepth 1 -name 'serum_static.a' -o -maxdepth 1 -name 'libserum_static.a' | head -1)"
 if [ -n "$static" ]; then
     mkdir -p "$OUT/include"
     cp -L "$static" "$OUT/libserum.a"
-    cp "$work/libserum/src/serum.h" "$OUT/include/"
+    cp "$work/libserum/src/"*.h "$OUT/include/"
 fi
 echo "$OUT/$(basename "$lib")"
