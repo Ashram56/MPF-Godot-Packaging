@@ -3,8 +3,9 @@
 # the folders that must keep their content on it. Everything else stays read-only. Steps:
 #   1. find the partition labelled MPF_DATA_LABEL; if there is none (first boot), create it in the free space at the end
 #      of the disk the root lives on, and format it (ext4 with its journal: a cabinet loses power without warning)
-#      an image made with common/games/inject_image.py already carries the partition (with games in its inbox): it is grown to the end
-#      of the disk when it is the last partition and free space follows it
+#      an image made with common/games/inject_image.py carries a small FAT32 partition labelled MPFSEED instead (games in its inbox/,
+#      made without Linux tools): its files are copied into <data>/inbox once, at step 2. An older image made by that tool carries
+#      the partition itself (games in its inbox): it is grown to the end of the disk when it is the last partition and free space follows it
 #   2. fsck -p, mount it on MPF_DATA_MOUNT (noatime); if that fails, a tmpfs takes its place so the system still boots
 #   3. for each "name:target" of MPF_PERSIST, seed <data>/persist/<name> from the image's target once, bind-mount it over the target
 #   4. if the maintenance flag (<data>/mpf/maintenance) is there, switch the root (and boot) partition to writable
@@ -66,6 +67,27 @@ grow_partition() {
     resize2fs "$dev" >/dev/null 2>&1 || log "resize2fs failed on $dev"
 }
 
+# Games put in the image before flashing (inject_image.py): the FAT32 partition MPFSEED holds an inbox/ folder. Copied once.
+import_seed() {
+    local seed id marker mnt="${MPF_SEED_MOUNT:-/run/mpf-seed}"
+    seed="$(blkid -L "${MPF_SEED_LABEL:-MPFSEED}" 2>/dev/null)"
+    [ -n "$seed" ] || return 0
+    [ -e "$DEGRADED" ] && return 0                      # the data is in RAM: do not use it up with bundles
+    id="$(blkid -s UUID -o value "$seed" 2>/dev/null)"; id="${id:-seed}"
+    marker="$DATA/mpf/seed-imported-$id"
+    [ -e "$marker" ] && return 0
+    mkdir -p "$mnt" "$DATA/inbox" "$DATA/mpf"
+    mount -t vfat -o ro,nosuid,nodev,noexec "$seed" "$mnt" || { log "cannot mount the seed $seed"; return 0; }
+    if [ -d "$mnt/inbox" ]; then
+        if cp -r --no-preserve=mode,ownership "$mnt/inbox/." "$DATA/inbox/"; then
+            sync; : > "$marker"; log "copied the games of $seed to $DATA/inbox"
+        else
+            log "copying the games of $seed failed"
+        fi
+    fi
+    umount "$mnt"
+}
+
 dev="$(blkid -L "$LABEL" 2>/dev/null)"
 if [ -z "$dev" ]; then
     udevadm settle --timeout=30
@@ -86,6 +108,7 @@ if [ -z "$dev" ]; then
     : > "$DEGRADED"
 fi
 mkdir -p "$DATA/persist" "$DATA/mpf" "$DATA/uploads" "$DATA/cache"
+import_seed
 if [ -n "$USERNAME" ] && id "$USERNAME" >/dev/null 2>&1; then chown "$USERNAME": "$DATA/cache"; fi
 
 for pair in ${MPF_PERSIST:-}; do
