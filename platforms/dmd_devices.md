@@ -82,19 +82,21 @@ colourisation file or on a real ZeDMD yet.** 256x64 (extra) pictures are not use
 frames; a ZeDMD HD needs another step. A Serum file keyed on the ROM's own frames needs the game to show exactly the
 ROM's pictures (a game whose DMD differs from the ROM's, for example an HD or changed font, gets no match).
 
-## PPUC's libdmdutil (ZeDMD, PIN2DMD, Serum): `dmd_bridge`
+## PPUC's libzedmd and libserum: `dmd_bridge`
 
-Preferred over `zedmd_feed`'s own copy of the ZeDMD protocol: [PPUC/libdmdutil](https://github.com/PPUC/libdmdutil) is the library
-Visual Pinball Standalone uses. It brings libzedmd, libserum (v2.8.2, the one pinned above), the PIN2DMD and the Pixelcade, **unmodified**.
+Preferred over `zedmd_feed`'s own copy of the ZeDMD protocol (owner's choice, 2026-10-30: the lighter library, `libzedmd`, not
+`libdmdutil`). Both PPUC libraries are used **unmodified**; the bridge only reads frames and hands them over.
 
 | Step | What |
 |---|---|
-| `native/dmdutil/build_dmdutil.sh [OUT]` | clones libdmdutil at the pinned commit (`DMDUTIL_SHA`, it has no release tags) and runs its own `platforms/<os>/<arch>/external.sh` for libusb, libzedmd, libserum, libpupdmd and libvni, then builds it. A shim makes PPUC's `curl` archive downloads work through `git` (networks that only allow git). Needs git, cmake, a C++ compiler, autoconf/automake/libtool, libudev-dev (Debian/Ubuntu). One build per CPU (x64, aarch64). |
-| `native/dmd_bridge/build.sh [DIR]` | builds `dmd_bridge`, which reads 128x32 frames of shades (one byte, 0-15) on stdin and gives them to `DMDUtil::DMD::UpdateData`; `--rom NAME --altcolor DIR` turns Serum on (`DIR/NAME/NAME.cRZ`, `.cROM` or `.cROMc`), frames it does not know keep `--color RRGGBB`. `--probe`, `--device PORT`, `--wifi ADDR`, `--brightness`. |
-| `dmd_out` | `--zedmd=#RRGGBB --zedmd-shades --zedmd-feed=DIR/dmd_bridge --zedmd-feed-arg=--rom --zedmd-feed-arg=NAME --zedmd-feed-arg=--altcolor --zedmd-feed-arg=DIR` |
+| `native/libzedmd/build_libzedmd.sh [OUT]` | clones PPUC/libzedmd at the pinned commit (`LIBZEDMD_SHA`) and runs its own `platforms/<os>/<arch>/external.sh` (cargs, libserialport, libframeutil, sockpp). A shim makes PPUC's `curl` archive downloads work through `git` (networks that only allow git). Needs git, cmake, a C++ compiler, autoconf/automake/libtool. One build per CPU (x64, aarch64, arm64 on a Mac); about half a minute. |
+| `native/serum/build_libserum.sh [OUT]` | libserum v2.8.2, loaded by the bridge at run time (`dlopen`). |
+| `native/dmd_bridge/build.sh [DIR]` | builds `dmd_bridge`: it reads 128x32 frames of shades (one byte, 0-15) on stdin and draws them with `ZeDMD::RenderRgb888`; with `--serum-lib LIB --rom NAME --altcolor DIR` (`DIR/NAME/NAME.cRZ`, `.cROM` or `.cROMc`) libserum colours the frames it knows (v1 palette, v2 RGB565 32p), the others keep `--color RRGGBB`, rotations run on libserum's timer. `--probe`, `--device PORT`, `--wifi ADDR`, `--brightness`, `--rgb-out FILE` (tests, no ZeDMD). |
+| `dmd_out` | `--zedmd=#RRGGBB --zedmd-shades --zedmd-feed=DIR/dmd_bridge --zedmd-feed-arg=--serum-lib --zedmd-feed-arg=LIB --zedmd-feed-arg=--rom --zedmd-feed-arg=NAME --zedmd-feed-arg=--altcolor --zedmd-feed-arg=DIR` |
 
-Checked: built on x86_64 (about 2 minutes); `tests/test_dmd_bridge.py` (with `DMDUTIL_DIR=<output>`) and a manual run that loads
-a real `.cROMc` (5211 frames, Serum v2). Not checked on a real ZeDMD with this bridge yet, nor built for aarch64.
+Checked: built on x86_64; `tests/test_dmd_bridge.py` (`LIBZEDMD_DIR=<output>`, optionally `LIBSERUM`, `SERUM_ALTCOLOR`, `SERUM_ROM`) and
+a manual run that loads a real `.cROMc` (5211 frames, Serum v2). Not checked on a real ZeDMD with this bridge yet, nor built for aarch64.
+The PIN2DMD is not covered (libzedmd drives the ZeDMD only): MPF's `pin2dmd` platform stays for it.
 
 ## Choosing the device
 
