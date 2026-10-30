@@ -192,7 +192,7 @@ def list_remote(cfg=None):
                        or (e["group"] and e["group"].lower() == g["id"].lower())), None) if kind == "game" else None
         items.append({"key": key, "for": (target["name"] + " " + target["version"]) if target else "", "name": n, "group": e["group"], "kind": kind, "size": e["size"], "mtime": e["mtime"], "url": e["url"],
                       "sha_url": e["url"] + ".sha256" if (e["group"], n + ".sha256") in names else "",
-                      "compatible": compatible, "installed": key in done,
+                      "compatible": compatible, "installed": key in done, "loose": not e["group"],
                       "changed": key in done and done[key] != stamp})
     if manifest is not None:
         items = manifest_items(cfg, manifest, installed, me) + items
