@@ -22,6 +22,7 @@ const FPS := 30.0
 const DEFAULT_COLOR := "#ff730d"
 const FEED_ARG := "--zedmd-feed="
 const SHADES_ARG := "--zedmd-shades"
+const FEED_ARGS_ARG := "--zedmd-feed-args="    # arguments for the feeder, separated by |  (e.g. --shades|--serum|DIR|--rom|NAME)
 
 var _color := Color(DEFAULT_COLOR)
 var _palette := PackedByteArray()      # 16 shades x 3 bytes
@@ -29,6 +30,8 @@ var _last := PackedByteArray()
 var _elapsed := 0.0
 var _feed: FileAccess = null           # the feeder's stdin
 var _feed_pid := 0
+var _feed_path := ""
+var _feed_args := PackedStringArray()
 var _shades := false                   # the feeder gets shades 0-15, one byte per dot, not RGB
 
 
@@ -46,13 +49,17 @@ func _ready() -> void:
 			_feed_name = a.trim_prefix(FEED_NAME_ARG)
 		elif a == SHADES_ARG:
 			_shades = true
+		elif a.begins_with(FEED_ARGS_ARG):
+			_feed_args = a.trim_prefix(FEED_ARGS_ARG).split("|", false)
 		elif a.begins_with(FEED_ARG):
-			_start_feed(a.trim_prefix(FEED_ARG))
+			_feed_path = a.trim_prefix(FEED_ARG)
 		elif a.begins_with("--pin2dmd=") or a.begins_with("--zedmd="):
 			on = true
 			var v := a.substr(a.find("=") + 1).strip_edges().to_lower()
 			if Color.html_is_valid(v):
 				_color = Color(v)
+	if _feed_path != "":
+		_start_feed(_feed_path)                # after the whole command line: its args and --zedmd-shades are known
 	set_process(on)
 	_palette = shade_palette(_color)
 
@@ -69,7 +76,7 @@ func _source() -> Viewport:
 
 
 func _start_feed(path: String) -> void:
-	var run := OS.execute_with_pipe(path, [])
+	var run := OS.execute_with_pipe(path, _feed_args)
 	if run.is_empty():
 		push_warning("zedmd_feed did not start: " + path)
 		return
