@@ -59,3 +59,52 @@ class Scenarios(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Replay(unittest.TestCase):
+    def test_replay_tool_against_a_fake_bcp_server(self):
+        import json
+        import socket
+        import subprocess
+        import threading
+        srv = socket.socket()
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        got = []
+
+        def serve():
+            c, _ = srv.accept()
+            buf = b""
+            while True:
+                d = c.recv(4096)
+                if not d:
+                    break
+                buf += d
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    line = line.decode()
+                    if line.startswith("service"):
+                        c.sendall(("list_switches?json=" + json.dumps({"switches": [["s_a", "A", "1", "b", 0], ["s_b", "B", "2", "b", 0]]}) + "\n").encode())
+                    else:
+                        got.append(line)
+        threading.Thread(target=serve, daemon=True).start()
+        path = os.path.join(tempfile.mkdtemp(), "s.json")
+        json.dump({"format": 1, "events": [[0, "s_a", "on"], [0.1, "s_a", "off"], [0.2, "s_b", "tap"]]}, open(path, "w"))
+        tool = os.path.join(os.path.dirname(__file__), "..", "common", "games", "replay_scenario.py")
+        r = subprocess.run([sys.executable, tool, path, "--port", str(srv.getsockname()[1])], capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(got, ["switch?name=s_a&state=int:1", "switch?name=s_a&state=int:0", "switch?name=s_b&state=int:1", "switch?name=s_b&state=int:0"])
+        json.dump({"format": 1, "events": [[0, "s_zz", "on"]]}, open(path, "w"))
+        srv2 = socket.socket()
+        srv2.bind(("127.0.0.1", 0))
+        srv2.listen(1)
+
+        def serve2():
+            c, _ = srv2.accept()
+            c.recv(4096)
+            c.sendall(("list_switches?json=" + json.dumps({"switches": [["s_a", "A", "1", "b", 0]]}) + "\n").encode())
+            time.sleep(1)
+        threading.Thread(target=serve2, daemon=True).start()
+        r = subprocess.run([sys.executable, tool, path, "--port", str(srv2.getsockname()[1])], capture_output=True, text=True, timeout=20)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("s_zz", r.stderr)
