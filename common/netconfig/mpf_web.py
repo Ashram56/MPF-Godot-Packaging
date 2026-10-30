@@ -52,14 +52,70 @@ def disk(path):
 
 
 def game_icon(g):
-    """URL of a game's picture (bundle.json "icon": a path inside the bundle), or None."""
-    rel = str(g["bundle"].get("icon") or "")
-    if not rel or os.path.splitext(rel)[1].lower() not in IMAGE_TYPES:
-        return None
-    p = os.path.realpath(os.path.join(g["path"], rel))
-    if not p.startswith(os.path.realpath(g["path"]) + os.sep) or not os.path.isfile(p):
-        return None
-    return f"/media/{g['folder']}"
+    """URL of a game's picture (see cover_file), or None."""
+    try:
+        f = cover_file(g)
+    except OSError:
+        f = None
+    return "/media/%s?v=%d" % (g["folder"], int(os.path.getmtime(f))) if f else None
+
+
+VIDEO_TYPES = {".mp4", ".mkv", ".webm", ".mov", ".avi", ".m4v"}
+_COVERS = {}
+_COVER_KEY = {}
+
+
+def _walk_files(root, limit=3000):
+    n = 0
+    for dirpath, dirs, names in os.walk(root, followlinks=True):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in names:
+            n += 1
+            if n > limit:
+                return
+            yield os.path.join(dirpath, name)
+
+
+def cover_file(g):
+    """Path of the picture shown behind a game's card, or None. In order: the bundle's own `icon`, its playfield picture, the biggest
+    picture inside its PuP Pack (backglass art), then one frame of the pack's backglass video (ffmpeg, made once and kept)."""
+    b = g["bundle"]
+    key = (g["folder"], G.pup_assigned(g["path"], b) or G.pup_installed(g["path"], b), os.path.getmtime(os.path.join(g["path"], "bundle.json")))
+    if _COVER_KEY.get(g["folder"]) == key and g["folder"] in _COVERS:
+        return _COVERS[g["folder"]]
+    found = None
+    inside = lambda rel: (lambda p: p if p.startswith(os.path.realpath(g["path"]) + os.sep) and os.path.isfile(p) else None)(  # noqa: E731
+        os.path.realpath(os.path.join(g["path"], rel))) if rel else None
+    icon = inside(str(b.get("icon") or ""))
+    if icon and os.path.splitext(icon)[1].lower() in IMAGE_TYPES:
+        found = icon
+    if not found:
+        found = inside(str((b.get("monitor") or {}).get("image") or "game/monitor/playfield.jpg"))
+    pack = (b.get("pup") or {}).get("pack_dir")
+    if not found and pack and os.path.isdir(os.path.join(g["path"], pack)):
+        best, vids = (0, None), []
+        for f in _walk_files(os.path.join(g["path"], pack)):
+            ext = os.path.splitext(f)[1].lower()
+            try:
+                size = os.path.getsize(f)
+            except OSError:
+                continue
+            if ext in (".png", ".jpg", ".jpeg") and 20_000 < size < 15_000_000 and size > best[0]:
+                best = (size, f)
+            elif ext in VIDEO_TYPES:
+                vids.append(f)
+        if best[1]:
+            found = best[1]
+        elif vids and shutil.which("ffmpeg"):
+            vids.sort(key=lambda f: (0 if "backglass" in f.lower() else 1, f))
+            out = os.path.join(C.STATE_DIR, "covers", g["folder"] + ".jpg")
+            if not os.path.isfile(out):
+                os.makedirs(os.path.dirname(out), exist_ok=True)
+                run("ffmpeg", "-y", "-v", "error", "-ss", "5", "-i", vids[0], "-frames:v", "1", "-vf", "scale=640:-1", out, timeout=60)
+            found = out if os.path.isfile(out) and os.path.getsize(out) > 1000 else None
+    _COVER_KEY[g["folder"]] = key
+    _COVERS[g["folder"]] = found
+    return found
 
 
 def state():
@@ -71,8 +127,12 @@ def state():
             "description": str(b.get("description", ""))[:300], "icon": game_icon(g),
             "pup": {"supported": bool(b.get("pup")), "installed": G.pup_installed(g["path"], b), "assigned": G.pup_assigned(g["path"], b)},
             "settings": bool(G.options_tool(g["path"])),
-            "installed": int(g["mtime"]),
+            "installed": int(g["mtime"]), "built": str(b.get("built") or ""),
         })
+    for g in games:         # the newest of each game (by build date, else by install date): the others are older versions
+        same = [x for x in games if x["id"] == g["id"]]
+        g["versions"] = len(same)
+        g["latest"] = len(same) > 1 and g is max(same, key=lambda x: (x["built"], x["installed"]))
     mode = C.mode_status()
     return {
         "hostname": socket.gethostname(), "arch": C.ARCH.get(platform.machine(), platform.machine()),
@@ -235,6 +295,21 @@ class Handler(BaseHTTPRequestHandler):
             if text is None:
                 return self._send(404, "not found", "text/plain")
             return self._send(200, text, "text/plain; charset=utf-8", [("Content-Disposition", 'attachment; filename="%s"' % unquote(p.rsplit("/", 1)[1]))])
+        if p == "/api/scenarios":
+            g = next((g for g in G.installed_games() if g["active"]), None)
+            return self._json({"game": g["bundle"]["id"] if g else "", "list": MON.scenarios(g["bundle"]["id"]) if g else [],
+                               "player": MON.PLAYER.status()})
+        if p.startswith("/api/scenarios/"):
+            g = next((g for g in G.installed_games() if g["active"]), None)
+            try:
+                ev = MON.read_scenario(g["bundle"]["id"], unquote(p.rsplit("/", 1)[1])) if g else None
+            except ValueError:
+                ev = None
+            if ev is None:
+                return self._send(404, "not found", "text/plain")
+            n = unquote(p.rsplit("/", 1)[1])
+            return self._send(200, json.dumps({"format": 1, "game": g["bundle"]["id"], "events": ev}, indent=1), "application/json",
+                              [("Content-Disposition", 'attachment; filename="%s.json"' % n)])
         if p == "/api/monitor/layout":
             return self._json(MON.layout(next((g for g in G.installed_games() if g["active"]), None)) or {})
         if p == "/api/monitor/image":
@@ -247,12 +322,12 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(u.query)
             return self._json(MON.MON.snapshot(*(float(q.get(k, ["0"])[0] or 0) for k in ("since",)), *(int(q.get(k, ["0"])[0] or 0) for k in ("rev", "epoch"))))
         if p.startswith("/api/settings/"):
-            game = G.installed_game(p.rsplit("/", 1)[1])
+            game = G.installed_game(unquote(p.rsplit("/", 1)[1]))
             return self._json({"html": settings_form(game)}) if game else self._json({"error": "no such game"}, 404)
         if p.startswith("/media/"):
             for g in G.installed_games():
-                if g["folder"] == p[len("/media/"):] and game_icon(g):
-                    f = os.path.join(g["path"], str(g["bundle"]["icon"]))
+                if g["folder"] == unquote(p[len("/media/"):]) and cover_file(g):
+                    f = cover_file(g)
                     return self._send(200, open(f, "rb").read(), mimetypes.guess_type(f)[0] or "application/octet-stream",
                                       [("Cache-Control", "max-age=300")])
             return self._send(404, "not found", "text/plain")
@@ -308,6 +383,26 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/logs/save":
             name = MON.save_log(next((g for g in G.installed_games() if g["active"]), None))
             return f"Saved as {name} in {MON.SAVED}"
+        if path.startswith("/api/scenarios/"):
+            g = next((g for g in G.installed_games() if g["active"]), None)
+            if not g:
+                raise ValueError("no game")
+            gid, act = g["bundle"]["id"], path.rsplit("/", 1)[1]
+            if act == "save":
+                try:
+                    ev = json.loads(form.get("events", "[]"))
+                except ValueError:
+                    raise ValueError("bad events")
+                return "Saved as " + MON.save_scenario(gid, form.get("name", ""), ev)
+            if act == "delete":
+                MON.delete_scenario(gid, form.get("name", ""))
+                return "Deleted"
+            if act == "play":
+                MON.PLAYER.start(form.get("name", ""), MON.read_scenario(gid, form.get("name", "")))
+                return "Playing"
+            if act == "stop":
+                MON.PLAYER.stop()
+                return "Stopped"
         if path == "/api/monitor/switch":
             MON.MON.set_switch(form.get("name", ""), form.get("do", "toggle"))
             return "ok"
@@ -347,7 +442,7 @@ class Handler(BaseHTTPRequestHandler):
             G.delete_game(form.get("folder", ""))
             return "Game removed."
         if path.startswith("/api/settings/"):
-            game = G.installed_game(path.rsplit("/", 1)[1])
+            game = G.installed_game(unquote(path.rsplit("/", 1)[1]))
             if not game:
                 raise ValueError("no such game")
             G.settings_save(game, form)
@@ -403,6 +498,7 @@ button.pri{background:linear-gradient(135deg,var(--accent),var(--accent2));borde
 input,select,textarea{font:inherit;color:var(--text);background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;width:100%}
 input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
 .form{display:grid;gap:10px}.form label{display:grid;gap:4px;color:var(--dim);font-size:13px}
+.mx{border-collapse:collapse;width:100%;font-size:13px}.mx th,.mx td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:center}.mx tbody th{text-align:left;font-weight:600}.mx input{width:auto;accent-color:var(--acc,#4af)}
 .nets{display:grid;gap:6px;max-height:260px;overflow:auto;margin:8px 0}.net{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;border:1px solid var(--line);cursor:pointer;background:var(--bg2)}
 .net:hover{border-color:var(--accent)}a.net{color:var(--text);text-decoration:none}.net svg{width:16px;height:16px;flex:none}.sig{display:inline-flex;gap:2px;align-items:flex-end;height:16px}.sig i{width:4px;background:var(--line);border-radius:1px}.sig i.on{background:var(--accent)}
 .sig i:nth-child(1){height:5px}.sig i:nth-child(2){height:8px}.sig i:nth-child(3){height:12px}.sig i:nth-child(4){height:16px}
@@ -420,8 +516,8 @@ fieldset label{display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px
 dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px}
 .sw{justify-content:flex-start;padding:6px 10px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;text-align:left}
 .sw.on{background:var(--ok);border-color:var(--ok);color:#04210f;font-weight:600}.sw small{display:block;opacity:.7;font-size:11px}
-#monCard.fsx{position:fixed;inset:0;z-index:60;border-radius:0;overflow:auto;background:var(--bg);padding:10px}#monCard.fsx .pfw img{height:calc(var(--z,1)*(100vh - 70px));max-width:none}
-#monCard.fsx #monLogBox,#monCard.fsx h2,#monCard.fsx .muted[data-t=monHint]{display:none}
+#monCard.fsx{position:fixed;inset:0;z-index:60;border-radius:0;overflow:auto;background:var(--bg);padding:10px}#monCard.fsx .pfw img{max-width:none}#monCard.fsx #monPf{overflow:hidden}
+#monCard.fsx #scList,#monCard.fsx #monLogBox,#monCard.fsx h2,#monCard.fsx .muted[data-t=monHint]{display:none}
 .pfw{position:relative;display:inline-block;line-height:0}.pfw img{height:calc(var(--z,1)*min(80vh,860px));max-width:100%;width:auto;display:block;border-radius:10px}
 .sp{position:absolute;transform:translate(-50%,-50%);aspect-ratio:1;min-width:12px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:50%;border:1.5px solid rgba(255,255,255,.6);background:rgba(0,0,0,.4);color:#fff;display:grid;place-items:center;font:bold 10px/1 sans-serif;transition:background .08s}
 .sp.switch{border-radius:3px;cursor:pointer}.sp.switch.on{background:#3ddc97;border-color:#fff;box-shadow:0 0 8px #3ddc97}
@@ -498,6 +594,7 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
  <div class="row"><button id="logsBtn"><svg><use href="#i-term"/></svg><span data-t="logs"></span></button><button id="saveLogBtn" class="pri"><svg><use href="#i-disk"/></svg><span data-t="saveLog"></span></button><button id="monBtn"><svg><use href="#i-cpu"/></svg><span data-t="monitor"></span></button></div>
  <p class="muted mt" data-t="saveLogHint"></p><div class="nets" id="savedLogs"></div></div></section>
 <section data-tab="monitor"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="monitor"></span>&nbsp;<span class="badge" id="monBadge"></span></h2><div class="card" id="monCard"><div class="row"><button id="monFull" type="button" title="">⛶</button><input id="monFilter" style="max-width:240px" data-ph="monFilter"><span id="monZoomBox" class="row hide"><label class="muted row" style="gap:6px"><span data-t="monZoom"></span><input type="range" id="monZ" min="0.5" max="4" step="0.1" style="width:110px;padding:0"></label><label class="muted row" style="gap:6px"><span data-t="monSize"></span><input type="range" id="monK" min="0.8" max="4" step="0.1" style="width:90px;padding:0"></label><button id="monFit" type="button">1:1</button></span><select id="monView" style="width:auto" class="hide"><option value="pf" data-t="monViewPf"></option><option value="list" data-t="monViewList"></option></select><span class="muted" id="monCount"></span></div>
+<div class="row mt" id="scBar"><button id="scRec" type="button"></button><span class="muted" id="scState"></span><span class="grow"></span><span class="muted" id="scNone"></span></div><div class="nets" id="scList"></div>
 <p class="muted" data-t="monHint"></p><div id="monPf" class="hide" style="text-align:center;overflow-x:auto"><div class="pfw" id="pfw"><img id="pfImg" alt=""></div></div><div class="sws mt" id="monGrid"></div><h2 class="mt"><span data-t="monLog"></span></h2><pre id="monLogBox" style="max-height:160px"></pre></div></section>
 </main>
 
@@ -506,7 +603,7 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
 
 <script>
 const T={en:{tabGames:"Games",tabInstall:"Install and updates",tabConfig:"Configuration",diag:"Diagnostics",saveLog:"Save the game log",saveLogHint:"Writes the game output, the machine state and the latest switch changes to one file on the data partition (the live logs are in RAM), to hand it over for debugging.",savedLogs:"Saved logs",monitor:"Switch monitor",monFilter:"Filter…",monToggle:"Click flips the switch",monTap:"Click taps the switch",monHint:"Live view through MPF's BCP connection (the game must be running). Short press = the switch closes and opens, long press = it stays closed while you hold, right click = flips it. Ctrl + wheel zooms.",monLog:"Latest changes",monNone:"No switch yet",monZoom:"Zoom",monSize:"Size",monViewPf:"Playfield",monViewList:"List",monOn:"on",monOff:"off",monConn:"Connected",monDisc:"Not connected",games:"Games",add:"Add a game or a PuP Pack",dropGame:"Game bundle",dropGameHint:"Drop a .tar.xz here or click",dropPup:"PuP Pack",dropPupHint:"Drop the pack's .zip here or click",
-goGame:"Upload and install",goPup:"Add to the library",packs:"PuP Packs",assign:"Pack of each game",assignHint:"A pack is added to the library once, then given to a game here. Switching it costs no new upload (the game keeps a link to the pack).",noPack:"No pack",ownPack:"installed with the game",packNone:"No pack in the library yet.",del:"Delete",confirmDelPack:"Remove this pack from the library?",otaFolder:"Folder on the server",otaUpdates:"updates",otaNew:"new game",keepOld:"Keep the older versions of this game",sha:"Its .sha256 file (optional)",packFor:"Install the pack for",network:"Network",system:"System",scan:"Scan",ssid:"Network name",psk:"Password",country:"Country code",connect:"Save and connect",
+goGame:"Upload and install",goPup:"Add to the library",packs:"PuP Packs",assign:"Pack of each game",assignHint:"A pack is added to the library once, then given to a game here. Switching it costs no new upload (the game keeps a link to the pack).",noPack:"No pack",ownPack:"installed with the game",packNone:"No pack in the library yet.",scDl:"Download (replay_scenario.py plays it into MPF in simulation)",scRec:"Record a scenario",scStop:"Stop and save",scRecording:"Recording your clicks",scNone:"No scenario recorded for this game.",scEmpty:"Nothing was recorded.",scName:"Name of the scenario",scConfirmDel:"Delete this scenario?",loose:"at the root",looseHint:"Not in a sub-folder: webdav_tidy.py puts it in one",del:"Delete",noZip:"no zip",unpacked:"unpacked",usedBy:"used by",inUse:"In use: take it away from the game first",confirmDelPack:"Remove this pack from the library?",otaFolder:"Folder on the server",otaUpdates:"updates",otaNew:"new game",builtOn:"built",installedOn:"installed",latestV:"latest version",olderV:"older version",keepOld:"Keep the older versions of this game",sha:"Its .sha256 file (optional)",packFor:"Install the pack for",network:"Network",system:"System",scan:"Scan",ssid:"Network name",psk:"Password",country:"Country code",connect:"Save and connect",
 sshKey:"SSH public key",sshPw:"SSH password login",unchanged:"unchanged",save:"Save",logs:"Game output",active:"Active",activate:"Activate at startup",start:"Start",stop:"Stop",restart:"Restart",settings:"Settings",delete:"Remove",
 running:"Running",stopped:"Stopped",noGames:"No game installed yet. Add a bundle below.",pupYes:"PuP Pack installed",pupNo:"no PuP Pack",version:"Version",confirmDel:"Remove this game with its settings and scores?",
 game:"Game",storage:"Storage",free:"free",uptime:"Up",online:"Online",offline:"Offline",autostart:"Starts at power-on",noAuto:"Does not start at power-on",enableAuto:"Start at power-on",disableAuto:"Do not start at power-on",
@@ -515,7 +612,7 @@ maintTxt:"The system is writable (for updates of the operating system). Go back 
 degraded:"No data partition: settings and scores are kept in RAM and are lost at power-off.",inbox:"Waiting in the inbox (installed at the next boot): ",inboxHelp:"Files copied to the inbox folder are installed at boot.",
 uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none",ota:"Updates (WebDAV)",otaUrl:"Server address",otaUser:"User",otaPw:"Password",otaPwKept:"unchanged",otaSave:"Save",otaCheck:"Check for updates",otaInstall:"Install",otaDone:"Installed",otaChanged:"Changed on the server",otaNone:"Nothing found in this folder",otaGame:"Game",otaPack:"PuP Pack",otaHint:"The address is the server only; the folder (default MPF Games) holds bundles (.tar.xz, with a .sha256), in sub-folders per game if you like, and PuP Pack .zip files (they go to the library)."},
 fr:{tabGames:"Jeux",tabInstall:"Installation et mises à jour",tabConfig:"Configuration",diag:"Diagnostic",saveLog:"Enregistrer le jeu (log)",saveLogHint:"Écrit la sortie du jeu, l'état de la machine et les derniers changements de switches dans un fichier sur la partition de données (les logs en cours sont en RAM), à fournir pour le débogage.",savedLogs:"Logs enregistrés",monitor:"Moniteur de switches",monFilter:"Filtrer…",monToggle:"Un clic inverse le switch",monTap:"Un clic fait une impulsion",monHint:"Vue en direct par la connexion BCP de MPF (le jeu doit être démarré). Appui court = le switch se ferme puis s'ouvre, appui long = il reste fermé tant que vous maintenez, clic droit = bascule. Ctrl + molette = zoom.",monLog:"Derniers changements",monNone:"Aucun switch",monZoom:"Zoom",monSize:"Taille",monViewPf:"Plateau",monViewList:"Liste",monOn:"actif",monOff:"inactif",monConn:"Connecté",monDisc:"Non connecté",games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
-goGame:"Envoyer et installer",goPup:"Ajouter à la bibliothèque",packs:"PuP Packs",assign:"Pack de chaque jeu",assignHint:"Un pack est ajouté une fois à la bibliothèque, puis affecté à un jeu ici. Le changer ne demande pas de nouvel envoi (le jeu garde un lien vers le pack).",noPack:"Aucun pack",ownPack:"installé avec le jeu",packNone:"Aucun pack dans la bibliothèque.",del:"Supprimer",confirmDelPack:"Retirer ce pack de la bibliothèque ?",otaFolder:"Dossier sur le serveur",otaUpdates:"met à jour",otaNew:"nouveau jeu",keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
+goGame:"Envoyer et installer",goPup:"Ajouter à la bibliothèque",packs:"PuP Packs",assign:"Pack de chaque jeu",assignHint:"Un pack est ajouté une fois à la bibliothèque, puis affecté à un jeu ici. Le changer ne demande pas de nouvel envoi (le jeu garde un lien vers le pack).",noPack:"Aucun pack",ownPack:"installé avec le jeu",packNone:"Aucun pack dans la bibliothèque.",scDl:"Télécharger (replay_scenario.py le rejoue dans MPF en simulation)",scRec:"Enregistrer un scénario",scStop:"Arrêter et enregistrer",scRecording:"Enregistrement de vos clics",scNone:"Aucun scénario enregistré pour ce jeu.",scEmpty:"Rien n'a été enregistré.",scName:"Nom du scénario",scConfirmDel:"Supprimer ce scénario ?",loose:"à la racine",looseHint:"Pas dans un sous-dossier : webdav_tidy.py le range",del:"Supprimer",noZip:"pas de zip",unpacked:"décompressé",usedBy:"utilisé par",inUse:"Utilisé : le retirer du jeu d'abord",confirmDelPack:"Retirer ce pack de la bibliothèque ?",otaFolder:"Dossier sur le serveur",otaUpdates:"met à jour",otaNew:"nouveau jeu",builtOn:"construite le",installedOn:"installée le",latestV:"dernière version",olderV:"ancienne version",keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
 sshKey:"Clé publique SSH",sshPw:"Connexion SSH par mot de passe",unchanged:"inchangé",save:"Enregistrer",logs:"Sortie du jeu",active:"Actif",activate:"Activer au démarrage",start:"Démarrer",stop:"Arrêter",restart:"Redémarrer",settings:"Réglages",delete:"Supprimer",
 running:"En marche",stopped:"Arrêté",noGames:"Aucun jeu installé. Ajoutez un bundle ci-dessous.",pupYes:"PuP Pack installé",pupNo:"pas de PuP Pack",version:"Version",confirmDel:"Supprimer ce jeu avec ses réglages et ses scores ?",
 game:"Jeu",storage:"Stockage",free:"libres",uptime:"Démarré depuis",online:"En ligne",offline:"Hors ligne",autostart:"Démarre à la mise sous tension",noAuto:"Ne démarre pas à la mise sous tension",enableAuto:"Démarrer à la mise sous tension",disableAuto:"Ne pas démarrer à la mise sous tension",
@@ -526,12 +623,13 @@ uploading:"Envoi",installing:"Installation",done:"Terminé",error:"Erreur",hostP
 let L=(localStorage.getItem('mpfLang')||navigator.language||'en').slice(0,2);if(!T[L])L='en';
 const t=k=>(T[L]&&T[L][k])||T.en[k]||k, $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ico=(n,c='')=>`<svg class="${c}" stroke="currentColor"><use href="#i-${n}"/></svg>`;
-function applyLang(){document.documentElement.lang=L;$('#lang').value=L;document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));document.querySelectorAll('[data-ph]').forEach(e=>e.placeholder=t(e.dataset.ph));if(S)render(S)}
+function applyLang(){document.documentElement.lang=L;scDraw();$('#lang').value=L;document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));document.querySelectorAll('[data-ph]').forEach(e=>e.placeholder=t(e.dataset.ph));if(S)render(S)}
 $('#lang').onchange=e=>{L=e.target.value;localStorage.setItem('mpfLang',L);applyLang()};
 let S=null,toastT;
 function toast(m,err){const e=$('#toast');e.textContent=m;e.className='show'+(err?' err':'');clearTimeout(toastT);toastT=setTimeout(()=>e.className='',4200)}
 async function post(url,data){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(data)});
  let j={};try{j=await r.json()}catch(e){j={ok:false,msg:'?'}}toast(j.msg||'',!j.ok);if(j.ok)refresh();return j}
+const fmtD=(d,time)=>{const o=new Date(d);return isNaN(o)?'':o.toLocaleString(L==='fr'?'fr-FR':'en-GB',time?{dateStyle:'medium',timeStyle:'short'}:{dateStyle:'medium'})};
 const fmtB=b=>b>=1e9?(b/1e9).toFixed(1)+' GB':(b/1e6).toFixed(0)+' MB';
 const fmtUp=s=>s>=86400?Math.floor(s/86400)+'d '+Math.floor(s%86400/3600)+'h':s>=3600?Math.floor(s/3600)+'h '+Math.floor(s%3600/60)+'m':Math.floor(s/60)+'m';
 function sig(dbm){const n=dbm>-55?4:dbm>-65?3:dbm>-75?2:dbm>-85?1:0;return `<span class="sig">${[1,2,3,4].map(i=>`<i class="${i<=n?'on':''}"></i>`).join('')}</span>`}
@@ -551,7 +649,8 @@ function render(s){
  $('#games').innerHTML=s.games.length?s.games.map(x=>`<div class="card game ${x.active?'active':''}">
   <div class="cover" ${x.icon?`style="background-image:url('${x.icon}')"`:''}>${x.icon?'':ico('pin')}</div>
   <div><div class="row"><h3 class="grow">${esc(x.name)}</h3>${x.active?`<span class="badge acc">${t('active')}</span>`:''}</div>
-  <p>${t('version')} ${esc(x.version)} · ${x.pup.supported?(x.pup.installed?t('pupYes'):t('pupNo')):''}</p>${x.description?`<p>${esc(x.description)}</p>`:''}</div>
+  <p>${t('version')} ${esc(x.version)} · ${x.pup.supported?(x.pup.installed?t('pupYes'):t('pupNo')):''}</p>
+  <p class="muted">${x.built?t('builtOn')+' '+fmtD(x.built,1)+' · ':''}${t('installedOn')} ${fmtD(x.installed*1000,1)}${x.latest?` <span class="badge ok">${t('latestV')}</span>`:(x.versions>1?` <span class="badge">${t('olderV')}</span>`:'')}</p>${x.description?`<p>${esc(x.description)}</p>`:''}</div>
   <div class="row">${x.active?(s.game.running?`<button data-a="stop">${ico('stop')}${t('stop')}</button><button data-a="restart">${ico('redo')}${t('restart')}</button>`:`<button class="pri" data-a="start">${ico('play')}${t('start')}</button>`)
    :`<button class="pri" data-a="activate" data-f="${esc(x.folder)}">${ico('play')}${t('activate')}</button>`}
    ${x.settings?`<button data-a="settings" data-f="${esc(x.folder)}" data-n="${esc(x.name)}">${ico('gear')}${t('settings')}</button>`:''}
@@ -601,11 +700,12 @@ $('#goGame').onclick=async()=>{const f=$('#fGame')._f;if(!f)return;$('#goGame').
 $('#goPup').onclick=async()=>{const f=$('#fPup')._f;if(!f)return;$('#goPup').disabled=true;await upload('pup',f,'');resetPick($('#dropPup'),$('#fPup'),$('#goPup'),'dropPup')};
 let packBusy=false;
 function packs(s){const lib=s.pups||[],gs=s.games.filter(g=>g.pup.supported);
- $('#packList').innerHTML=lib.map(p=>`<div class="net"><b class="grow">${esc(p.name)}</b><span class="muted">${fmtB(p.size)}</span><button data-pdel="${esc(p.name)}" title="${t('del')}">${ico('trash')}</button></div>`).join('');
+ $('#packList').innerHTML=lib.map(p=>`<div class="net"><b class="grow">${esc(p.name)}</b><span class="muted">${p.zip?fmtB(p.size):t('noZip')}${p.installed?' · '+t('unpacked')+' '+fmtB(p.installed):''}${p.used_by&&p.used_by.length?' · '+t('usedBy')+' '+esc(p.used_by.join(', ')):''}</span><button data-pdel="${esc(p.name)}" title="${p.used_by&&p.used_by.length?t('inUse'):t('del')}"${p.used_by&&p.used_by.length?' disabled':''}>${ico('trash')}</button></div>`).join('');
  $('#packNone').textContent=lib.length?'':t('packNone');
  if(packBusy||document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#packGrid'))return;
- $('#packGrid').innerHTML=gs.map(g=>`<div class="net"><b class="grow">${esc(g.name)} ${esc(g.version)}</b><select data-pg="${esc(g.folder)}"><option value="">${t('noPack')}</option>${lib.map(p=>`<option value="${esc(p.name)}"${g.pup.assigned===p.name?' selected':''}>${esc(p.name)}</option>`).join('')}${g.pup.installed&&!g.pup.assigned?`<option value="" selected hidden>${t('ownPack')}</option>`:''}</select></div>`).join('')||'<span class="muted">—</span>'}
-$('#packGrid').onchange=async e=>{const sel=e.target.closest('select[data-pg]');if(!sel)return;sel.blur();packBusy=true;const r=sel.value?await post('/api/pup/assign',{folder:sel.dataset.pg,pack:sel.value}):await post('/api/pup/unassign',{folder:sel.dataset.pg});packBusy=false;poll()};
+ const cols=lib.filter(p=>p.zip);
+ $('#packGrid').innerHTML=gs.length&&cols.length?`<table class="mx"><thead><tr><th></th><th>${t('noPack')}</th>${cols.map(p=>`<th>${esc(p.name.replace(/\.zip$/i,''))}</th>`).join('')}</tr></thead><tbody>${gs.map(g=>`<tr><th>${esc(g.name)} ${esc(g.version)}${g.pup.installed&&!g.pup.assigned?`<br><span class="muted">${t('ownPack')}</span>`:''}</th><td><input type="radio" name="pg-${esc(g.folder)}" data-pg="${esc(g.folder)}" value=""${!g.pup.assigned&&!g.pup.installed?' checked':''}></td>${cols.map(p=>`<td><input type="radio" name="pg-${esc(g.folder)}" data-pg="${esc(g.folder)}" value="${esc(p.name)}"${g.pup.assigned===p.name?' checked':''}></td>`).join('')}</tr>`).join('')}</tbody></table>`:'<span class="muted">—</span>'}
+$('#packGrid').onchange=async e=>{const sel=e.target.closest('input[data-pg]');if(!sel)return;packBusy=true;const r=sel.value?await post('/api/pup/assign',{folder:sel.dataset.pg,pack:sel.value}):await post('/api/pup/unassign',{folder:sel.dataset.pg});packBusy=false;poll()};
 $('#packList').onclick=async e=>{const b=e.target.closest('button[data-pdel]');if(!b)return;if(!confirm(t('confirmDelPack')))return;await post('/api/pup/delete',{pack:b.dataset.pdel});poll()};
 // network
 async function scan(){const b=$('#scanBtn');b.disabled=true;$('#nets').innerHTML='<span class="muted">…</span>';
@@ -623,7 +723,7 @@ $('#otaForm').addEventListener('input',()=>{otaDirty=true});
 $('#otaForm').onsubmit=async e=>{e.preventDefault();const r=await post('/api/ota/config',Object.fromEntries(new FormData(e.target)));if(r&&r.ok)otaDirty=false};
 $('#otaCheck').onclick=async()=>{const b=$('#otaCheck');b.disabled=true;$('#otaList').innerHTML='<span class="muted">…</span>';
  try{const r=await fetch('/api/ota/list');const j=await r.json();if(!r.ok){toast(j.msg||'?',true);$('#otaList').innerHTML='';b.disabled=false;return}
- $('#otaList').innerHTML=j.map(i=>`<div class="net"><b class="grow">${esc(i.version?i.label+' '+i.version:(i.group?i.group+' / ':'')+i.name)}</b>${i.kind==='game'&&!(i.version&&i.installed&&!i.update)?`<span class="badge">${i.for?t('otaUpdates')+' '+esc(i.for):t('otaNew')}</span>`:''}<span class="muted">${i.kind==='game'?t('otaGame'):t('otaPack')} · ${fmtB(i.size)}</span>${i.changed?`<span class="badge">${t('otaChanged')}</span>`:i.installed?`<span class="badge">${t('otaDone')}</span>`:''}${i.compatible?`<button data-k="${esc(i.key)}">${t('otaInstall')}</button>`:''}</div>`).join('')||'<span class="muted">'+t('otaNone')+'</span>'}catch(e){toast('?',true)}b.disabled=false};
+ $('#otaList').innerHTML=j.map(i=>`<div class="net"><b class="grow">${esc(i.version?i.label+' '+i.version:(i.group?i.group+' / ':'')+i.name)}</b>${i.kind==='game'&&!(i.version&&i.installed&&!i.update)?`<span class="badge">${i.for?t('otaUpdates')+' '+esc(i.for):t('otaNew')}</span>`:''}<span class="muted">${i.kind==='game'?t('otaGame'):t('otaPack')} · ${fmtB(i.size)}${i.mtime&&fmtD(i.mtime)?' · '+fmtD(i.mtime):''}</span>${i.loose?`<span class="badge" title="${t('looseHint')}">${t('loose')}</span>`:''}${i.changed?`<span class="badge">${t('otaChanged')}</span>`:i.installed?`<span class="badge">${t('otaDone')}</span>`:''}${i.compatible?`<button data-k="${esc(i.key)}">${t('otaInstall')}</button>`:''}</div>`).join('')||'<span class="muted">'+t('otaNone')+'</span>'}catch(e){toast('?',true)}b.disabled=false};
 $('#otaList').onclick=async e=>{const b=e.target.closest('button[data-k]');if(!b)return;b.disabled=true;await post('/api/ota/install',{key:b.dataset.k});poll()};
 async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);packs(S);otaFill(S.ota)}catch(e){}}
 const TABS=['games','install','config','monitor'];let TAB=(location.hash||'').slice(1);if(!TABS.includes(TAB))TAB='games';
@@ -669,17 +769,35 @@ function monStop(){clearInterval(monT);monT=null}
 $('#monView').onchange=monView;$('#monBtn').onclick=()=>$('#tabs button[data-go=monitor]').click();$('#monFilter').oninput=monPoll;
 $('#monZ').oninput=e=>{monPref.z=+e.target.value;monSave();monApply()};$('#monK').oninput=e=>{monPref.k=+e.target.value;monSave();monApply()};$('#monFit').onclick=()=>{monPref.z=1;monSave();monApply()};
 $('#monPf').addEventListener('wheel',e=>{if(!e.ctrlKey)return;e.preventDefault();monPref.z=Math.min(4,Math.max(.5,Math.round(((monPref.z||1)*(e.deltaY<0?1.1:1/1.1))*10)/10));monSave();monApply()},{passive:false});
-function monSend(n,d){monQ=monQ.then(()=>fetch('/api/monitor/switch',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({name:n,do:d})}).then(r=>r.json()).then(j=>{if(!j.ok)toast(j.msg||'?',true)}).catch(()=>{}))}
+let scRecT=null,scEv=[];
+function monSend(n,d){if(scRecT!==null&&scEv.length<3000)scEv.push([Math.round((performance.now()-scRecT))/1000,n,d]);monQ=monQ.then(()=>fetch('/api/monitor/switch',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({name:n,do:d})}).then(r=>r.json()).then(j=>{if(!j.ok)toast(j.msg||'?',true)}).catch(()=>{}))}
 function monBind(root,sel){root.addEventListener('pointerdown',e=>{const b=e.target.closest(sel);if(!b||e.button!==0)return;e.preventDefault();try{b.setPointerCapture(e.pointerId)}catch(x){}b.dataset.held='1';monSend(b.dataset.n,'on')});
  const up=e=>{const b=e.target.closest(sel);if(!b||!b.dataset.held)return;delete b.dataset.held;monSend(b.dataset.n,'off')};
  root.addEventListener('pointerup',up);root.addEventListener('pointercancel',up);
  root.addEventListener('contextmenu',e=>{const b=e.target.closest(sel);if(!b)return;e.preventDefault();monSend(b.dataset.n,'toggle')})}
-const fsOff=()=>{$('#monCard').classList.remove('fsx')};
-$('#monFull').onclick=()=>{const c=$('#monCard'),on=!c.classList.contains('fsx');c.classList.toggle('fsx',on);
+function scDraw(){const r=scRecT!==null;$('#scRec').textContent=r?t('scStop'):t('scRec');$('#scRec').classList.toggle('pri',!r);$('#scState').textContent=r?t('scRecording')+' · '+scEv.length:''}
+async function scLoad(){try{const j=await (await fetch('/api/scenarios')).json();const p=j.player||{};
+ $('#scList').innerHTML=(j.list||[]).map(x=>`<div class="net"><b class="grow">${esc(x.name)}</b><span class="muted">${x.events} · ${x.seconds} s</span><a class="btn" href="/api/scenarios/${encodeURIComponent(x.name)}" download title="${t('scDl')}">${ico('disk')}</a>${p.running&&p.name===x.name?`<span class="badge">${p.done}/${p.total}</span><button data-sstop="1">■</button>`:`<button data-splay="${esc(x.name)}"${p.running?' disabled':''}>▶</button>`}<button data-sdel="${esc(x.name)}" title="${t('del')}">${ico('trash')}</button></div>`).join('');
+ $('#scNone').textContent=(j.list||[]).length?'':t('scNone');if(p.running)setTimeout(scLoad,700)}catch(e){}}
+$('#scRec').onclick=async()=>{if(scRecT===null){scEv=[];scRecT=performance.now();scDraw();return}
+ const ev=scEv.slice();scRecT=null;scDraw();if(!ev.length){toast(t('scEmpty'),true);return}
+ const name=(prompt(t('scName'),'')||'').trim();if(!name)return;
+ const r=await post('/api/scenarios/save',{name,events:JSON.stringify(ev)});scLoad()};
+$('#scList').onclick=async e=>{const b=e.target.closest('button');if(!b)return;
+ if(b.dataset.splay!==undefined)await post('/api/scenarios/play',{name:b.dataset.splay});
+ else if(b.dataset.sstop)await post('/api/scenarios/stop',{});
+ else if(b.dataset.sdel!==undefined){if(!confirm(t('scConfirmDel')))return;await post('/api/scenarios/delete',{name:b.dataset.sdel})}
+ scLoad()};
+function monFs(){const c=$('#monCard'),img=$('#pfImg');if(!c.classList.contains('fsx')){img.style.width=img.style.height='';return}
+ const bar=c.querySelector('.row'),r=(img.naturalWidth/img.naturalHeight)||0;if(!r)return;
+ const aw=window.innerWidth-24,ah=window.innerHeight-(bar?bar.offsetHeight:0)-28,w=Math.max(50,Math.min(aw,ah*r));img.style.width=w+'px';img.style.height=(w/r)+'px'}
+window.addEventListener('resize',monFs);$('#pfImg').addEventListener('load',monFs);
+const fsOff=()=>{$('#monCard').classList.remove('fsx');monFs()};
+$('#monFull').onclick=()=>{const c=$('#monCard'),on=!c.classList.contains('fsx');c.classList.toggle('fsx',on);monFs();
  try{if(on&&c.requestFullscreen)c.requestFullscreen().catch(()=>{});else if(!on&&document.fullscreenElement)document.exitFullscreen()}catch(e){}};
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)fsOff()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')fsOff()});
-monBind($('#pfw'),'.sp.switch');monBind($('#monGrid'),'button[data-n]');monApply();
+scDraw();scLoad();monBind($('#pfw'),'.sp.switch');monBind($('#monGrid'),'button[data-n]');monApply();
 applyLang();showTab();if(TAB==="config")savedList();refresh();poll();setInterval(refresh,4000);
 </script></body></html>
 """

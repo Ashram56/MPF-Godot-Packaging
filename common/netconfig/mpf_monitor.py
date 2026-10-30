@@ -283,6 +283,128 @@ class Monitor:
 MON = Monitor()
 
 
+# ---------------------------------------------------------------- scenarios (switch scripts recorded by hand, replayed on the machine)
+SCENARIOS = os.environ.get("MPF_SCENARIOS_DIR") or os.path.join(C.STATE_DIR, "scenarios")
+MAX_EVENTS = 3000
+SCENARIO_DOS = ("on", "off", "toggle", "tap")
+
+
+def _scen_dir(game_id):
+    gid = re.sub(r"[^A-Za-z0-9._-]", "_", str(game_id or ""))[:80]
+    if not gid or gid.startswith("."):
+        raise ValueError("no game")
+    return os.path.join(SCENARIOS, gid)
+
+
+def _scen_name(name):
+    name = re.sub(r"[^A-Za-z0-9._ -]", "_", str(name or "").strip())[:60].strip(" .")
+    if not name:
+        raise ValueError("give the scenario a name")
+    return name
+
+
+def scenarios(game_id):
+    """[{name, events, seconds}] of the scenarios recorded for a game (any version of it)."""
+    d = _scen_dir(game_id)
+    out = []
+    try:
+        names = sorted(n for n in os.listdir(d) if n.endswith(".json"))
+    except OSError:
+        return out
+    for n in names:
+        try:
+            with open(os.path.join(d, n), encoding="utf-8") as f:
+                ev = json.load(f)["events"]
+            out.append({"name": n[:-5], "events": len(ev), "seconds": round(ev[-1][0], 1) if ev else 0})
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            continue
+    return out
+
+
+def check_events(events):
+    """The events as [[seconds, switch, do]] in time order, or ValueError."""
+    if not isinstance(events, list) or not events or len(events) > MAX_EVENTS:
+        raise ValueError(f"a scenario has 1 to {MAX_EVENTS} events")
+    out = []
+    for e in events:
+        try:
+            t, name, do = float(e[0]), str(e[1]), str(e[2])
+        except (TypeError, ValueError, IndexError, KeyError):
+            raise ValueError("bad event")
+        if not (0 <= t < 86400) or not name or do not in SCENARIO_DOS:
+            raise ValueError("bad event")
+        out.append([round(t, 3), name, do])
+    out.sort(key=lambda e: e[0])
+    return out
+
+
+def save_scenario(game_id, name, events):
+    name = _scen_name(name)
+    d = _scen_dir(game_id)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, name + ".json"), "w", encoding="utf-8") as f:
+        json.dump({"format": 1, "events": check_events(events)}, f)
+    return name
+
+
+def read_scenario(game_id, name):
+    try:
+        with open(os.path.join(_scen_dir(game_id), _scen_name(name) + ".json"), encoding="utf-8") as f:
+            return check_events(json.load(f)["events"])
+    except (OSError, KeyError, TypeError):
+        raise ValueError("no such scenario")
+
+
+def delete_scenario(game_id, name):
+    try:
+        os.remove(os.path.join(_scen_dir(game_id), _scen_name(name) + ".json"))
+    except OSError:
+        raise ValueError("no such scenario")
+
+
+class Player:
+    """Plays one scenario at a time through the monitor, with the timing it was recorded with."""
+
+    def __init__(self, send=None):
+        self.send = send or (lambda n, d: MON.set_switch(n, d))
+        self.stop_flag = threading.Event()
+        self.thread = None
+        self.name = ""
+        self.done = 0
+        self.total = 0
+
+    def running(self):
+        return bool(self.thread and self.thread.is_alive())
+
+    def status(self):
+        return {"running": self.running(), "name": self.name, "done": self.done, "total": self.total}
+
+    def start(self, name, events):
+        if self.running():
+            raise ValueError("a scenario is already playing")
+        self.stop_flag.clear()
+        self.name, self.done, self.total = name, 0, len(events)
+        self.thread = threading.Thread(target=self._run, args=(events,), daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.stop_flag.set()
+
+    def _run(self, events):
+        t0 = time.monotonic()
+        for t, n, d in events:
+            if self.stop_flag.wait(max(0.0, t - (time.monotonic() - t0))):
+                break
+            try:
+                self.send(n, d)
+            except ValueError:
+                pass                     # a switch this machine does not have: the rest still plays
+            self.done += 1
+
+
+PLAYER = Player()
+
+
 # ---------------------------------------------------------------- saved logs
 def _tail(path, limit=120_000):
     try:

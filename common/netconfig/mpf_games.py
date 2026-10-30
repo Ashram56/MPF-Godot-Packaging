@@ -534,14 +534,44 @@ def pup_zip(name):
     return os.path.join(C.PUPS, "zips", name)
 
 
+def _du(path):
+    total = 0
+    for dp, _, names in os.walk(path):
+        for n in names:
+            try:
+                total += os.lstat(os.path.join(dp, n)).st_size
+            except OSError:
+                pass
+    return total
+
+
 def pup_library():
-    """[{name, size}] of the packs in the library."""
+    """[{name, size, installed, zip, used_by}] of the packs: the zips in the library and the unpacked copies (`installed`, in bytes)
+    that remain without a zip or without a game using them (the leftover of a deleted game still takes room)."""
     d = os.path.join(C.PUPS, "zips")
     try:
-        names = sorted(n for n in os.listdir(d) if n.lower().endswith(".zip"))
+        names = {n for n in os.listdir(d) if n.lower().endswith(".zip")}
     except OSError:
-        return []
-    return [{"name": n, "size": os.path.getsize(os.path.join(d, n))} for n in names]
+        names = set()
+    copies = {}
+    root = os.path.join(C.PUPS, "installed")
+    try:
+        for n in os.listdir(root):
+            copies.setdefault(n.rsplit("@", 1)[0] + ".zip", []).append(os.path.join(root, n))
+    except OSError:
+        pass
+    names |= set(copies)
+    use = {}
+    for g in installed_games():
+        a = pup_assigned(g["path"], g["bundle"])
+        if a:
+            use.setdefault(a, []).append(f"{g['name']} {g['version']}")
+    out = []
+    for n in sorted(names):
+        z = os.path.join(d, n)
+        out.append({"name": n, "zip": os.path.isfile(z), "size": os.path.getsize(z) if os.path.isfile(z) else 0,
+                    "installed": sum(_du(c) for c in copies.get(n, [])), "used_by": use.get(n, [])})
+    return out
 
 
 def pup_store(path, name):
@@ -680,15 +710,22 @@ def delete_pup_job(name):
 
 
 def delete_pup(name):
+    """Remove a pack: its zip and its unpacked copies. Refused while a game uses it."""
+    name = os.path.basename(name)
     for g in installed_games():
         if pup_assigned(g["path"], g["bundle"]) == name:
             raise JobError(f"in use by {g['name']} {g['version']}: take it away first")
+    found = False
     try:
         os.remove(pup_zip(name))
+        found = True
     except OSError:
-        raise JobError("this pack is not in the library")
+        pass
     for d in glob_installed(name[:-4]):
         shutil.rmtree(d, ignore_errors=True)
+        found = True
+    if not found:
+        raise JobError("this pack is not in the library")
 
 
 def glob_installed(stem):
