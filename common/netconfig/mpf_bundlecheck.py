@@ -113,10 +113,22 @@ def importable(python, names):
         return None
 
 
-def problems(root, python=None, b=None, source=None):
+def python_files(folder):
+    """Every Python file under `folder` (a format 2 bundle has no start script: MPF imports the game's code, so all of it is checked)."""
+    out = []
+    for dirpath, dirs, names in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS)
+        out += [os.path.join(dirpath, n) for n in sorted(names) if n.endswith(".py")]
+    return out
+
+
+def problems(root, python=None, b=None, source=None, starts=None):
     """[str] of what keeps the bundle in `root` from starting; [] when nothing was found. `python` is the game's Python (its venv's; None
     when there is none: third-party names are then not judged). `source` is the folder the bundle was built from, when the caller has
-    it: a module that is in the source but not in the bundle is an omission whatever the Python says."""
+    it: a module that is in the source but not in the bundle is an omission whatever the Python says. `starts` (absolute paths) replaces
+    the start script of `run.start` as the files the walk begins with (format 2)."""
+    if starts is not None:
+        return walk(root, list(starts), python, source)
     if b is None:
         try:
             with open(os.path.join(root, "bundle.json"), encoding="utf-8") as f:
@@ -129,9 +141,14 @@ def problems(root, python=None, b=None, source=None):
     first = os.path.join(root, start)
     if not os.path.isfile(first):
         return [f"run.start runs {start}, which is not in the bundle"]
+    return walk(root, [first], python, source)
+
+
+def walk(root, firsts, python=None, source=None):
+    """Follow the top-level imports of `firsts` through the bundle; [str] of what cannot be found."""
     mods = index(root)
     src_mods = index(source) if source else {}
-    seen, queue, bad, unknown = set(), [first], [], {}
+    seen, queue, bad, unknown = set(), list(firsts), [], {}
     while queue:
         path = queue.pop()
         if path in seen:

@@ -21,8 +21,11 @@ SPEC.json (paths relative to the spec's folder, the game's repository root):
   precheck                     a command (list) run in the game's root first; a non-zero exit stops the build (e.g. "are
                                the generated media current?")
   source_commits               {"name": "git rev-parse argument"} recorded in bundle.json "source" (default game_commit: HEAD)
-  run, options, requires,      copied into bundle.json as they are; "pup": {"install", "pack_dir", "needs_restart"}
-  pup, keep_on_update, extra   tells the setup page how to install the game's PuP Pack (install: a command with ZIP_PATH_OR_URL)
+  format                       2 (platforms/game-bundles.md, "The contract"): bundle.json holds facts only, the platform runs
+                               everything; game_dir, mpf, dmd, pup (rom, manifest), addons, settings, profiles (data),
+                               monitor, icon are copied as they are and checked (common/netconfig/mpf_contract.py)
+  run, options, requires,      format 1 only (no new bundle): copied into bundle.json as they are; "pup": {"install",
+  pup, keep_on_update, extra   "pack_dir", "needs_restart"} tells the setup page how to install the game's PuP Pack
 Run from this platform's checkout (python -m mpf_godot), with GODOT=/path/to/godot unless `mpf_godot setup` ran.
 The version defaults to YYYY.MM.DD-<short commit>; requires.godot is this platform's pinned Godot; keep_on_update
 defaults to []; game/.godot (the import) is packed on purpose.
@@ -43,6 +46,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mpf_godot import fsutil  # noqa: E402
 from mpf_godot import toolchain as tc  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "common", "netconfig"))
+import mpf_contract as K  # noqa: E402
 
 FORMAT = 1
 FORMATS = {"arm64": "etc2", "x86_64": "s3tc", "all": "both"}
@@ -64,7 +69,10 @@ def git(root, *args):
 KEYS = {"id": str, "name": str, "description": str, "icon": str, "game_dir": str, "git_tracked": list, "git_exclude": list, "copy": list,
         "optional": list, "never": list, "never_names": list, "import_seed": list, "force_vram": list, "platform_addons": list,
         "requires": dict, "run": dict, "options": dict, "pup": dict, "keep_on_update": list, "monitor": dict, "profiles": dict,
-        "gozen": dict, "extra": dict, "source_commits": dict, "precheck": list}
+        "gozen": dict, "extra": dict, "source_commits": dict, "precheck": list,
+        "format": int, "mpf": dict, "dmd": dict, "addons": list, "settings": dict}
+# format 2 (platforms/game-bundles.md): files and facts only; these keys go into bundle.json as they are
+V2_KEYS = ("game_dir", "description", "icon", "mpf", "dmd", "pup", "addons", "settings", "profiles", "monitor")
 
 
 def validate_spec(spec):
@@ -75,6 +83,10 @@ def validate_spec(spec):
             problems.append("unknown key `{}` (typo? the contract lists: {})".format(k, ", ".join(sorted(KEYS))))
         elif not isinstance(v, KEYS[k]):
             problems.append("`{}` must be a {}".format(k, KEYS[k].__name__))
+    if K.is_v2(spec):
+        facts = {k: v for k, v in spec.items() if k != "precheck"}       # precheck is a build step of the repository, never in the bundle
+        facts.setdefault("game_dir", "game")
+        return problems + K.problems(facts)
     if not isinstance(spec.get("run", {}), dict) or not spec.get("run", {}).get("start"):
         problems.append("`run.start` is missing: the command that starts the game")
     return problems
@@ -282,6 +294,11 @@ def manifest(root, spec, version, target):
          "requires": dict(spec.get("requires", {}), godot=tc.GODOT_VERSION),
          "platform_addons": list(spec.get("platform_addons", [])),
          "keep_on_update": list(spec.get("keep_on_update", []))}
+    if K.is_v2(spec):
+        m["format"] = K.FORMAT
+        m["game_dir"] = spec.get("game_dir", "game")
+        m.update({k: spec[k] for k in V2_KEYS if k in spec})
+        return m
     for k in ("run", "options", "pup"):
         if k in spec:
             m[k] = spec[k]
@@ -338,6 +355,14 @@ def main(argv=None):
             raise SystemExit("cabinet data appeared in the bundle: " + rel)
     m = manifest(root, spec, version, args.target)
     m["sizes"] = sizes(stage)
+    if K.is_v2(m) and m.get("addons"):         # an add-on whose repository this build cannot read (private) is left out
+        for a in [a for a in m["addons"] if not os.path.isdir(os.path.join(stage, a.get("dir", "")))]:
+            say("   add-on {} not in this build ({} missing): the bundle has the base assets only".format(a.get("id"), a.get("dir")))
+        m["addons"] = [a for a in m["addons"] if os.path.isdir(os.path.join(stage, a.get("dir", "")))]
+    if K.is_v2(m):
+        bad = K.problems(m, stage)
+        if bad:
+            raise SystemExit("the bundle breaks the format 2 contract:\n  - " + "\n  - ".join(bad))
     with open(os.path.join(stage, "bundle.json"), "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
     say("== SHA256SUMS: {} files".format(write_sums(stage)))
