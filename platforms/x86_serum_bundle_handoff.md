@@ -21,7 +21,7 @@ declaring their build tools (git, CMake >= 3.25, a C++17 compiler; zig for anoth
 ## Steps for the image generator
 
 1. Build `zedmd_feed` and `dmd_serum` for `x86_64` (and `arm64` with zig) on the build box; put them where the game looks: `game/native/bin/<arch>/` of the installed game (or ship them in the image and point the game at them).
-2. Build the Tron bundle with `common/games/build_game_package.py ~/tron-legacy-mpf --repo-branch 34zlzp --allow-branch --target x86_64 --pup-zip <author's PuP Pack zip>` (the game's `scripts/package/build_bundle.py` also builds the two programs when `game/native/bin/<arch>` is empty).
+2. Build the Tron bundle with `common/games/build_game_package.py --repo ~/tron-legacy-mpf --allow-branch --target x86_64 --pup-zip <author's PuP Pack zip>`, in a clone checked out on the PR's branch (the game's `scripts/package/build_bundle.py` also builds the two programs when `game/native/bin/<arch>` is empty).
 3. The player brings the Serum file: **`DIR/trn_174h/trn_174h.cROMc`**, never in git or in the bundle. Start with `run.py --zedmd --zedmd-serum DIR`.
 4. Install the bundle through the page, then `common/games/check_installed.sh 60`.
 
