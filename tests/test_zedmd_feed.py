@@ -1,5 +1,11 @@
 """game/native/zedmd_feed (the C feeder) against a fake ZeDMD on a pty: handshake, then the zone packets it writes are
 the ones the Python platform (mpf_godot/zedmd_native.py) builds for the same frames."""
+import sys as _sys
+import unittest as _unittest
+
+if _sys.platform == "win32":
+    raise _unittest.SkipTest("uses a pty (the serial feeder runs on Linux and macOS)")
+
 import os
 import pty
 import select
