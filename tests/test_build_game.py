@@ -58,12 +58,14 @@ class BuildTest(unittest.TestCase):
         os.makedirs(os.path.join(self.repo, "machine", "config"))
         with open(os.path.join(self.repo, "machine", "config", "config.yaml"), "w") as f:
             f.write("#config_version=6\n")
+        with open(os.path.join(self.repo, "machine", "project.godot"), "w") as f:
+            f.write("[application]\n")
         self.out = os.path.join(self.tmp, "dist")
 
     def recipe(self, extra_args=(), setup=True):
         r = {"id": "fake", "target": "all",
              "setup": [["{python}", "-c", "open('ready', 'w').write('x')"]] if setup else [],
-             "build": ["{python}", MAKE, "machine", "--id", "fake", "--version", "{version}", "--start", "mpf both", "-o", "{out}", *extra_args]}
+             "build": ["{python}", MAKE, "machine", "--id", "fake", "--version", "{version}", "-o", "{out}", *extra_args]}
         path = os.path.join(self.tmp, "fake.json")
         with open(path, "w") as f:
             json.dump(r, f)
