@@ -1,132 +1,55 @@
 #!/usr/bin/env python3
-"""Make a game bundle (the archive the setup page, the inbox and inject_image.py install) from a folder of your own code.
+"""Make a format 2 game bundle (the archive the setup page, the inbox and inject_image.py install) from a folder of your own MPF code.
 
-    make_bundle.py SRC --id my-game --name "My game" --version 1.0 --start "python3 run.py" [-o DIR]
+    make_bundle.py SRC --id my-game --name "My game" --version 1.0 \
+        --hardware virtual=hw_virtual --hardware proc=hw_proc [--keep data] [-o DIR]
 
-SRC is the folder that holds your game (an MPF machine folder, a Godot project, a Python launcher: anything the start command
-can run). It is copied to `game/` inside the bundle, the bundle's working folder is `game/`, and the result is
-`<id>@<version>.tar.xz` with a `.sha256` beside it. The format is described in common/games/README.md.
+SRC is an MPF machine folder with a Godot (GMC) project: `project.godot` and MPF's `config/` side by side. It is copied to `game/`
+inside the bundle as it is; the result is `<id>@<version>.tar.xz` with a `.sha256` beside it. The bundle is **files and facts**
+(format 2, platforms/game-bundles.md): no command, no start script, no settings tool. The platform launches the game itself
+(`python -m mpf_godot run game -c <configs>`), stores the settings and applies them. Nothing is generated: run Godot's import
+(`godot --headless --import`) in SRC first, so the machine does not import at its first start.
 
-Every bundle gets a **Hardware** setting on the setup page, `virtual` (default) or `proc` (a P-ROC): the start command is then
-`scripts/package/start.py`, which adds `--hw-virtual-args` or `--hw-proc-args` to your `--start` command (the choice is stored in
-`settings/options.json`, carried over by updates). Your own settings page entries can be added by editing the generated
-`scripts/package/options.json` before the archive is made (`--no-hw-option` skips all of this).
-
-Options of the common cases:
-  --start CMD        what runs the game (default `python3 run.py`). `python3` is the base system's venv python (MPF installed),
-                     any other name is looked up in that venv's bin first (`mpf`), then on the PATH. It runs in `game/`.
-  --no-display       a game that opens no window (the page does not wait for the X session before starting it)
-  --keep PATH        a file or folder (relative to `game/`) that an update carries over to the next version: settings, scores
-                     (repeatable; default none). PuP Packs listed by --pup-dir are linked rather than copied.
-  --pup-dir DIR      where this game's PuP Pack goes (relative to `game/`); the page then offers the Pack upload for it
-  --pup-install CMD  the command that installs a pack (`ZIP_PATH_OR_URL` stands for the zip; runs in the game's folder as the game user)
-  --pup-media DIR    the part of the pack that is large media (hard-linked between versions)
+Options:
+  --configs A,B      MPF config files of config/ always loaded (default `config`)
+  --hardware N=A,B   one hardware choice: its name and the extra config files of config/ it loads (repeatable). Two or more add a
+                     "Hardware" setting on the page (default `virtual` when there is one); one is always used. Without any, the
+                     platform loads only --configs: they must name MPF's hardware platform themselves.
+  --settings FILE    your own settings schema (a JSON file in SRC: `groups` and `options`, each with one target `godot_arg`, `ini`
+                     or `hardware`; platforms/game-bundles.md); the Hardware setting is added to it when it has none
+  --keep PATH        a file or folder (relative to `game/`) that an update carries over to the next version: settings, scores,
+                     audits (repeatable). `.platform/` (the page's settings, the PuP link, MPF_GAME_DATA) is always kept.
+  --dmd-rom NAME     the PinMAME set name: the default Serum colourisation of the game on a ZeDMD
+  --pup-rom NAME / --pup-manifest FILE   the PuP Pack the game reads (MPF_PUP_PACK) and its manifest in SRC (the list of the
+                     pack's files the game uses, never a file of the pack); the page then offers the pack upload for this game
   --arch ARCH        `all` (default: no native binary), `arm64`, `x86_64` or `arm64+x86_64`
-  --platform-addon N take the platform's own copy of an add-on (`gde_gozen`, `mpf-gmc`) instead of one from your folder
-  --exclude GLOB     leave out files (repeatable; `.git`, `__pycache__`, `*.pyc`, `logs` are always left out)
-  --game-args        pass the board's Godot arguments (MPF_GAME_ARGS of /etc/default/mpf-game, e.g. `--rendering-driver opengl3`) to your
-                     start command (default: not passed, your program would reject them)
-  --no-hw-option     do not add the "Hardware" setting (see below)
-  --hw-virtual-args=A  (write it with `=`: it may start with `-`) arguments added to the start command in virtual mode (default `-x`: MPF's virtual platform)
-  --hw-proc-args=A     arguments added in P-ROC mode (default none: the hardware platform your config asks for; e.g. `-c proc` for
-                     an extra config file)
-  --description T / --icon FILE   text and picture shown on the page's game list (icon relative to `game/`)
+  --platform-addon N an add-on the platform installs for the machine (default `gde_gozen` and `mpf-gmc`; repeat to choose); your
+                     own copy in SRC/addons/N is left out
+  --exclude GLOB     leave out files (repeatable; `.git`, `__pycache__`, `*.pyc`, `logs`, `.venv` are always left out)
+  --description T / --icon FILE   text and picture shown on the page's game list (icon relative to SRC)
 """
 import argparse
 import datetime
 import fnmatch
 import hashlib
+import io
 import json
 import os
 import re
 import sys
 import tarfile
+import tempfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "netconfig"))
+import mpf_contract as K  # noqa: E402
 
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$")
-OPTIONS_JSON = {
-    "groups": [{"id": "machine", "label": "Machine"}],
-    "options": [{"id": "machine.hw", "group": "machine", "label": "Hardware", "type": "choice", "choices": ["virtual", "proc"],
-                 "default": "virtual", "help": "virtual: no machine, play with the keyboard. proc: a Multimorphic P-ROC on the machine.",
-                 "restart": True}],
-}
-
-START_PY = '''#!/usr/bin/env python3
-"""Start the game: the command of launch.json plus the arguments of the chosen hardware mode (settings/options.json)."""
-import json
-import os
-import shlex
-import sys
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(os.path.dirname(HERE))
-launch = json.load(open(os.path.join(HERE, "launch.json")))
-try:
-    hw = json.load(open(os.path.join(ROOT, "settings", "options.json"))).get("machine.hw", "virtual")
-except (OSError, ValueError):
-    hw = "virtual"
-argv = shlex.split(launch["start"]) + shlex.split(launch["proc_args"] if hw == "proc" else launch["virtual_args"])
-bindir = os.path.dirname(sys.executable)
-if argv[0] in ("python", "python3"):
-    argv[0] = sys.executable
-os.chdir(os.path.join(ROOT, "game"))
-os.environ["PATH"] = bindir + os.pathsep + os.environ.get("PATH", "")
-os.execvp(argv[0], argv)
-'''
-
-OPTIONS_PY = '''#!/usr/bin/env python3
-"""The setup page's settings tool: list | get | set ID VALUE... | unset ID... (values in settings/options.json)."""
-import json
-import os
-import sys
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-STORE = os.path.join(os.path.dirname(os.path.dirname(HERE)), "settings", "options.json")
-schema = json.load(open(os.path.join(HERE, "options.json")))
-by_id = {o["id"]: o for o in schema["options"]}
-
-
-def read():
-    try:
-        return json.load(open(STORE))
-    except (OSError, ValueError):
-        return {}
-
-
-def write(values):
-    os.makedirs(os.path.dirname(STORE), exist_ok=True)
-    with open(STORE, "w") as f:
-        json.dump(values, f, indent=2)
-
-
-cmd, args = (sys.argv[1] if len(sys.argv) > 1 else "list"), sys.argv[2:]
-if cmd == "list":
-    print(json.dumps(schema))
-elif cmd == "get":
-    print(json.dumps(read()))
-elif cmd == "set":
-    values = read()
-    pairs = list(zip(args[::2], args[1::2]))
-    for k, v in pairs:
-        o = by_id.get(k)
-        if o is None:
-            sys.exit(f"unknown setting {k}")
-        if o["type"] == "choice" and v not in o["choices"]:
-            sys.exit(f"{k}: one of {', '.join(o['choices'])}")
-        if o["type"] == "bool":
-            v = v.lower() in ("1", "true", "yes", "on")
-        values[k] = v
-    write(values)
-elif cmd == "unset":
-    values = read()
-    for k in args:
-        values.pop(k, None)
-    write(values)
-else:
-    sys.exit("usage: bundle_options.py list|get|set|unset")
-'''
-
-ALWAYS = [".git", "__pycache__", "*.pyc", "logs", ".venv", ".godot/mono"]
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+ALWAYS = [".git", "__pycache__", "*.pyc", "logs", ".venv", ".godot/mono", ".platform"]
+SETTINGS = "settings.json"
+HW_OPTION = {"id": "machine.hardware", "group": "machine", "label": "Hardware", "type": "choice",
+             "help": "virtual: no machine, play with the keyboard; the others: the machine's own boards.", "target": {"hardware": True}}
 
 
 def die(msg):
@@ -141,22 +64,62 @@ def sha256(path):
     return h.hexdigest()
 
 
+def inside(rel, what):
+    if not rel or rel.startswith("/") or ".." in rel.replace("\\", "/").split("/"):
+        die(f"{what} {rel}: a path inside the game folder")
+    return rel.replace("\\", "/").strip("/")
+
+
+def hardware_sets(items):
+    sets = {}
+    for item in items:
+        name, _, cfgs = item.partition("=")
+        if not NAME_RE.match(name) or not cfgs:
+            die(f"--hardware {item}: NAME=config[,config]")
+        sets[name] = [c.strip() for c in cfgs.split(",") if c.strip()]
+    return sets
+
+
+def settings_schema(src, rel, sets):
+    """The settings schema of the bundle (or None): the game's own file, plus the Hardware setting when there are two sets or more."""
+    s = {"groups": [], "options": []}
+    if rel:
+        try:
+            with open(os.path.join(src, rel), encoding="utf-8") as f:
+                s = json.load(f)
+        except (OSError, ValueError) as e:
+            die(f"--settings {rel}: {e}")
+    if len(sets) > 1 and not any((o.get("target") or {}).get("hardware") for o in s.get("options", [])):
+        if not any(g.get("id") == "machine" for g in s.setdefault("groups", [])):
+            s["groups"].insert(0, {"id": "machine", "label": "Machine"})
+        s.setdefault("options", []).insert(0, dict(HW_OPTION, choices=list(sets), default="virtual" if "virtual" in sets else list(sets)[0]))
+    return s if (rel or s["options"]) else None
+
+
+def collect(src, skip):
+    files = []
+    for base, dirs, names in os.walk(src):
+        dirs[:] = sorted(d for d in dirs if not any(fnmatch.fnmatch(d, g) or fnmatch.fnmatch(os.path.relpath(os.path.join(base, d), src).replace(os.sep, "/"), g) for g in skip))
+        for n in sorted(names):
+            rel = os.path.relpath(os.path.join(base, n), src).replace(os.sep, "/")
+            if not any(fnmatch.fnmatch(n, g) or fnmatch.fnmatch(rel, g) for g in skip):
+                files.append(rel)
+    return files
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0], epilog="See the top of this file for details.")
     ap.add_argument("src")
     ap.add_argument("--id", required=True)
     ap.add_argument("--name")
     ap.add_argument("--version", required=True)
-    ap.add_argument("--start", default="python3 run.py")
-    ap.add_argument("--no-display", action="store_true")
+    ap.add_argument("--configs", default="config")
+    ap.add_argument("--hardware", action="append", default=[])
+    ap.add_argument("--settings")
     ap.add_argument("--keep", action="append", default=[])
-    ap.add_argument("--pup-dir")
-    ap.add_argument("--game-args", action="store_true")
-    ap.add_argument("--no-hw-option", action="store_true")
-    ap.add_argument("--hw-virtual-args", default="-x")
-    ap.add_argument("--hw-proc-args", default="")
-    ap.add_argument("--pup-media")
-    ap.add_argument("--pup-install")
+    ap.add_argument("--dmd-rom")
+    ap.add_argument("--pup-rom")
+    ap.add_argument("--pup-manifest")
     ap.add_argument("--arch", default="all")
     ap.add_argument("--platform-addon", action="append", default=[])
     ap.add_argument("--exclude", action="append", default=[])
@@ -164,7 +127,8 @@ def main():
     ap.add_argument("--icon")
     ap.add_argument("-o", "--output-dir", default=".")
     a = ap.parse_args()
-    if not os.path.isdir(a.src):
+    src = os.path.abspath(a.src)
+    if not os.path.isdir(src):
         die(f"{a.src}: not a folder")
     if not ID_RE.match(a.id):
         die("--id: lowercase letters, digits, . _ - (at most 64)")
@@ -172,78 +136,74 @@ def main():
         die("--version: letters, digits, . _ + - (at most 64)")
     if a.arch not in ("all", "arm64", "x86_64", "arm64+x86_64"):
         die("--arch: all, arm64, x86_64 or arm64+x86_64")
-    for k in a.keep:
-        if k.startswith("/") or ".." in k.split("/"):
-            die(f"--keep {k}: a path inside the game folder")
+    keep = [inside(k, "--keep") for k in a.keep]
+    sets = hardware_sets(a.hardware)
+    addons = a.platform_addon or ["gde_gozen", "mpf-gmc"]
+    configs = [c.strip() for c in a.configs.split(",") if c.strip()]
 
     bundle = {
-        "format": 1, "id": a.id, "name": a.name or a.id, "version": a.version,
-        "description": a.description,
+        "format": K.FORMAT, "id": a.id, "name": a.name or a.id, "version": a.version, "description": a.description,
         "target": {"os": "linux", "arch": a.arch},
         "built": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "run": {"start": a.start, "cwd": "game", "needs_display": not a.no_display, "game_args": a.game_args},
-        "keep_on_update": ["game/" + k for k in a.keep],
+        "game_dir": "game",
+        "mpf": {"configs": configs, **({"hardware": sets} if sets else {})},
+        "platform_addons": addons,
+        "keep_on_update": ["game/" + k for k in keep],
     }
-    if (a.pup_media or a.pup_install) and not a.pup_dir:
-        die("--pup-media and --pup-install go with --pup-dir")
-    if not a.no_hw_option:
-        bundle["run"]["start"] = "python3 ../scripts/package/start.py"
-        bundle["options"] = {"tool": "scripts/package/bundle_options.py", "schema": "scripts/package/options.json"}
-        bundle["keep_on_update"].append("settings")
-    if a.pup_dir:
-        bundle["pup"] = {"pack_dir": "game/" + a.pup_dir.strip("/"), "needs_restart": True}
-        if a.pup_install:
-            bundle["pup"]["install"] = a.pup_install
-        if a.pup_media:
-            bundle["pup"]["media_dir"] = "game/" + a.pup_media.strip("/")
-        bundle["keep_on_update"].append("game/" + a.pup_dir.strip("/"))
-    if a.platform_addon:
-        bundle["platform_addons"] = a.platform_addon
+    if a.dmd_rom:
+        bundle["dmd"] = {"rom": a.dmd_rom}
+    if a.pup_rom or a.pup_manifest:
+        if not (a.pup_rom and a.pup_manifest):
+            die("--pup-rom and --pup-manifest go together")
+        bundle["pup"] = {"rom": a.pup_rom, "manifest": "game/" + inside(a.pup_manifest, "--pup-manifest")}
     if a.icon:
-        bundle["icon"] = "game/" + a.icon
-    top = f"{a.id}@{a.version}"
-    skip = ALWAYS + a.exclude
+        bundle["icon"] = "game/" + inside(a.icon, "--icon")
+    schema = settings_schema(src, a.settings and inside(a.settings, "--settings"), sets)
+    if schema:
+        bundle["settings"] = {"schema": SETTINGS}
 
-    files = []
-    for base, dirs, names in os.walk(a.src):
-        dirs[:] = sorted(d for d in dirs if not any(fnmatch.fnmatch(d, g) or fnmatch.fnmatch(os.path.relpath(os.path.join(base, d), a.src), g) for g in skip))
-        for n in sorted(names):
-            rel = os.path.relpath(os.path.join(base, n), a.src)
-            if not any(fnmatch.fnmatch(n, g) or fnmatch.fnmatch(rel, g) for g in skip):
-                files.append(rel)
+    skip = ALWAYS + ["addons/" + n for n in addons] + a.exclude
+    files = collect(src, skip)
     if not files:
         die("nothing to pack")
-    start_prog = a.start.split()[0]
-    if start_prog in ("python", "python3") and len(a.start.split()) > 1 and not a.start.split()[1].startswith("-") \
-            and a.start.split()[1] not in files and not os.path.exists(os.path.join(a.src, a.start.split()[1])):
-        print(f"warning: {a.start.split()[1]} is not in {a.src}", file=sys.stderr)
+    if not any(f.startswith(".godot/") for f in files):
+        print("warning: no .godot/ import in the folder: run `godot --headless --import` in it first, or the machine imports at "
+              "its first start", file=sys.stderr)
+    with tempfile.TemporaryDirectory() as view:              # the bundle as the platform sees it, without copying the game
+        os.symlink(src, os.path.join(view, "game"))
+        if schema:
+            with open(os.path.join(view, SETTINGS), "w", encoding="utf-8") as f:
+                json.dump(schema, f)
+        bad = K.problems(bundle, view)
+    if bad:
+        die("the bundle would break the format 2 contract:\n  " + "\n  ".join(bad))
 
-    sums = "".join(f"{sha256(os.path.join(a.src, r))}  game/{r}\n" for r in files)
+    top = f"{a.id}@{a.version}"
+    extra = {"bundle.json": json.dumps(bundle, indent=2) + "\n"}
+    if schema:
+        extra[SETTINGS] = json.dumps(schema, indent=2) + "\n"
+    sums = "".join(f"{hashlib.sha256(v.encode()).hexdigest()}  {k}\n" for k, v in extra.items() if k != "bundle.json")
+    sums += "".join(f"{sha256(os.path.join(src, r))}  game/{r}\n" for r in files)
+    extra["SHA256SUMS"] = sums
     os.makedirs(a.output_dir, exist_ok=True)
     out = os.path.join(a.output_dir, top + ".tar.xz")
-    import io
     with tarfile.open(out, "w:xz") as t:
-        def add_bytes(name, data, mode=0o644):
-            i = tarfile.TarInfo(f"{top}/{name}")
-            i.size, i.mode = len(data), mode
-            t.addfile(i, io.BytesIO(data))
-        add_bytes("bundle.json", (json.dumps(bundle, indent=2) + "\n").encode())
-        extra = {}
-        if not a.no_hw_option:
-            extra = {"scripts/package/start.py": START_PY, "scripts/package/bundle_options.py": OPTIONS_PY,
-                     "scripts/package/options.json": json.dumps(OPTIONS_JSON, indent=2) + "\n",
-                     "scripts/package/launch.json": json.dumps({"start": a.start, "virtual_args": a.hw_virtual_args, "proc_args": a.hw_proc_args}, indent=2) + "\n"}
-            sums += "".join(f"{hashlib.sha256(v.encode()).hexdigest()}  {k}\n" for k, v in extra.items())
-        add_bytes("SHA256SUMS", sums.encode())
-        for k, v in extra.items():
-            add_bytes(k, v.encode(), 0o755 if k.endswith(".py") else 0o644)
+        for k in ("bundle.json", SETTINGS, "SHA256SUMS"):
+            if k in extra:
+                data = extra[k].encode()
+                i = tarfile.TarInfo(f"{top}/{k}")
+                i.size, i.mode = len(data), 0o644
+                t.addfile(i, io.BytesIO(data))
         for r in files:
-            p = os.path.join(a.src, r)
+            p = os.path.join(src, r)
             i = t.gettarinfo(p, f"{top}/game/{r}")
             i.uid = i.gid = 0
             i.uname = i.gname = "root"
-            with open(p, "rb") as f:
-                t.addfile(i, f)
+            if i.isfile():
+                with open(p, "rb") as f:
+                    t.addfile(i, f)
+            else:
+                t.addfile(i)
     with open(out + ".sha256", "w") as f:
         f.write(f"{sha256(out)}  {os.path.basename(out)}\n")
     print(f"{out}: {len(files)} files, {os.path.getsize(out) // 1024} KB")

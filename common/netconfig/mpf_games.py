@@ -345,11 +345,11 @@ def platform_addon(name):
     cands = [C.PLATFORM_DIR, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
     if C.GOZEN_SO:
         cands.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(C.GOZEN_SO)))))
-    marker = "gozen.gdextension" if name == "gde_gozen" else "plugin.cfg"
+    marker = {"gde_gozen": "gozen.gdextension", "mpf-gmc": "plugin.cfg"}.get(name)     # an add-on made of one script has no marker: the folder is it
     for c in cands:
         # the add-ons of the platform checkout (GoZen), and the ones its toolchain made (mpf-gmc, patched: mpf_godot/gmc_patch.py)
         for sub in ("addons", os.path.join("toolchain", "addons")):
-            if c and os.path.isfile(os.path.join(c, sub, name, marker)):
+            if c and (os.path.isfile(os.path.join(c, sub, name, marker)) if marker else os.path.isdir(os.path.join(c, sub, name))):
                 return os.path.join(c, sub, name)
     return None
 
@@ -480,6 +480,10 @@ def install_game(archive, expect_sha, keep_old=True):
     bad = trial(root, b)
     if bad:
         raise JobError("this bundle cannot start, so it was not installed (the current game is untouched): " + " | ".join(bad[:6]))
+    for name in b.get("platform_addons", []):       # before anything moves: a missing add-on must not leave a half-installed (root-owned) folder
+        if not platform_addon(name):
+            raise JobError(f"this bundle needs the platform's {name} add-on and this system has none, so it was not installed "
+                           "(the current game is untouched): update the platform (MPF_PLATFORM_DIR)")
     folder = folder_name(b)
     dest = os.path.join(C.GAMES, folder)
     old = dest + ".old"
