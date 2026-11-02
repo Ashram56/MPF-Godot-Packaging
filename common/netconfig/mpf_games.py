@@ -334,7 +334,8 @@ def platform_addon(name):
     cands = [C.PLATFORM_DIR, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
     if C.GOZEN_SO:
         cands.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(C.GOZEN_SO)))))
-    marker = "gozen.gdextension" if name == "gde_gozen" else "plugin.cfg"
+    # dmd_out is a script (an autoload), not an editor plugin: it has no plugin.cfg
+    marker = {"gde_gozen": "gozen.gdextension", "dmd_out": "dmd_out.gd"}.get(name, "plugin.cfg")
     for c in cands:
         # the add-ons of the platform checkout (GoZen), and the ones its toolchain made (mpf-gmc, patched: mpf_godot/gmc_patch.py)
         for sub in ("addons", os.path.join("toolchain", "addons")):
@@ -496,7 +497,13 @@ def install_game(archive, expect_sha, keep_old=True):
     volatile_game_dirs(dest)
     shutil.rmtree(stage, ignore_errors=True)
     shutil.rmtree(old, ignore_errors=True)
-    install_platform_addons(dest, b, me)
+    pw = pwd.getpwnam(C.USER)
+    try:
+        install_platform_addons(dest, b, me)
+    except Exception:
+        # the folder is already in place: hand it to the game's user before reporting, or the game could never write its data
+        sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", dest)
+        raise
     if C.GAME_OVERRIDE and os.path.isfile(C.GAME_OVERRIDE):
         os.makedirs(os.path.join(dest, "game"), exist_ok=True)
         shutil.copy2(C.GAME_OVERRIDE, os.path.join(dest, "game", "override.cfg"))
@@ -509,7 +516,6 @@ def install_game(archive, expect_sha, keep_old=True):
             elif re.match(r"libgozen\.linux\..*%s\.so$" % me, n):
                 shutil.copy(C.GOZEN_SO, os.path.join(bindir, n))
                 job_log(f"{n}: replaced by this board's GoZen")
-    pw = pwd.getpwnam(C.USER)
     sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", dest)
     reimport_scripts(dest, b)
     os.remove(archive)

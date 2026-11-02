@@ -24,6 +24,15 @@ class PlatformAddons(unittest.TestCase):
             self.assertEqual(got, ["libgozen.linux.template_release.x86_64.so"])
             self.assertTrue(os.path.isfile(os.path.join(dest, "game", "addons", "gde_gozen", "gozen.gdextension")))
 
+    def test_dmd_out_is_a_script_without_plugin_cfg(self):
+        with tempfile.TemporaryDirectory() as plat, tempfile.TemporaryDirectory() as dest:
+            a = os.path.join(plat, "addons", "dmd_out")
+            os.makedirs(a)
+            open(os.path.join(a, "dmd_out.gd"), "w").close()
+            C.PLATFORM_DIR = plat
+            nc.install_platform_addons(dest, {"platform_addons": ["dmd_out"]}, "x86_64")
+            self.assertTrue(os.path.isfile(os.path.join(dest, "game", "addons", "dmd_out", "dmd_out.gd")))
+
     def test_missing_platform_addon(self):
         with tempfile.TemporaryDirectory() as plat, tempfile.TemporaryDirectory() as dest:
             old, nc.platform_addon = nc.platform_addon, lambda name: None
