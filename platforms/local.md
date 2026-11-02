@@ -48,6 +48,9 @@ python -m mpf_godot local list ; python -m mpf_godot local use <id or id@version
 | `dmd`, `serum` | `mpf_dmd.py`: output `auto`, `lcd`, `zedmd` or `pin2dmd`, the single colour, the Serum library (one file per ROM name) and its assignment per game (default: the bundle's `dmd.rom`) |
 | `start` | format 2: `mpf_contract.plan` (configs, Godot arguments of the settings and of the board's profile, `MPF_PUP_PACK`, `MPF_ADDONS`, `MPF_GAME_DATA`) plus `mpf_dmd.plan`, then `mpf_godot run`; format 1: the bundle's `run.start` with `mpf_dmd.merge_args` |
 
+With the output `zedmd` (saved or `--dmd zedmd`), `start` first asks `dmd_bridge --probe`: when no ZeDMD answers (not plugged in,
+port taken), that run shows the DMD on the screen instead of none.
+
 What a desktop changes: no systemd or game user, the game in a window instead of the cabinet's screens (`MPF_GAME_ARGS` adds the
 cabinet's own arguments when you want them), `auto` looks for a ZeDMD with `dmd_bridge --probe` (libzedmd tries every serial port;
 `local dmd --port COM5` names one), and the board is `x86` (a Mac with Apple silicon: `arm64`; `MPF_BOARD=rpi4` shows a game as a

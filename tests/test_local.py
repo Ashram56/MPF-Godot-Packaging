@@ -112,6 +112,15 @@ class Local(unittest.TestCase):
         self.assertIn("MPF_DMD_OUTPUT=lcd", lcd)
         self.assertNotIn("--zedmd", lcd)
 
+    def test_a_zedmd_that_does_not_answer_gives_the_screen(self):
+        self.local_cmd("install", archive(os.path.join(self.t, "demo.tar.xz"), bundle()))
+        with open(os.path.join(self.env["MPF_DMD_BRIDGE_DIR"], "dmd_bridge"), "w") as f:
+            f.write("#!/bin/sh\nexit 2\n")              # --probe: no ZeDMD
+        out = self.local_cmd("start", "--dmd", "zedmd", "--dry-run").stdout
+        self.assertIn("no ZeDMD answers", out)
+        self.assertIn("MPF_DMD_OUTPUT=lcd", out)
+        self.assertNotIn("--zedmd", out)
+
     def test_a_new_version_keeps_settings_and_pack(self):
         self.local_cmd("install", archive(os.path.join(self.t, "v1.tar.xz"), bundle("1.0")))
         pack = os.path.join(self.t, "p.zip")

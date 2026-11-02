@@ -522,6 +522,28 @@ def game_environment(b):
     return child
 
 
+def zedmd_answers():
+    """dmd_bridge --probe (with the saved port): a ZeDMD is plugged in and answers."""
+    d = DMD.bridge_dir()
+    if not d:
+        return False
+    cmd = [os.path.join(d, DMD.BRIDGE), "--probe"] + (["--device", zedmd_port()] if zedmd_port() else [])
+    try:
+        return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                              timeout=20).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def run_output(output=None):
+    """This run's output: a ZeDMD asked for (here or saved) that does not answer gives the screen, so a desktop never shows no DMD."""
+    wanted = output or DMD.load()["output"]
+    if wanted == "zedmd" and DMD.bridge_dir() and not zedmd_answers():
+        say("no ZeDMD answers: the DMD is shown on the screen for this run")
+        return "lcd"
+    return output
+
+
 def dmd_plan(gid, b, output=None):
     """(launcher args, Godot user args, MPF_DMD_OUTPUT): mpf_dmd.plan with this run's output and the saved ZeDMD port."""
     saved = DMD.load()
@@ -561,6 +583,7 @@ def start(name=None, output=None, seconds=None, monitor=False, dry_run=False, ex
     game = game_or_fail(name)
     b = M.read_bundle(game)
     gid = os.path.basename(game).split("@")[0]
+    output = run_output(output)
     pre, dmd, out = dmd_plan(gid, b, output)
     env = game_environment(b)
     env["MPF_DMD_OUTPUT"] = out
