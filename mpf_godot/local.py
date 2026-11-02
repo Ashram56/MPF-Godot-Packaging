@@ -204,10 +204,8 @@ def host_ok(b):
     arches = str(tgt.get("arch", "all")).split("+")
     if "all" in arches:
         return True, ""
-    if ME not in arches:
-        return False, f"this bundle is for {tgt.get('os')}/{tgt.get('arch')}, this computer is {OS}/{ME}"
-    if tgt.get("os", "linux") != OS:
-        return True, f"this bundle was made for {tgt.get('os')}: its native files (if any) are not used here"
+    if ME not in arches:            # the arch says which GPU texture formats were imported (a bundle carries no binary)
+        return False, f"this bundle's textures are for {tgt.get('arch')}, this computer is {ME}"
     return True, ""
 
 
