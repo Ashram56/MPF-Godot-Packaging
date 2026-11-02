@@ -520,6 +520,26 @@ def game_environment(b):
     return child
 
 
+PREVIEW_FILE = os.path.join(LOCAL, "state", "dmd-preview.rgb")
+
+
+def preview_args():
+    """`--dmd preview`: dmd_bridge writes each picture to a file (no ZeDMD needed) and the game hides its screen DMD, as it does for a
+    ZeDMD; mpf_godot/dmd_preview.py shows the file."""
+    return ["--zedmd-feed-arg=--rgb-out", "--zedmd-feed-arg=" + PREVIEW_FILE]
+
+
+def start_preview():
+    os.makedirs(os.path.dirname(PREVIEW_FILE), exist_ok=True)
+    if os.path.exists(PREVIEW_FILE):
+        os.remove(PREVIEW_FILE)
+    py = tc.python()
+    if subprocess.run([py, "-c", "import tkinter"], capture_output=True).returncode:
+        raise Fail("the preview window needs tkinter: Python from python.org has it (Linux: apt install python3-tk)")
+    return subprocess.Popen([py, "-m", "mpf_godot.dmd_preview", PREVIEW_FILE], cwd=ROOT,
+                            env=dict(os.environ, PYTHONPATH=ROOT))
+
+
 def zedmd_answers():
     """dmd_bridge --probe (with the saved port): a ZeDMD is plugged in and answers."""
     d = DMD.bridge_dir()
@@ -534,7 +554,12 @@ def zedmd_answers():
 
 
 def run_output(output=None):
-    """This run's output: a ZeDMD asked for (here or saved) that does not answer gives the screen, so a desktop never shows no DMD."""
+    """This run's output: a ZeDMD asked for (here or saved) that does not answer gives the screen, so a desktop never shows no DMD.
+    "preview" is the ZeDMD's pictures in a window (no ZeDMD needed): the bridge's output, with preview_args()."""
+    if output == "preview":
+        if not DMD.bridge_dir():
+            raise Fail("the preview needs dmd_bridge (`local doctor`)")
+        return "zedmd"
     wanted = output or DMD.load()["output"]
     if wanted == "zedmd" and DMD.bridge_dir() and not zedmd_answers():
         say("no ZeDMD answers: the DMD is shown on the screen for this run")
@@ -581,8 +606,11 @@ def start(name=None, output=None, seconds=None, monitor=False, dry_run=False, ex
     game = game_or_fail(name)
     b = M.read_bundle(game)
     gid = os.path.basename(game).split("@")[0]
+    preview = output == "preview"
     output = run_output(output)
     pre, dmd, out = dmd_plan(gid, b, output)
+    if preview:
+        dmd = dmd + preview_args()
     env = game_environment(b)
     env["MPF_DMD_OUTPUT"] = out
     board = shlex.split(os.environ.get("MPF_GAME_ARGS", ""))
@@ -600,7 +628,12 @@ def start(name=None, output=None, seconds=None, monitor=False, dry_run=False, ex
         os.makedirs(P["env"]["MPF_GAME_DATA"], exist_ok=True)
         os.environ.update(env)
         from mpf_godot import launcher
-        return launcher.run(P["game_dir"], configs=",".join(P["configs"]), monitor=monitor, seconds=seconds, godot_args=godot)
+        viewer = start_preview() if preview else None
+        try:
+            return launcher.run(P["game_dir"], configs=",".join(P["configs"]), monitor=monitor, seconds=seconds, godot_args=godot)
+        finally:
+            if viewer:
+                viewer.terminate()
     run_ = b.get("run") or {}
     argv = shlex.split(run_.get("start") or M.DEFAULT_START)
     if argv[0] in ("python", "python3"):
@@ -609,6 +642,8 @@ def start(name=None, output=None, seconds=None, monitor=False, dry_run=False, ex
         argv += dmd_merge(board, gid, b, output)       # the cabinet's order: run.py options, then Godot's -- --
         if out == "zedmd" and zedmd_port():
             argv += port_args(zedmd_port())          # Godot user arguments: merge_args ends with them
+        if preview:
+            argv += preview_args()
     head = [a for a in (["--seconds", str(seconds)] if seconds else []) + (["--monitor"] if monitor else [])]
     if head:                                          # run.py options go before Godot's --
         i = argv.index("--") if "--" in argv else len(argv)
@@ -617,7 +652,12 @@ def start(name=None, output=None, seconds=None, monitor=False, dry_run=False, ex
     say(f"{os.path.basename(game)} (format 1): DMD {out}\n   $ " + " ".join(argv))
     if dry_run:
         return 0
-    return subprocess.call(argv, cwd=os.path.normpath(os.path.join(game, run_.get("cwd") or ".")), env=dict(os.environ, **env))
+    viewer = start_preview() if preview else None
+    try:
+        return subprocess.call(argv, cwd=os.path.normpath(os.path.join(game, run_.get("cwd") or ".")), env=dict(os.environ, **env))
+    finally:
+        if viewer:
+            viewer.terminate()
 
 
 # ---------------------------------------------------------------- doctor, bridge build
@@ -697,7 +737,8 @@ def parser():
     s.add_argument("--game")
     s = sub.add_parser("start", help="play a game (default: the active one)")
     s.add_argument("game", nargs="?")
-    s.add_argument("--dmd", choices=DMD.OUTPUTS, help="this run's DMD output (default: the saved one)")
+    s.add_argument("--dmd", choices=DMD.OUTPUTS + ("preview",), help="this run's DMD output (default: the saved one); preview: the ZeDMD's "
+                   "pictures, Serum colour included, in a window")
     s.add_argument("--seconds", type=float)
     s.add_argument("--monitor", action="store_true")
     s.add_argument("--dry-run", action="store_true", help="print what would start")

@@ -36,6 +36,7 @@ python -m mpf_godot local serum D:\Colorisations\<rom>.cROMc        # a Serum co
 python -m mpf_godot local dmd --output zedmd --serum <game id>=<rom>   # where the DMD goes; which colourisation a game uses
 python -m mpf_godot local start                                     # the active game, in a window
 python -m mpf_godot local start --dmd lcd                           # this run only: the DMD on the screen
+python -m mpf_godot local start --dmd preview                       # the ZeDMD's pictures (Serum colour) in a window, no ZeDMD needed
 python -m mpf_godot local start --dry-run                           # print the configs, Godot arguments and MPF_* variables
 python -m mpf_godot local settings ; python -m mpf_godot local set dmd.mode=classic
 python -m mpf_godot local list ; python -m mpf_godot local use <id or id@version> ; python -m mpf_godot local remove <id@version>
@@ -50,6 +51,10 @@ python -m mpf_godot local list ; python -m mpf_godot local use <id or id@version
 
 With the output `zedmd` (saved or `--dmd zedmd`), `start` first asks `dmd_bridge --probe`: when no ZeDMD answers (not plugged in,
 port taken), that run shows the DMD on the screen instead of none.
+
+`local start --dmd preview` shows the DMD a ZeDMD would get, **Serum colour included**, in a window (`mpf_godot/dmd_preview.py`, tkinter:
+part of the python.org installers; Linux `apt install python3-tk`). `dmd_bridge --rgb-out FILE` writes each picture, the window shows the file;
+the game hides its own screen DMD, as it does for a ZeDMD. No ZeDMD needed (and none is driven in that run).
 
 What a desktop changes: no systemd or game user, the game in a window instead of the cabinet's screens (`MPF_GAME_ARGS` adds the
 cabinet's own arguments when you want them), `auto` looks for a ZeDMD with `dmd_bridge --probe` (libzedmd tries every serial port;
