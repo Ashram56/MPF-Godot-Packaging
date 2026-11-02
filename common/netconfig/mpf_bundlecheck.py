@@ -59,6 +59,10 @@ def index(root):
                 found.setdefault(n[:-3], os.path.join(dirpath, n))
         if "__init__.py" in names:
             found.setdefault(os.path.basename(dirpath), os.path.join(dirpath, "__init__.py"))
+    for dirpath, dirs, names in os.walk(root):          # a folder of modules with no __init__.py is a namespace package (`import tf`)
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        if dirpath != root and any(n.endswith(".py") for n in names) and "__init__.py" not in names:
+            found.setdefault(os.path.basename(dirpath), dirpath)
     return found
 
 
@@ -170,12 +174,13 @@ def walk(root, firsts, python=None, source=None):
                 else:
                     bad.append(f"{rel}: the relative import '{name}' has no file in the bundle")
             elif top in mods:
-                queue.append(mods[top])
+                if os.path.isfile(mods[top]):            # a namespace package (a folder) has no file to follow: its modules are start points too in format 2
+                    queue.append(mods[top])
             elif top in src_mods:
                 bad.append(f"{rel}: imports '{top}', which is in the source ({os.path.relpath(src_mods[top], source)}) but was left out of the bundle")
             elif top not in PROVIDED:
                 unknown.setdefault(top, rel)
-        queue.extend(mods[m] for m in string_scripts(path, mods) if mods[m] not in seen)
+        queue.extend(mods[m] for m in string_scripts(path, mods) if mods[m] not in seen and os.path.isfile(mods[m]))
     if unknown:
         known = set(sys.stdlib_module_names) if hasattr(sys, "stdlib_module_names") else set()
         todo = {n for n in unknown if n not in known}

@@ -66,6 +66,16 @@ everything.** Read this page whole before changing the game; the contract table 
    it prints the configs, Godot arguments, ini keys and environment the platform would use. Then install it on a machine and run
    `common/games/check_installed.sh 60` (rule 11). Do not deliver a bundle from a branch (rules 1 and 10).
 
+## 2b. Practical notes (from building Transformers Pro's format 2 bundle from this page alone, 2026-11-02)
+
+- **The spec's folder is the paths' root.** `python -m mpf_godot bundle SPEC` resolves `git_tracked`, `copy` and `settings.schema` from the folder that
+  holds the spec: keep `bundle_spec.json` at the game repository's root (a spec in a subfolder reports every path as missing).
+- **`settings.schema` and every file the bundle declares must also be in `copy`** (or tracked): the builder does not add them.
+- **A folder of modules without `__init__.py` is a package** (`import tf` with `game/tf/`): the page's import check accepts it (it used to refuse such a bundle).
+- **A bundle without a PuP manifest** (the pack is not at hand at the build) simply leaves `pup` out: the game runs without PuP.
+- **Test in a sandbox:** `python -m mpf_godot setup --no-monitor`, then `mpf_games.install_game` with `MPF_USER`, `MPF_GAMES_DIR`, `MPF_GAME_ENV`
+  (`GODOT=`, `MPF_GAME_VENV=`, `DISPLAY=`), `MPF_PLATFORM_DIR` set and a `systemctl` that does nothing on the `PATH`, then `mpf_games.game_exec()` under Xvfb on `:0`.
+
 ## 3. What the platform gives the game at start
 
 | Name | Value |
