@@ -74,6 +74,9 @@ everything.** Read this page whole before changing the game; the contract table 
 - **A folder of modules without `__init__.py` is a package** (`import tf` with `game/tf/`): the page's import check accepts it (it used to refuse such a bundle).
 - **A bundle without a PuP manifest** (the pack is not at hand at the build) simply leaves `pup` out: the game runs without PuP.
 - **Test in a sandbox:** `python -m mpf_godot setup --no-monitor`, then `mpf_games.install_game` with `MPF_USER`, `MPF_GAMES_DIR`, `MPF_GAME_ENV`
+- **Tron Legacy's format 2 bundle (2026-11-02, from PR 70 of the game, without the PuP Pack):** the page's installer refused it, `the bundle needs the platform's dmd_out and this system has none`: `addons/dmd_out` has only `dmd_out.gd`, and `platform_addon` looked for a `plugin.cfg` (fixed: the marker of `dmd_out` is `dmd_out.gd`). A game builder that always copies the PuP manifest and the add-on stops at `pup/manifest.json` when no pack is at hand: drop `pup`, `addons` and their `copy` entries from the spec (the game then runs without PuP).
+- **`mpf_games.install_game` consumes the archive** (it is moved into the install): keep a copy to upload or to install again.
+- **Godot under Xvfb needs a Vulkan driver** (`apt install mesa-vulkan-drivers`, lavapipe): without it Godot falls back to OpenGL 3 and crashed a few seconds after MPF reached attract (signal 4, `Index p_index = 0 is out of bounds`); with it the game stays up in attract.
   (`GODOT=`, `MPF_GAME_VENV=`, `DISPLAY=`), `MPF_PLATFORM_DIR` set and a `systemctl` that does nothing on the `PATH`, then `mpf_games.game_exec()` under Xvfb on `:0`.
 
 ## 3. What the platform gives the game at start
