@@ -14,7 +14,7 @@ everything.** Read this page whole before changing the game; the contract table 
 | `extra.profiles` with `apply` / `detect` commands | `profiles.<board>`: `limits`, `defaults`, `godot_args` as data; the platform detects the board (`rpi4`, `rpi5`, `jetson`, `x86`) |
 | `pup.install` / `pup.status` / `pack_dir` / `media_dir` / `extract_only` | `pup`: `rom` and `manifest` only; the page unpacks the author's zip untouched, the game gets `MPF_PUP_PACK` |
 | a media folder made from the pack and shipped in the bundle (copied mp3/png, converted files, a still) | nothing of the pack in the bundle: the game reads the pack in place |
-| HD art made from the pack at each build (`--pup-zip`) | an **add-on**: made once, stored in a repository (private for art derived from a third-party pack), copied as it is into `addons/<id>/` |
+| HD art made from the pack at each build (`--pup-zip`) | an **add-on**: made once, stored in the game's repository (art derived from the pack too, owner exception 2026-11-02), copied as it is into `addons/<id>/` |
 | the game detects a PIN2DMD or ZeDMD, adds `--zedmd-feed`, opens the serial port | removed: the platform chooses the output, starts `dmd_bridge`, passes `--zedmd=`/`--pin2dmd=`, sets `MPF_DMD_OUTPUT` |
 | `requires.env` (`<GAME>_VENV`, ...) | removed: fixed names only (`MPF_GAME_VENV`, `GODOT`, `MPF_*`) |
 
@@ -52,11 +52,10 @@ everything.** Read this page whole before changing the game; the contract table 
    the PuP off when that folder's manifest is missing. The tool that writes the manifest reads the pack once, when the creator makes the game (or the pack's version changes); the manifest is then committed to the game's repository and the build only copies it; the manifest lists files (path, size, length, size in pixels), never their content.
 6. **Add-ons.** Everything made for the game beyond its base assets, including art cut or derived from the PuP Pack (DMD clips,
    letters, award icons, a still for the service menu), is made once by the game's tools, **outside the build**, and committed as
-   assets to a repository: a private one for anything derived from a third-party pack, checked out as a submodule. The build copies the
+   assets to a repository: the game's own, public one, including art derived from the PuP Pack (owner exception 2026-11-02; the owner will later make sure derived art no longer comes from the pack). The build copies the
    folder into `addons/<id>/` and lists it in `addons` (`setting` / `when`: the setting that switches it on, e.g. `dmd.mode` = `hd`).
    At run time the game finds its add-ons in `MPF_ADDONS` (folders separated by `:`) and falls back to its base assets (the ROM's
-   animations) for one that is absent. **The game's source package already contains the add-on** (stored in the repository, private
-   submodule included): the build copies it and never drops it. A builder that finds the add-on missing stops; it does not ship a
+   animations) for one that is absent. **The game's source package already contains the add-on** (stored in the game's repository): the build copies it and never drops it. A builder that finds the add-on missing stops; it does not ship a
    bundle without it.
 7. **Build.** The build stages, imports and packs; it **generates nothing** (no art, no conversion, no settings tool) and runs no
    command of the game but its own build script. `python -m mpf_godot bundle SPEC --target all` stops when the contract is broken
@@ -74,7 +73,7 @@ everything.** Read this page whole before changing the game; the contract table 
 - **A folder of modules without `__init__.py` is a package** (`import tf` with `game/tf/`): the page's import check accepts it (it used to refuse such a bundle).
 - **The source package holds everything except the PuP Pack itself (owner decision 2026-11-02).** The manifest (`pup.manifest`) and every add-on made from the pack
   are written **once, by the game's creator, when the game is made or the pack's version changes**, and committed to the game's repository (the manifest
-  in the public one, derived art in the private add-on repository). The bundle build then needs no pack, no zip and no PuP tool: it copies. A builder
+  derived art too, as an owner exception). The bundle build then needs no pack, no zip and no PuP tool: it copies. A builder
   that asks for the pack, or leaves `pup` or an add-on out because the pack is absent, is wrong: the game's creator did not finish the package.
   Only the pack's own files (the author's zip) stay outside; they are assigned on the setup page.
 - **Test in a sandbox:** `python -m mpf_godot setup --no-monitor`, then `mpf_games.install_game` with `MPF_USER`, `MPF_GAMES_DIR`, `MPF_GAME_ENV`
