@@ -1,6 +1,12 @@
 """native/dmd_bridge (PPUC's libzedmd for the ZeDMD, libserum for colour) with --rgb-out, so no ZeDMD is needed. Set
 LIBZEDMD_DIR to the output of native/libzedmd/build_libzedmd.sh plus native/dmd_bridge/build.sh (it takes a while to build, so
 the tests are skipped without it); LIBSERUM adds the real libserum, SERUM_ALTCOLOR/SERUM_ROM a real colourisation."""
+import sys as _sys
+import unittest as _unittest
+
+if _sys.platform == "win32":
+    raise _unittest.SkipTest("uses a pty (the serial feeder runs on Linux and macOS)")
+
 import os
 import subprocess
 import shutil
