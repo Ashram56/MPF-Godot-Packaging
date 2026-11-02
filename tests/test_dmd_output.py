@@ -31,16 +31,16 @@ class DmdOutput(Base):
 
     def test_lcd_has_no_args(self):
         D.set_output("lcd")
-        self.assertEqual(D.merge_args(["--a"], "tron", {}), ["--a"])
+        self.assertEqual(D.merge_args(["--a"], "mygame", {}), ["--a"])
 
     def test_auto_follows_detection(self):
         self.assertEqual(D.resolve(detected=""), "lcd")
         self.assertEqual(D.resolve(detected="zedmd"), "zedmd")
-        self.assertEqual(D.plan("tron", {}, detected="pin2dmd"), (["--pin2dmd=#2a6cff"], []))
+        self.assertEqual(D.plan("mygame", {}, detected="pin2dmd"), (["--pin2dmd=#2a6cff"], []))
 
     def test_zedmd_mono_without_colourisation(self):
         D.set_output("zedmd", "#ff0000")
-        pre, user = D.plan("tron", {"dmd": {"rom": "trn_174h"}})
+        pre, user = D.plan("mygame", {"dmd": {"rom": "trn_174h"}})
         self.assertEqual(pre, ["--zedmd=#ff0000"])
         self.assertEqual(user, ["--zedmd-shades", "--zedmd-feed=" + os.path.join(self.bd, "dmd_bridge")])
 
@@ -49,16 +49,16 @@ class DmdOutput(Base):
         self.assertEqual(self.upload("trn_174h.cROMc"), "trn_174h")
         self.upload("other.cRZ")
         b = {"dmd": {"rom": "trn_174h"}}
-        args = D.merge_args(["--board"], "tron", b)
+        args = D.merge_args(["--board"], "mygame", b)
         self.assertEqual(args[:3], ["--board", "--zedmd=#2a6cff", "--"])
         self.assertIn("--zedmd-feed-arg=trn_174h", args)
         self.assertIn("--zedmd-feed-arg=" + D.SERUM, args)
-        D.assign_serum("tron", "other")
-        self.assertIn("--zedmd-feed-arg=other", D.merge_args([], "tron", b))
-        D.assign_serum("tron", "none")
-        self.assertFalse(any("--rom" in a for a in D.merge_args([], "tron", b)))
-        D.assign_serum("tron", "")
-        self.assertEqual(D.chosen_serum("tron", b), "trn_174h")
+        D.assign_serum("mygame", "other")
+        self.assertIn("--zedmd-feed-arg=other", D.merge_args([], "mygame", b))
+        D.assign_serum("mygame", "none")
+        self.assertFalse(any("--rom" in a for a in D.merge_args([], "mygame", b)))
+        D.assign_serum("mygame", "")
+        self.assertEqual(D.chosen_serum("mygame", b), "trn_174h")
         self.assertEqual(D.chosen_serum("other_game", {}), "")
 
     def test_board_args_with_godot_section(self):
