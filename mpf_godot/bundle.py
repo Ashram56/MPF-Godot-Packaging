@@ -144,7 +144,7 @@ def forbidden(spec, stage):
     for base, _, files in os.walk(stage):
         for name in files:
             if any(fnmatch.fnmatch(name, p) for p in pats):
-                found.append(os.path.relpath(os.path.join(base, name), stage))
+                found.append(os.path.relpath(os.path.join(base, name), stage).replace(os.sep, "/"))
     return found
 
 

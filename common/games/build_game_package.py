@@ -243,11 +243,11 @@ def verify(archive, recipe, target):
     have = {n.split("/", 1)[1] for n in names if "/" in n}
     run_cfg = meta.get("run") or {}
     words = str(run_cfg.get("start", "")).split()
-    cwd = os.path.normpath(str(run_cfg.get("cwd", ".")))
+    cwd = os.path.normpath(str(run_cfg.get("cwd", "."))).replace(os.sep, "/")
     for w in words[1:] if words and words[0] in ("python", "python3") else words[:1]:
         if w.startswith("-"):
             continue
-        if ("/" in w or w.endswith((".py", ".sh"))) and os.path.normpath(os.path.join(cwd, w)) not in have:
+        if ("/" in w or w.endswith((".py", ".sh"))) and os.path.normpath(os.path.join(cwd, w)).replace(os.sep, "/") not in have:
             problems.append(f"run.start runs {w!r}, which is not in the archive (cwd {cwd!r})")
         break
     addons = meta.get("platform_addons", [])

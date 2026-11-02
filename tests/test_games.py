@@ -1,4 +1,10 @@
 """Several games on one image: install, versions, the active game, the inbox, how a bundle is started (common/netconfig/mpf_games.py)."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import io
 import json
 import os

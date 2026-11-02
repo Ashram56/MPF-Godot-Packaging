@@ -1,4 +1,10 @@
 """The setup page installs the platform's binary add-ons into a bundle that lists them (bundle.json platform_addons)."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import os
 import sys
 import tempfile

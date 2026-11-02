@@ -64,10 +64,16 @@ def job_state():
         return JOB
 
 
+def as_user(*cmd):
+    """The command prefixed to run as the game's user: runuser needs root, so when this process is not root (tests, a
+    desktop run) it is already the user and runs the command as it is."""
+    return ("runuser", "-u", C.USER, "--") + tuple(cmd) if getattr(os, "geteuid", lambda: 1)() == 0 else tuple(cmd)
+
+
 def sh(*cmd, cwd=None, user=False):
     """Run a command for the job, log its output, fail the job when it fails."""
     if user:
-        cmd = ("runuser", "-u", C.USER, "--") + cmd
+        cmd = as_user(*cmd)
     job_log("$ " + " ".join(cmd))
     r = run(*cmd, cwd=cwd)
     job_log((r.stdout + r.stderr)[-2000:])
@@ -108,7 +114,7 @@ def trial(root, b):
             cmd[0] = game_python()
         env = ["env"] + [f"{k}={v}" for k, v in game_env().items()] + ["MPF_BUNDLE_CHECK=1"]
         try:
-            r = run("runuser", "-u", C.USER, "--", *env, *cmd, cwd=root, timeout=BC.check_timeout(b))
+            r = run(*as_user(*env, *cmd), cwd=root, timeout=BC.check_timeout(b))
         except subprocess.TimeoutExpired:
             r = subprocess.CompletedProcess(cmd, 124, "", f"no answer after {BC.check_timeout(b)} s")
         if r.returncode:
@@ -252,7 +258,7 @@ def tool(game, *args):
     t = options_tool(game)
     if not t:
         raise ValueError("this game has no settings tool")
-    return run("runuser", "-u", C.USER, "--", game_python(), t, *args, cwd=game)
+    return run(*as_user(game_python(), t, *args), cwd=game)
 
 
 def settings_schema(game):
@@ -335,7 +341,7 @@ def board_profile(game, b):
     args = shlex.split(cmd)
     if args[0] in ("python3", "python"):
         args[0] = game_python()
-    r = run("runuser", "-u", C.USER, "--", *args, cwd=game)
+    r = run(*as_user(*args), cwd=game)
     job_log((r.stdout + r.stderr).strip() or "board profile: nothing to apply")
 
 
@@ -401,7 +407,7 @@ def reimport_scripts(dest, b):
     pw = pwd.getpwnam(C.USER)
     env = dict(os.environ, HOME=pw.pw_dir, **ram_xdg_env())
     job_set(msg="Importing the project (a few seconds)")
-    cmd = ["runuser", "-u", C.USER, "--", "env"] + [f"{k}={v}" for k, v in env.items() if k in ("HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")]
+    cmd = list(as_user("env")) + [f"{k}={v}" for k, v in env.items() if k in ("HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")]
     cmd += [godot, "--headless", "--path", project, "--import"]
     job_log("$ " + " ".join(cmd[-5:]))
     r = run(*cmd)
