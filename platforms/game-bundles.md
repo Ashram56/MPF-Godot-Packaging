@@ -80,7 +80,7 @@ every key explained at the top of `mpf_godot/bundle.py`); the builder is the sam
 ```sh
 python -m mpf_godot bundle bundle_spec.json --target all          # universal: arm64 + x86_64, no binary
 python -m mpf_godot bundle bundle_spec.json --target x86_64       # one architecture's textures only
-python -m mpf_godot bundle bundle_spec.json --version 2026.10.28 --out DIR --no-archive
+python -m mpf_godot bundle bundle_spec.json --version 1.4.0 --label base --out DIR --no-archive
 ```
 
 What it does, in order:

@@ -101,7 +101,7 @@ local changes) unless you add `--allow-branch` for a test package. It prints `so
 once crashed in a loop on a machine because later fixes were missing.
 
 **No recipe needed for the SAM games.** Without a recipe the tool follows their convention: `scripts/setup.py` (with `--no-monitor` when it
-has that option), then `scripts/package/build_bundle.py` with `--out`, and `--target` / `--version` only when that script's `--help` lists them,
+has that option), then `scripts/package/build_bundle.py` with `--out`, and `--target` / `--version` / `--label` only when that script's `--help` lists them,
 else `bundle_spec.json` with `mpf_godot bundle`. The checks also refuse an archive whose `run.start` script is missing, or whose Godot project uses
 `mpf-gmc` that neither the archive nor `platform_addons` provides.
 
@@ -121,7 +121,7 @@ What each step does, so it can also be done by hand:
 1. **Get the repository** and its submodules (the game's `mpf-package.json` says whether it needs them).
 2. **Setup** (the game's `setup`, or by convention `python3 scripts/setup.py --no-monitor`) in the clone: a Python venv with MPF, Godot, the generated
    MPF config, media, sounds and baked fonts. About 12 GB of disk; the longest step.
-3. **Build** (the game's `build`, or by convention `.venv/bin/python scripts/package/build_bundle.py --target all --version V --out DIR`), which stages the game, makes the Godot
+3. **Build** (the game's `build`, or by convention `.venv/bin/python scripts/package/build_bundle.py --target all --version X.Y.Z --label L --out DIR`), which stages the game, makes the Godot
    import for both GPU families and writes `bundle.json` and `SHA256SUMS`. It uses this repository's `mpf_godot bundle` (the tool finds
    the checkout; the recipe sets `MPF_GODOT_PACKAGING`). Any game with a `bundle_spec.json` and no `build` is built with
    `python -m mpf_godot bundle bundle_spec.json` ([platforms/game-bundles.md](../../platforms/game-bundles.md)).
