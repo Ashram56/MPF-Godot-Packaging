@@ -5,7 +5,7 @@ between a PIN2DMD, a ZeDMD and the screen (platforms/dmd_devices.md, "Choosing t
     python -m mpf_godot dmd-detect     # pin2dmd, zedmd, or nothing
 
 A PIN2DMD counts when its USB id (0314:e457) is on the bus. A ZeDMD counts only when it answers the handshake on its
-USB serial port (the ESP32's own USB 303a:1001, or a CH340 / CP210x bridge, ids that other boards share), as
+USB serial port (the ESP32's own USB 303a:1001, a Raspberry Pi Pico 2 2e8a:000f (checked on a ZeDMD 6.1.3), or a CH340 / CP210x bridge, ids that other boards share), as
 mpf_godot/zedmd_native.py speaks it. Linux only (sysfs); elsewhere nothing is found and "auto" stays stacked.
 A ZeDMD on Wi-Fi is not looked for.
 """
@@ -16,7 +16,7 @@ import sys
 import time
 
 PIN2DMD = ("0314", "e457")
-ZEDMD = {("303a", "1001"): 115200, ("1a86", "55d3"): 921600, ("1a86", "7523"): 921600, ("10c4", "ea60"): 921600}
+ZEDMD = {("303a", "1001"): 115200, ("2e8a", "000f"): 921600, ("1a86", "55d3"): 921600, ("1a86", "7523"): 921600, ("10c4", "ea60"): 921600}
 HANDSHAKE = b"FRAME" + b"ZeDMD" + bytes((0x0C, 0, 0, 0))
 SYS = "/sys"
 

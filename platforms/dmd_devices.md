@@ -57,7 +57,7 @@ python -m mpf_godot addons GAME --dmd # copies addons/dmd_out into the game (add
 ```
 
 A PIN2DMD counts when its USB id (0314:e457) is on the bus; a ZeDMD only when it answers the handshake on its USB serial
-port (the ESP32's own USB 303a:1001, or a CH340 / CP210x bridge, ids other boards share). Linux only (sysfs); a ZeDMD on
+port (the ESP32's own USB 303a:1001, a Pico 2 2e8a:000f, or a CH340 / CP210x bridge, ids other boards share). Linux only (sysfs); a ZeDMD on
 Wi-Fi is not looked for. A game's launcher runs `dmd-detect` at start and, if it names a device, starts Godot with
 `--pin2dmd` / `--zedmd` and MPF with the matching overlay; a choice made by the player (the setup page's "DMD display")
 wins over detection. The game itself only has to keep its DMD classic 128x32 when one of these args is present.
