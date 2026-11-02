@@ -147,6 +147,7 @@ A new game's session reads this table before it builds. Each row comes from a re
 | An installed game with every file owned by root and no `game/addons/<name>` for one of its `platform_addons` (2026-11-02) | `platform_addon()` looked for `plugin.cfg` in every add-on; a one-script add-on (`dmd_out`) has none, so the install raised "needs the platform's dmd_out" after the folder swap and before the `chown`, leaving the half-installed folder (the game then crashed on `PermissionError` in `game/data`) | A marker is only asked of `gde_gozen` and `mpf-gmc`; the add-ons are checked before anything moves, so a missing one leaves the current game untouched |
 | A bundle "checks" but does not run | Only the build's own checks were looked at | Rule 11: install it and run `check_installed.sh 60` |
 | HD DMD shows the dot animations and ROM letters on a machine, the PuP clips on the builder (2026-10-29) | The art made from the PuP Pack was made on the machine (needs numpy, lived in folders a pack reuse replaced) | Rule 12: made offline at the build, shipped in the bundle, nothing made on the target |
+| Godot logs `res://addons/mpf-gmc/... File not found`, GMC never opens port 5050, the service restarts every 2 min (2026-11-02) | A format 2 game whose `game_dir` is not `game` (its Godot project at the repository root, `"game_dir": "."`): the installer put the platform's GMC in `game/addons/` instead of beside `project.godot` | Fixed in the installer (`mpf_games.project_dir`): add-ons, `override.cfg` and the logs go into `game_dir`. An image whose page predates the fix needs `update_page.sh` for such a game |
 | A format 2 bundle refused: `imports 'x', which is neither in the bundle nor installed` for a package the bundle does have (2026-11-02) | The game's package folder has no `__init__.py` (namespace package, found through the game folder on `sys.path`); `mpf_bundlecheck.index` only knew folders with an `__init__.py` | `index` now counts a folder with Python files as a namespace package (`tests/test_bundlecheck.py`). The page only saw it on the machine: the builder runs without the game's venv Python, so it never judged the import. The refused install left no game, while the WebDAV list still said "installed" from an older record |
 
 What a bundle that cannot start does on a machine: the page's installer unpacks it, runs `mpf_bundlecheck.py` and the game's
@@ -203,6 +204,44 @@ Test on a machine: output ZeDMD, colourisation assigned, restart the game: `ps` 
 | The launcher, the board detection, settings storage and the page's form, the DMD output (bridge, libzedmd, Serum), the sound output | the settings schema and board profiles as data, the MPF hardware config sets |
 | GoZen binaries, patched GMC, `dmd_out`, `mpf_godot bundle` | its add-ons (made once, stored in a repository), the PuP manifest |
 | The PuP Pack library: upload, unpack untouched, assign, `MPF_PUP_PACK` | the PuP player code that reads the pack in place; the pack comes from its author |
+
+## Any MPF game, not only a ROM recreation
+
+The contract has nothing specific to Stern SAM games: `dmd`, `pup`, `addons` and `profiles` are optional. Checked on 2026-11-02 with a
+new MPF + GMC game that was never packaged (a trough, a start button, one mode, one slide), built from this page alone, installed with
+the page's installer and started with the platform's launcher in the sandbox: MPF reached attract mode, the *Hardware* and display settings
+and the `rpi4` profile gave the expected configs and Godot arguments. What a game must be for that to work:
+
+| Requirement | Why |
+|---|---|
+| **MPF 0.80.1 with GMC 1.0.0 on Godot 4.6.3** (the platform's pins, `mpf_godot/toolchain.py`) | The image has one MPF, one Godot and the patched GMC, the same for every game. A game made for another MPF version, or for the Kivy media controller (`mpf-mc`, MPF 0.57 and older), does not run; port it to GMC first. |
+| **No Python package beyond MPF and its dependencies** | Nothing is pip-installed on the target (rule 12); the installer refuses a bundle whose `.py` files under `game_dir` import a module the game's Python does not have (rule 8). Copy pure-Python helpers into the game instead. |
+| **MPF configs split by hardware**: the shared ones in `mpf.configs`, the `hardware:` section in one file per choice (`hw_virtual.yaml` with `platform: virtual`, `hw_proc.yaml`, ...) listed in `mpf.hardware` | The platform picks the set from the *Hardware* setting (default `virtual`). A game with `hardware:` in its main `config.yaml` has only one choice. |
+| **Every file it runs from is committed** (or listed in `copy`) | The builder stages the git-tracked files of `git_tracked` plus `copy`; an untracked file is silently left out. Keep `data/`, `logs/` and `addons/` untracked (cabinet data and the platform's add-ons). |
+| **It writes only under its own folder** (high scores, audits: list them in `keep_on_update`) or `MPF_GAME_DATA` | The root is read-only in production. |
+| **`platform_addons: ["mpf-gmc"]`** (plus `gde_gozen` when it plays videos, `dmd_out` only when it renders a 128x32 DMD for a PIN2DMD or ZeDMD) | Rule 4. A game without `dmd_out` has no RGB DMD output: leave the page's *Sortie DMD* on LCD (the platform does not check it yet). |
+
+The Godot project may be anywhere in the bundle: `game_dir` names it (`game` by convention, `.` when the repository root is both the MPF
+machine folder and the Godot project, the usual GMC layout). The smallest spec for such a game, at the repository root:
+
+```json
+{
+  "format": 2, "id": "mygame", "name": "My game",
+  "game_dir": ".", "git_tracked": ["."],
+  "never": ["data", "logs"], "never_names": ["*.local.cfg"],
+  "platform_addons": ["mpf-gmc"],
+  "mpf": {"configs": ["config"], "hardware": {"virtual": ["hw_virtual"], "proc": ["hw_proc"]}},
+  "settings": {"schema": "settings.json"},
+  "keep_on_update": ["data"]
+}
+```
+
+with a `settings.json` such as `{"groups": [{"id": "machine", "label": "Machine"}], "options": [{"id": "machine.hardware", "group":
+"machine", "label": "Hardware", "type": "choice", "choices": ["virtual", "proc"], "default": "virtual", "target": {"hardware": true}}]}`
+(without `settings` the page shows no settings card and the game always starts on `virtual`). Then, from this repository's checkout
+after `python -m mpf_godot setup`: `python -m mpf_godot bundle /path/to/mygame/bundle_spec.json --target all --out dist`, the check of
+[game-bundle-format2.md](game-bundle-format2.md) step 8, and the install on a machine (rule 11). Its textures are imported lossless unless
+its `.import` files ask for VRAM compression (`force_vram`, `import_seed`): fine for a small game, the builder only warns.
 
 ## Checklist for a new game
 

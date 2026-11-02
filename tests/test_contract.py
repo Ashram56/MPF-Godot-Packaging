@@ -120,6 +120,29 @@ class Platform(Base):
         self.assertNotIn("MPF_PUP_PACK", env)
         self.assertIn("music = true", open(os.path.join(game, "game/pup.local.cfg")).read())
 
+    def test_platform_addons_and_board_settings_go_into_game_dir(self):
+        """A game whose Godot project is not in game/ (game_dir "."): GMC and override.cfg must land beside its project.godot,
+        else Godot cannot load GMC and MPF never connects (observed 2026-11-02 on a game built from the docs alone)."""
+        gmc = os.path.join(self.t.name, "platform", "mpf-gmc")
+        os.makedirs(gmc)
+        open(os.path.join(gmc, "plugin.cfg"), "w").write("[plugin]\n")
+        ov = os.path.join(self.t.name, "override.cfg")
+        open(ov, "w").write("[audio]\n")
+        saved = G.platform_addon, G.reimport_scripts
+        G.platform_addon, G.reimport_scripts = (lambda name: gmc if name == "mpf-gmc" else None), (lambda dest, b: None)
+        C.GAME_OVERRIDE = ov
+        files = {k[len("game/"):] if k.startswith("game/") else k: v for k, v in FILES.items()}
+        try:
+            game = self.game(extra={"game_dir": ".", "platform_addons": ["mpf-gmc"], "keep_on_update": ["data"]}, files=files)
+        finally:
+            G.platform_addon, G.reimport_scripts = saved
+            C.GAME_OVERRIDE = ""
+        self.assertTrue(os.path.isfile(os.path.join(game, "addons", "mpf-gmc", "plugin.cfg")))
+        self.assertTrue(os.path.isfile(os.path.join(game, "override.cfg")))
+        self.assertFalse(os.path.exists(os.path.join(game, "game", "addons")))
+        argv = G.contract_command(game, G.read_bundle(game), G.game_env())[0]
+        self.assertEqual(argv[4], game)
+
     def test_settings_are_the_platforms_and_follow_the_board(self):
         game = self.game()
         G.settings_save(game, {"o.machine.hw": "proc", "o.pup.music": "false", "o.dmd.mode": "hd"})
