@@ -436,7 +436,7 @@ def build_log(game=None):
         out.append(f"mode {mode[0]}")
     out += ["", "== journal: mpf-game.service ==", _journal("mpf-game.service"),
             "", "== journal: mpf-netconfig / inbox ==", _journal("mpf-netconfig.service", 120), _journal("mpf-netconfig-inbox.service", 120)]
-    for folder in (C.VOLATILE_LOGS, os.path.join(game["path"], "game", "logs") if game else ""):
+    for folder in (C.VOLATILE_LOGS, os.path.join(game["path"], (game.get("bundle") or {}).get("game_dir") or "game", "logs") if game else ""):
         if folder and os.path.isdir(folder):
             files = sorted((os.path.join(folder, n) for n in os.listdir(folder) if n.endswith((".log", ".txt"))),
                            key=lambda p: -os.path.getmtime(p))[:4]

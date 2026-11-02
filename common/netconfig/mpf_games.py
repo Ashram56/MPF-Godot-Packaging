@@ -131,6 +131,17 @@ def read_bundle(path):
         return None
 
 
+def project_dir(b):
+    """The bundle's Godot project folder, relative to the bundle: format 2 `game_dir`, a platform-run format 1 game's
+    `launch.project`, else `game`. The platform's add-ons, the board's override.cfg and the logs go there: an add-on put in
+    another folder is not seen by Godot (observed 2026-11-02: a game with game_dir "." lost its GMC, MPF never connected)."""
+    if K.is_v2(b):
+        rel = b.get("game_dir") or "game"
+    else:
+        rel = (b.get("launch") or {}).get("project") or "game"
+    return os.path.normpath(rel)
+
+
 def folder_name(b):
     return f"{b['id']}@{b['version']}"
 
@@ -350,7 +361,7 @@ def install_platform_addons(dest, b, me):
         src = platform_addon(name)
         if not src:
             raise JobError(f"the bundle needs the platform's {name} and this system has none (set MPF_PLATFORM_DIR)")
-        dst = os.path.join(dest, "game", "addons", name)
+        dst = os.path.join(dest, project_dir(b), "addons", name)
         shutil.rmtree(dst, ignore_errors=True)
         for base, _dirs, files in os.walk(src):
             for f in files:
@@ -364,7 +375,7 @@ def install_platform_addons(dest, b, me):
                 shutil.copy2(os.path.join(base, f), t)
         # Godot loads an add-on's native extension only if .godot/extension_list.cfg names it (the editor writes that file;
         # a bundle exported without the add-on's binaries does not have it)
-        lst = os.path.join(dest, "game", ".godot", "extension_list.cfg")
+        lst = os.path.join(dest, project_dir(b), ".godot", "extension_list.cfg")
         for f in sorted(os.listdir(dst)):
             if f.endswith(".gdextension"):
                 line = f"res://addons/{name}/{f}"
@@ -383,7 +394,7 @@ def reimport_scripts(dest, b):
     if not any(platform_addon(n) and not os.path.isdir(os.path.join(platform_addon(n), "bin")) for n in b.get("platform_addons", [])):
         return
     godot = game_env().get("GODOT") or shutil.which("godot") or ""
-    project = os.path.join(dest, "game")
+    project = os.path.join(dest, project_dir(b))
     if not godot or not os.path.isfile(os.path.join(project, "project.godot")):
         job_log("no Godot or no project.godot: the script classes of the platform add-ons are not re-imported")
         return
@@ -498,11 +509,11 @@ def install_game(archive, expect_sha, keep_old=True):
     shutil.rmtree(old, ignore_errors=True)
     install_platform_addons(dest, b, me)
     if C.GAME_OVERRIDE and os.path.isfile(C.GAME_OVERRIDE):
-        os.makedirs(os.path.join(dest, "game"), exist_ok=True)
-        shutil.copy2(C.GAME_OVERRIDE, os.path.join(dest, "game", "override.cfg"))
-        job_log(f"board settings ({C.GAME_OVERRIDE}) copied to game/override.cfg")
+        os.makedirs(os.path.join(dest, project_dir(b)), exist_ok=True)
+        shutil.copy2(C.GAME_OVERRIDE, os.path.join(dest, project_dir(b), "override.cfg"))
+        job_log(f"board settings ({C.GAME_OVERRIDE}) copied to {project_dir(b)}/override.cfg")
     if C.GOZEN_SO and os.path.isfile(C.GOZEN_SO):
-        bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
+        bindir = os.path.join(dest, project_dir(b), "addons", "gde_gozen", "bin")
         for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
             if n in b.get("gozen", {}) and all(f in b["gozen"][n] for f in C.GOZEN_NEEDS):
                 job_log(f"{n}: the bundle's own build has {' '.join(C.GOZEN_NEEDS)}, kept")
@@ -569,7 +580,7 @@ def run_pup_installer(game, b, zipfile):
     if b.get("platform_addons"):
         install_platform_addons(game, b, C.ARCH.get(platform.machine(), platform.machine()))
         reimport_scripts(game, b)
-        sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", os.path.join(game, "game", "addons"))
+        sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", os.path.join(game, project_dir(b), "addons"))
 
 
 # ---------------------------------------------------------------- PuP Pack library
@@ -874,7 +885,7 @@ def volatile_game_dirs(game):
     pw = pwd.getpwnam(C.USER)
     os.makedirs(C.VOLATILE_LOGS, exist_ok=True)
     os.chown(C.VOLATILE_LOGS, pw.pw_uid, pw.pw_gid)
-    logs = os.path.join(game, "game", "logs")
+    logs = os.path.join(game, project_dir(read_bundle(game) or {}), "logs")
     if os.path.islink(logs):
         return
     if os.path.isdir(logs):
