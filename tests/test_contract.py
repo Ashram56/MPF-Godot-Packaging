@@ -1,4 +1,10 @@
 """Bundle format 2: files and facts only, the platform starts the game (common/netconfig/mpf_contract.py, platforms/game-bundles.md)."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import json
 import os
 import sys

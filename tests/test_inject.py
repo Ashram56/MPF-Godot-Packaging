@@ -1,4 +1,10 @@
 """Own code in a bundle (common/games/make_bundle.py) and bundles in an image before flashing (common/games/inject_image.py)."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import json
 import os
 import shutil

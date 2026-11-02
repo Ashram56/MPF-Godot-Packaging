@@ -1,4 +1,10 @@
 """Updates from a WebDAV folder (common/netconfig/mpf_ota.py), against a small local server."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import hashlib
 import http.server
 import json
