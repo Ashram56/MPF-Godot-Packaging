@@ -94,6 +94,10 @@ Preferred over `zedmd_feed`'s own copy of the ZeDMD protocol (owner's choice, 20
 | `native/dmd_bridge/build.sh [DIR]` | builds `dmd_bridge`: it reads 128x32 frames of shades (one byte, 0-15) on stdin and draws them with `ZeDMD::RenderRgb888`; with `--serum-lib LIB --rom NAME --altcolor DIR` (`DIR/NAME/NAME.cRZ`, `.cROM` or `.cROMc`) libserum colours the frames it knows (v1 palette, v2 RGB565 32p), the others keep `--color RRGGBB`, rotations run on libserum's timer. `--probe`, `--device PORT`, `--wifi ADDR`, `--brightness`, `--rgb-out FILE` (tests, no ZeDMD). |
 | `dmd_out` | `--zedmd=#RRGGBB --zedmd-shades --zedmd-feed=DIR/dmd_bridge --zedmd-feed-arg=--serum-lib --zedmd-feed-arg=LIB --zedmd-feed-arg=--rom --zedmd-feed-arg=NAME --zedmd-feed-arg=--altcolor --zedmd-feed-arg=DIR` |
 
+Windows x64: `native/build_windows_bridge.sh` cross-builds the same libzedmd commit, libserum and `dmd_bridge.exe` with mingw-w64 into
+`native/prebuilt/windows-x86_64/dmd_bridge/` (stdin read on a thread, libserum loaded with `LoadLibrary`); the local platform uses it
+([local.md](local.md)). macOS: `python -m mpf_godot local build-bridge`.
+
 Checked: built on x86_64; `tests/test_dmd_bridge.py` (`LIBZEDMD_DIR=<output>`, optionally `LIBSERUM`, `SERUM_ALTCOLOR`, `SERUM_ROM`) and
 a manual run that loads a real `.cROMc` (5211 frames, Serum v2). Not checked on a real ZeDMD with this bridge yet, nor built for aarch64.
 The PIN2DMD is not covered (libzedmd drives the ZeDMD only): MPF's `pin2dmd` platform stays for it.

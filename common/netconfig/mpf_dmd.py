@@ -6,7 +6,9 @@ is assigned to the game). The game only draws its classic 128x32 DMD; every argu
 Settings: STATE_DIR/dmd.json. Colourisations: SERUM/<rom>/<rom>.cROMc|.cRZ|.cROM, one per ROM name, assigned per game."""
 import json
 import os
+import platform
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -159,21 +161,56 @@ def chosen_serum(game_id, bundle, s=None):
 
 
 # ---------------------------------------------------------------- launch
+BRIDGE = "dmd_bridge.exe" if os.name == "nt" else "dmd_bridge"
+# libserum's library as native/serum/build_libserum*.sh name it
+SERUM_LIBS = ("serum64.dll",) if os.name == "nt" else ("libserum64.so", "libserum.so", "libserum64.dylib", "libserum.dylib")
+
+
 def bridge_dir():
-    """Folder of dmd_bridge (and its libzedmd / libserum64.so), or None."""
+    """Folder of dmd_bridge (and its libzedmd / libserum), or None. Windows: the prebuilt native/prebuilt/windows-x86_64/dmd_bridge/
+    (native/dmd_bridge/build_windows.sh) of the local platform (mpf_godot/local.py)."""
     roots = [os.environ.get("MPF_DMD_BRIDGE_DIR", ""), C.PLATFORM_DIR,
              os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
-    arch = C.ARCH.get(os.uname().machine, os.uname().machine)
+    arch = C.ARCH.get(platform.machine().lower(), platform.machine())
+    subs = ["", os.path.join("native", "bin", arch, "dmd_bridge"), os.path.join("native", "bin", "dmd_bridge")]
+    if os.name == "nt":
+        subs.insert(1, os.path.join("native", "prebuilt", "windows-" + arch, "dmd_bridge"))
+    elif sys.platform == "darwin":
+        subs.insert(1, os.path.join("native", "bin", "macos-" + arch, "dmd_bridge"))
     for r in roots:
-        for sub in ("", os.path.join("native", "bin", arch, "dmd_bridge"), os.path.join("native", "bin", "dmd_bridge")):
+        for sub in subs:
             d = os.path.join(r, sub) if r else ""
-            if d and os.path.isfile(os.path.join(d, "dmd_bridge")):
+            if d and os.path.isfile(os.path.join(d, BRIDGE)):
                 return d
     return None
 
 
+def serum_lib(d):
+    """libserum next to dmd_bridge (or in its lib/), or ""."""
+    for name in SERUM_LIBS:
+        for p in (os.path.join(d, name), os.path.join(d, "lib", name)):
+            if os.path.isfile(p):
+                return p
+    return ""
+
+
+def probe_bridge(timeout=15):
+    """True when dmd_bridge --probe finds a ZeDMD (libzedmd looks on every serial port: Windows and macOS, where dmd_panel has no
+    sysfs)."""
+    d = bridge_dir()
+    if not d:
+        return False
+    try:
+        return subprocess.run([os.path.join(d, BRIDGE), "--probe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              stdin=subprocess.DEVNULL, timeout=timeout).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def detect():
-    """"pin2dmd", "zedmd" or "" (an LCD DMD)."""
+    """"pin2dmd", "zedmd" or "" (an LCD DMD). Linux: sysfs (mpf_godot/dmd_panel.py); Windows and macOS: a ZeDMD that answers dmd_bridge."""
+    if not sys.platform.startswith("linux"):
+        return "zedmd" if probe_bridge() else ""
     try:
         from mpf_godot import dmd_panel
         return dmd_panel.find()
@@ -205,10 +242,10 @@ def plan(game_id, bundle, detected=None):
     d = bridge_dir()
     if not d:
         return [], []           # no bridge on this system: the screen DMD
-    user = ["--zedmd-shades", "--zedmd-feed=" + os.path.join(d, "dmd_bridge")]
+    user = ["--zedmd-shades", "--zedmd-feed=" + os.path.join(d, BRIDGE)]
     rom = chosen_serum(game_id, bundle, s)
     if rom:
-        lib = next((p for p in (os.path.join(d, "libserum64.so"), os.path.join(d, "lib", "libserum64.so")) if os.path.isfile(p)), "")
+        lib = serum_lib(d)
         if lib:
             for a in ("--serum-lib", lib, "--rom", rom, "--altcolor", SERUM):
                 user.append("--zedmd-feed-arg=" + a)
