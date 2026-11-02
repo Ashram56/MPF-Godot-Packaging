@@ -50,24 +50,31 @@ will run. `python3 -m unittest tests.test_inject` shows the tool producing a bun
 
 ## Before flashing: `inject_image.py`
 
+Pure Python 3.8+, standard library only: runs as it is on **Windows, macOS and Linux**, no root, no loop device, no extra tool to
+install, no network. Download the image (`.img.xz` is read directly) and your files, then:
+
 ```sh
-python3 common/games/inject_image.py rpi4-image.img \
-        --bundle dist/my-game-1.4.tar.xz --pup ~/Downloads/pack.zip:my-game \
-        --bundle dist/my-machine@1.0.tar.xz -o rpi4-with-games.img
+python3 common/games/inject_image.py x86-debian13-uefi.img.xz \
+        --bundle my-game-1.4.tar.xz --pup pack.zip:my-game \
+        --bundle my-machine@1.0.tar.xz -o x86-with-games.img        # Windows: py -3 common\games\inject_image.py ...
 ```
 
-It copies the image and appends **one partition** (`mpfdata`, the read/write data partition of the [read-only mode](../readonly/README.md))
-that holds an `inbox/` folder with the files. Nothing in the image's own partitions changes, and no root, loop device or network is
-needed. At the first boot the partition grows to the end of the card and `mpf-netconfig-inbox.service` installs the files before
-the game starts; if anything fails the file goes to `/data/inbox/failed/` with a log, visible from the page.
+It copies the image and appends **one small FAT32 partition** labelled `MPFSEED` (GPT on x86, MBR on the Raspberry Pi 4) that holds
+an `inbox/` folder with the files; nothing in the image's own partitions changes. At the first boot `mpf-persist` makes the
+read/write data partition (`mpfdata`) in the free space of the card, copies the seed's inbox into it once, and
+`mpf-netconfig-inbox.service` installs the files before the game starts; if anything fails the file goes to `/data/inbox/failed/`
+with a log, visible from the page. Flash the result as usual (balenaEtcher, Raspberry Pi Imager, Rufus).
 
 - `--bundle` (repeatable): the **first** one becomes the active game, the others are installed and wait to be chosen on the page.
 - `--pup FILE:GAME`: the pack of that game (`my-game` or `my-game@1.4`). Without `:GAME` it goes to the active game.
 - Works on the Raspberry Pi 4 image and on the x86 USB stick image (its installer copies the games to the disk it installs on). A Jetson
   is flashed with NVIDIA's tools, not from a disk image: copy the files to `/data/inbox` over SSH, or use the page.
-- A big pack or bundle makes a big partition and a big image to flash; the tool prints the size. Keep it for what must be there at
-  the first boot and add the rest from the page.
-- Start again from the original image to change the content: an image that already carries a data partition is refused.
+- The seed holds the files as they are: a big pack or bundle makes a big image to flash (the tool prints the size), and a file is
+  limited to 4 GiB (FAT32). Keep it for what must be there at the first boot and add the rest from the page. The space of the seed
+  stays used; the card needs room after it for the data partition (at least 512 MB).
+- Start again from the original image to change the content: an image that already carries a `MPFSEED` partition is refused.
+- Checked end to end: the x86 image with the Transformers bundle booted under QEMU, made its data partition, imported and installed
+  the game and made it the active one.
 
 ## Building the package of a game from its repository
 

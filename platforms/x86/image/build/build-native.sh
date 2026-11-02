@@ -234,7 +234,7 @@ in_chroot "id mpf >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,r
 if [ "$READONLY" = 1 ]; then
     . "$REPO_ROOT/common/readonly/install-readonly.sh"
     # console-setup (the AZERTY console of the installer menu) rewrites its cache in /etc/console-setup at every boot: in RAM
-    mpf_readonly_install "$R" mpf /boot/efi "" "/etc/console-setup:2m"
+    mpf_readonly_install "$R" mpf /boot/efi "" "/etc/console-setup:2m /home/mpf/.cache:128m /home/mpf/.local/share/xorg:8m"
 fi
 
 ##############################################################################
@@ -251,6 +251,12 @@ if [ -n "$EXTRAS" ]; then
             mesa-vulkan-drivers libgl1-mesa-dri libegl1 libvulkan1 libxcursor1 libxinerama1 libxrandr2 libxi6 libxext6 libxrender1 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3"
         printf 'allowed_users=console\nneeds_root_rights=auto\n' > "$R/etc/X11/Xwrapper.config"
         install -m 755 "$KIT/../../cabinet/xinitrc" "$R/home/mpf/.xinitrc"
+        # read-only production mode: the X server's log in RAM (the Xorg of a user session writes ~/.local/share/xorg/Xorg.0.log
+        # and stops at once when it cannot: the login would end and restart every 2 s). xinit only exists now, so it is written here
+        if [ "$READONLY" = 1 ]; then
+            printf '#!/bin/sh\n\nexec /usr/bin/X -nolisten tcp -logfile /tmp/Xorg.0.log "$@"\n' > "$R/etc/X11/xinit/xserverrc"
+            chmod 755 "$R/etc/X11/xinit/xserverrc"
+        fi
     fi
     if has mpf; then
         # The repository's own Linux installer, run as the cabinet user in the chroot (Python 3.11 via uv, MPF,

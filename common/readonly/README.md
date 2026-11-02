@@ -21,9 +21,10 @@ that runs before `local-fs.target`): the image does not change size, the card ke
 already there it is checked (`e2fsck -p`) and mounted. If it cannot be made (no free space, a broken file system), a
 tmpfs takes its place so that the system still boots, the page says so in bold, and settings are lost at power-off.
 
-An image can also carry the partition ready-made, with games waiting in its `inbox/` ([common/games/inject_image.py](../games/README.md)):
-`mpf-persist` finds the label, and grows the partition to the end of the card when it is the last one and free space follows it
-(`resize2fs`, online-safe because it runs before the mount). The inbox is installed by `mpf-netconfig-inbox.service`.
+An image can also carry games ([common/games/inject_image.py](../games/README.md), pure Python, any OS): a small FAT32 partition labelled
+`MPFSEED` with an `inbox/` folder. `mpf-persist` copies it into the data partition once (a marker `mpf/seed-imported-<uuid>` on the data
+partition says it is done) and `mpf-netconfig-inbox.service` installs the files. An older image carried the data partition itself: it
+is still found by its label and grown to the end of the card (`resize2fs`, online-safe because it runs before the mount).
 
 The folders that must be written are not moved, they are **bind-mounted** from the data partition over the image's own
 (`/opt/games`, `/etc/ssh`, `/etc/wpa_supplicant`, `/home/<user>/.ssh`, and a platform's extra ones): first boot copies the
