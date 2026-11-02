@@ -132,6 +132,22 @@ class Install(Base):
         state, msg = self.install(version="2", extra={"platform_addons": ["mpf-gmc"]})       # no platform GMC: refused, not silently skipped
         self.assertEqual(state, "error")
 
+    def test_script_addon_without_marker_installs_and_missing_one_leaves_nothing(self):
+        plat = os.path.join(self.t.name, "plat")
+        os.makedirs(os.path.join(plat, "addons", "oneshot"))
+        open(os.path.join(plat, "addons", "oneshot", "oneshot.gd"), "w").write("# one script, no plugin.cfg\n")
+        saved = C.PLATFORM_DIR
+        C.PLATFORM_DIR = plat
+        try:
+            state, msg = self.install(extra={"platform_addons": ["oneshot"]}, files={"game/project.godot": b""})
+            self.assertEqual(state, "done", msg)
+            self.assertTrue(os.path.isfile(os.path.join(C.GAMES, "demo@1.0", "game", "addons", "oneshot", "oneshot.gd")))
+            state, msg = self.install(version="2", extra={"platform_addons": ["missing"]}, files={"game/project.godot": b""})
+            self.assertEqual(state, "error")
+            self.assertFalse(os.path.exists(os.path.join(C.GAMES, "demo@2")))        # refused before anything moved
+        finally:
+            C.PLATFORM_DIR = saved
+
     def test_a_second_game_waits_to_be_chosen(self):
         self.install()
         state, msg = self.install(gid="other", name="Other", version="3")
