@@ -367,7 +367,8 @@ def main():
     ap.add_argument("--repo", help="the game's repository: a folder already cloned (used as it is) or a git URL")
     ap.add_argument("--ref", help="branch or tag to build (a cloned URL only)")
     ap.add_argument("--workdir", default=os.path.join(os.path.expanduser("~"), "mpf-game-builds"), help="where a URL is cloned")
-    ap.add_argument("--version")
+    ap.add_argument("--version", help="the number, like 1.4.0 (the archive is <id>-<version>-<label>-linux-<target>)")
+    ap.add_argument("--label", help="what the build holds, like serum-zedmd or hd-colour")
     ap.add_argument("--target", choices=sorted(TARGET_ARCH))
     ap.add_argument("--out", default="dist")
     ap.add_argument("--skip-setup", action="store_true")
@@ -418,7 +419,7 @@ def main():
             env["GODOT"] = found[0]
     if recipe.get("build"):
         cmd = fill(recipe["build"], values)
-        if not version:      # the game's builder chooses (date and commit)
+        if not version:      # the game's builder chooses (its spec's version, else the date)
             i = cmd.index("--version") if "--version" in cmd else -1
             if i >= 0:
                 del cmd[i:i + 2]
@@ -432,11 +433,11 @@ def main():
             sys.path.insert(0, PLATFORM)
             from mpf_godot import toolchain as tc
             run([py, "-m", "pip", "install", "--quiet"] + tc.BUILD_REQUIREMENTS, repo, env, a.dry_run)
-        for opt, val in (("--target", target), ("--version", version), ("--pup-zip", a.pup_zip)):
+        for opt, val in (("--target", target), ("--version", version), ("--label", a.label), ("--pup-zip", a.pup_zip)):
             if val and (a.dry_run or opt in helptext):
                 cmd += [opt, val]
     elif description_of(repo):
-        cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else [])
+        cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else []) + (["--label", a.label] if a.label else [])
     else:
         die("the repository has no scripts/package/build_bundle.py and no package description (" + ", ".join(DESCRIPTIONS) + "), and no recipe says how to build it "
             "(for your own MPF code without a build step: common/games/make_bundle.py)")

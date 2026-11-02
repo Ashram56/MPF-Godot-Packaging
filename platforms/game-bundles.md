@@ -80,7 +80,7 @@ every key explained at the top of `mpf_godot/bundle.py`); the builder is the sam
 ```sh
 python -m mpf_godot bundle bundle_spec.json --target all          # universal: arm64 + x86_64, no binary
 python -m mpf_godot bundle bundle_spec.json --target x86_64       # one architecture's textures only
-python -m mpf_godot bundle bundle_spec.json --version 2026.10.28 --out DIR --no-archive
+python -m mpf_godot bundle bundle_spec.json --version 1.4.0 --label base --out DIR --no-archive
 ```
 
 What it does, in order:
@@ -101,8 +101,12 @@ What it does, in order:
 4. **Write `bundle.json`** (with `"format": 2` in the spec: `id`, `name`, `version`, `target` with `arch` `arm64`, `x86_64` or
    `arm64+x86_64` and `texture_formats`, `source` commit, `requires`, `keep_on_update`, `platform_addons`, and the facts of the
    contract above, copied as they are; it stops when `mpf_contract.problems` finds a command or a declared file missing) and
-   **`SHA256SUMS`**, pack as `<id>-<version>-linux-<target>.tar.xz` with a `.sha256` next to it.
-`game/.godot` (the import) is packed on purpose; the version defaults to `YYYY.MM.DD-<short commit>`; `requires.godot` is this platform's pinned Godot.
+   **`SHA256SUMS`**, pack as `<id>-<version>-<label>-linux-<target>.tar.xz` with a `.sha256` next to it
+(e.g. `my-game-1.4.0-serum-zedmd-linux-all.tar.xz`). **Naming (2026-11-02): a version number and a label, never a commit hash.** `--version X.Y.Z`
+(else the spec's `version`, else today's date) is the number, raised by the game for each bundle it hands out; `--label` (else the spec's `label`;
+lowercase words joined by `-`: `base`, `hd-colour`, `serum-zedmd`) says what the build holds. bundle.json `version` is `<number>-<label>` (what the
+setup page and `<id>@<version>` use), with `semver` and `label` beside it; the commit stays in bundle.json `source` (`game_commit`, `game_commit_short`).
+`game/.godot` (the import) is packed on purpose; `requires.godot` is this platform's pinned Godot.
 5. **Check** with `xz -t`, `tar -xJOf ARCHIVE <id>/bundle.json`, and that no `libgozen` is in a universal archive.
 
 A game can have its own builder (by convention `scripts/package/build_bundle.py` in its repository) that writes the spec and
@@ -143,6 +147,7 @@ A new game's session reads this table before it builds. Each row comes from a re
 | `could not read Username ... Failed to clone 'pup_pack'` during setup | The PuP Pack submodule is private | Expected: the pack is never in the bundle (rule 7), installed from the author's zip |
 | A bundle "checks" but does not run | Only the build's own checks were looked at | Rule 11: install it and run `check_installed.sh 60` |
 | HD DMD shows the dot animations and ROM letters on a machine, the PuP clips on the builder (2026-10-29) | The art made from the PuP Pack was made on the machine (needs numpy, lived in folders a pack reuse replaced) | Rule 12: made offline at the build, shipped in the bundle, nothing made on the target |
+| A format 2 bundle refused: `imports 'x', which is neither in the bundle nor installed` for a package the bundle does have (2026-11-02) | The game's package folder has no `__init__.py` (namespace package, found through the game folder on `sys.path`); `mpf_bundlecheck.index` only knew folders with an `__init__.py` | `index` now counts a folder with Python files as a namespace package (`tests/test_bundlecheck.py`). The page only saw it on the machine: the builder runs without the game's venv Python, so it never judged the import. The refused install left no game, while the WebDAV list still said "installed" from an older record |
 
 What a bundle that cannot start does on a machine: the page's installer unpacks it, runs `mpf_bundlecheck.py` and the game's
 `run.check`, and **refuses it before touching anything**: the installed game stays the active one, the message says what is missing.

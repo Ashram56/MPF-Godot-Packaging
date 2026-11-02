@@ -77,6 +77,12 @@
   "extra": {
    "type": "object"
   },
+  "version": {
+   "type": "string"
+  },
+  "label": {
+   "type": "string"
+  },
   "source_commits": {
    "type": "object"
   },
