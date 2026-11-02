@@ -334,7 +334,7 @@ def platform_addon(name):
     cands = [C.PLATFORM_DIR, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
     if C.GOZEN_SO:
         cands.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(C.GOZEN_SO)))))
-    marker = "gozen.gdextension" if name == "gde_gozen" else "plugin.cfg"
+    marker = {"gde_gozen": "gozen.gdextension", "dmd_out": "dmd_out.gd"}.get(name, "plugin.cfg")   # dmd_out has no plugin.cfg
     for c in cands:
         # the add-ons of the platform checkout (GoZen), and the ones its toolchain made (mpf-gmc, patched: mpf_godot/gmc_patch.py)
         for sub in ("addons", os.path.join("toolchain", "addons")):
