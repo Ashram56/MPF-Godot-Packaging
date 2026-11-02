@@ -68,7 +68,7 @@ def zedmd_answers(device, baud, timeout=5.0):
         while time.monotonic() < end:
             if time.monotonic() - sent >= 1.0:
                 reply, sent = b"", time.monotonic()
-                os.write(fd, HANDSHAKE.ljust(64, b"\0"))
+                os.write(fd, HANDSHAKE.ljust(64, b"\0") * 8)     # a Pico 2's ZeDMD answers only a full 512-byte block
             ready, _, _ = select.select([fd], [], [], 0.1)
             if ready:
                 reply += os.read(fd, 64 - len(reply))

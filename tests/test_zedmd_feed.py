@@ -31,6 +31,21 @@ def wire(packet):
     return data.ljust(-(-len(data) // 64) * 64, b"\0")
 
 
+FAKE_SERUM = r"""
+#include <stdint.h>
+#include <string.h>
+typedef struct { uint8_t *frame, *palette, *rotations; uint16_t *frame32; uint32_t width32; uint16_t *r32, *rif32;
+  uint8_t *me32; uint16_t *frame64; uint32_t width64; uint16_t *r64, *rif64; uint8_t *me64; uint32_t SerumVersion;
+  uint8_t flags; uint32_t nocolors; } F;
+static uint16_t pixels[128 * 32];
+static F frame = {0, 0, 0, pixels, 128, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 16};
+F *Serum_Load(const char *dir, const char *rom, uint8_t flags) { return &frame; }
+uint32_t Serum_Colorize(uint8_t *in) { for (int i = 0; i < 128 * 32; i++) pixels[i] = (uint16_t)(in[i] << 11); return 0; }
+uint32_t Serum_Rotate(void) { return 0; }
+void Serum_Dispose(void) {}
+"""
+
+
 @unittest.skipUnless(shutil.which("cc") or shutil.which("gcc"), "no C compiler")
 class TestFeed(unittest.TestCase):
     @classmethod
@@ -78,12 +93,12 @@ class TestFeed(unittest.TestCase):
         p = subprocess.Popen([self.exe, "--port", self.port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             a = frame([(9, 5, (9, 8, 7)), (100, 30, (255, 255, 255))])
-            self.serve(lambda: len(self.writes) >= 1, 3)                        # the handshake
+            self.serve(lambda: len(self.writes) >= 8, 3)                        # the handshake
             p.stdin.write(a)
             p.stdin.flush()
             want = b"".join(wire(pk) for pk in z.zone_packets(a, None, W, H))
-            self.serve(lambda: len(b"".join(self.writes[1:])) >= len(want), 5)
-            self.assertEqual(want, b"".join(self.writes[1:]))
+            self.serve(lambda: len(b"".join(self.writes[8:])) >= len(want), 5)
+            self.assertEqual(want, b"".join(self.writes[8:]))
             b = frame([(9, 5, (9, 8, 7)), (100, 30, (255, 0, 0))])             # one zone changes
             n = len(self.writes)
             p.stdin.write(b)
@@ -92,6 +107,72 @@ class TestFeed(unittest.TestCase):
             self.assertEqual(1, len(changed))
             self.serve(lambda: len(b"".join(self.writes[n:])) >= len(wire(changed[0])), 3)
             self.assertEqual(wire(changed[0]), b"".join(self.writes[n:]))
+        finally:
+            p.stdin.close()
+            p.wait(5)
+
+    def run_shades(self, args, shades, seconds=5):
+        """Feed one frame of shades with the given feeder arguments; the zone packets written for it."""
+        p = subprocess.Popen([self.exe, "--port", self.port, "--shades"] + args, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.serve(lambda: len(self.writes) >= 8, 3)
+            p.stdin.write(shades)
+            p.stdin.flush()
+            n = len(self.writes)
+            self.serve(lambda: len(self.writes) > n + 1, seconds)
+            self.serve(lambda: False, 0.5)
+            return b"".join(self.writes[8:])
+        finally:
+            p.stdin.close()
+            p.wait(5)
+
+    def shades(self, dots):
+        b = bytearray(W * H)
+        for x, y, n in dots:
+            b[y * W + x] = n
+        return bytes(b)
+
+    def test_shades_scale_one_colour(self):
+        got = self.run_shades(["--color", "2a6cff"], self.shades([(9, 5, 15), (100, 30, 5)]))
+        rgb = frame([(9, 5, (0x2a, 0x6c, 0xff)), (100, 30, (0x2a * 5 // 15, 0x6c * 5 // 15, 0xff * 5 // 15))])
+        self.assertEqual(b"".join(wire(pk) for pk in z.zone_packets(rgb, None, W, H)), got)
+
+    def test_serum_library_colours_the_frame(self):
+        """libserum is dlopen'ed: a stand-in with its C names returns a version 2 picture (RGB565) made from the shades."""
+        src = os.path.join(self.dir, "fake_serum.c")
+        with open(src, "w") as f:
+            f.write(FAKE_SERUM)
+        lib = os.path.join(self.dir, "libfakeserum.so")
+        subprocess.check_call([shutil.which("cc") or "gcc", "-shared", "-fPIC", "-o", lib, src])
+        got = self.run_shades(["--serum", lib, "/colours", "rom"], self.shades([(9, 5, 15), (100, 30, 8)]))
+        def red(n):                                 # the stand-in: RGB565 with the shade in the red bits
+            return (n * 255 // 31, 0, 0)
+        rgb = frame([(9, 5, red(15)), (100, 30, red(8))])
+        self.assertEqual(b"".join(wire(pk) for pk in z.zone_packets(rgb, None, W, H)), got)
+
+    def test_serum_without_a_colourisation_keeps_the_colour(self):
+        src = os.path.join(self.dir, "fake_serum_none.c")
+        with open(src, "w") as f:
+            f.write(FAKE_SERUM.replace("return &frame;", "return 0;", 1))
+        lib = os.path.join(self.dir, "libfakeserumnone.so")
+        subprocess.check_call([shutil.which("cc") or "gcc", "-shared", "-fPIC", "-o", lib, src])
+        got = self.run_shades(["--color", "ff0000", "--serum", lib, "/colours", "rom"], self.shades([(9, 5, 15)]))
+        self.assertEqual(b"".join(wire(pk) for pk in z.zone_packets(frame([(9, 5, (255, 0, 0))]), None, W, H)), got)
+
+    @unittest.skipUnless(os.environ.get("LIBSERUM"), "set LIBSERUM to a built libserum shared library")
+    def test_real_libserum_without_a_colourisation(self):
+        """The unmodified libserum loads through dlopen; a colourisation that is not there leaves the single colour."""
+        got = self.run_shades(["--color", "ff0000", "--serum", os.environ["LIBSERUM"], self.dir, "nothing"], self.shades([(9, 5, 15)]))
+        self.assertEqual(b"".join(wire(pk) for pk in z.zone_packets(frame([(9, 5, (255, 0, 0))]), None, W, H)), got)
+
+    def test_survives_a_closed_stderr(self):
+        """Godot's OS.execute_with_pipe may drop the stderr pipe: the first message must not end the feeder (SIGPIPE)."""
+        p = subprocess.Popen([self.exe, "--port", self.port], stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        p.stderr.close()
+        try:
+            self.serve(lambda: len(self.writes) >= 8, 3)                        # handshake; "ZeDMD 128x32 ..." is printed
+            self.serve(lambda: False, 0.5)
+            self.assertIsNone(p.poll())
         finally:
             p.stdin.close()
             p.wait(5)
