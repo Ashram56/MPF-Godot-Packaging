@@ -87,12 +87,12 @@ or a **folder** holding a clone:
 ```sh
 python3 common/games/build_game_package.py https://example.com/my-game.git --out dist
 python3 common/games/build_game_package.py ~/my-game --out dist      # your clone, your branch, as it is
-# dist/my-game-<date>-<commit>-linux-all.tar.xz  and  ...tar.xz.sha256
+# dist/my-game-1.0.0-base-linux-all.tar.xz  and  ...tar.xz.sha256
 ```
 
 With a URL it clones the game's repository into `~/mpf-game-builds/<id>` (`--workdir` changes it), runs its setup, builds, and checks.
 Options: `--repo FOLDER` uses a clone you already made *as it is* (your branch, your changes: nothing is cloned or checked out),
-`--repo URL` another remote, `--ref BRANCH_OR_TAG`, `--version 2026.10.29` (default: the date and the commit), `--target arm64|x86_64|all`
+`--repo URL` another remote, `--ref BRANCH_OR_TAG`, `--version 1.4.0 --label serum-zedmd` (name: `<id>-<version>-<label>-linux-<target>`; the commit is only in bundle.json), `--target arm64|x86_64|all`
 (default `all`: one archive for every machine, no binary inside), `--skip-setup` when the workspace is already prepared (rebuilds
 take minutes instead of the first run's 30 to 60), `--dry-run` to see the commands.
 

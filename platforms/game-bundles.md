@@ -101,8 +101,12 @@ What it does, in order:
 4. **Write `bundle.json`** (with `"format": 2` in the spec: `id`, `name`, `version`, `target` with `arch` `arm64`, `x86_64` or
    `arm64+x86_64` and `texture_formats`, `source` commit, `requires`, `keep_on_update`, `platform_addons`, and the facts of the
    contract above, copied as they are; it stops when `mpf_contract.problems` finds a command or a declared file missing) and
-   **`SHA256SUMS`**, pack as `<id>-<version>-linux-<target>.tar.xz` with a `.sha256` next to it.
-`game/.godot` (the import) is packed on purpose; the version defaults to `YYYY.MM.DD-<short commit>`; `requires.godot` is this platform's pinned Godot.
+   **`SHA256SUMS`**, pack as `<id>-<version>-<label>-linux-<target>.tar.xz` with a `.sha256` next to it
+(e.g. `my-game-1.4.0-serum-zedmd-linux-all.tar.xz`). **Naming (2026-11-02): a version number and a label, never a commit hash.** `--version X.Y.Z`
+(else the spec's `version`, else today's date) is the number, raised by the game for each bundle it hands out; `--label` (else the spec's `label`;
+lowercase words joined by `-`: `base`, `hd-colour`, `serum-zedmd`) says what the build holds. bundle.json `version` is `<number>-<label>` (what the
+setup page and `<id>@<version>` use), with `semver` and `label` beside it; the commit stays in bundle.json `source` (`game_commit`, `game_commit_short`).
+`game/.godot` (the import) is packed on purpose; `requires.godot` is this platform's pinned Godot.
 5. **Check** with `xz -t`, `tar -xJOf ARCHIVE <id>/bundle.json`, and that no `libgozen` is in a universal archive.
 
 A game can have its own builder (by convention `scripts/package/build_bundle.py` in its repository) that writes the spec and
