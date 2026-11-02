@@ -142,9 +142,10 @@ imports the textures and packs. The PuP Pack is never part of it (`pup.install`,
    included** (config, media, sounds, baked fonts, generated slides and data tables that git ignores). The game's own setup or build
    step produces them, here nothing is generated. `mpf_godot bundle` stops and lists any path of the spec's `copy` that is missing
    (`optional` lists those that may be absent), and the check refuses a Godot project that uses `mpf-gmc` without the add-on.
-2. **`bundle_spec.json`** (or `game_package.json`, at the root or in `scripts/package/`) ([platforms/game-bundles.md](../../platforms/game-bundles.md), example in
+2. **Facts, no command** (`"format": 2`, owner decision 2026-10-30): the bundle carries no start command, settings tool, install command or board script; the platform launches the game and applies its settings, profiles, PuP Pack and add-ons ([platforms/game-bundles.md](../../platforms/game-bundles.md), "The contract"). Format 1 below still builds for existing games until they move.
+3. **`bundle_spec.json`** (or `game_package.json`, at the root or in `scripts/package/`) ([platforms/game-bundles.md](../../platforms/game-bundles.md), example in
    `examples/bundle/bundle_spec.json`, JSON schema in `schema/game_package.schema.json`, checked by `mpf_godot bundle`): id, files, exclusions, `keep_on_update`, `requires`, `run`, `options`, `pup`, `platform_addons`.
-3. **Optionally `mpf-package.json`** at the repository root when the game is not built by the Stern SAM convention: `id` (what `bundle.json`
+4. **Optionally `mpf-package.json`** at the repository root when the game is not built by the Stern SAM convention: `id` (what `bundle.json`
    must say), `submodules`, `tools`, `disk_gb`, `min_python`, `setup` (commands, run in the clone), `build` (the command;
    `{python} {version} {target} {out} {platform}` are replaced), `env`, `target`, `publish_folder`, `needs`.
 

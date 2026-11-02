@@ -1,11 +1,10 @@
 {
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "title": "Game package description (the contract between a game and the platform)",
- "description": "Written and owned by the game, in its repository (bundle_spec.json or game_package.json). The platform keeps no game's spec. See common/games/README.md, 'What the game provides'.",
+ "description": "Written and owned by the game, in its repository (bundle_spec.json or game_package.json). The platform keeps no game's spec. See common/games/README.md, 'What the game provides'. Format 2 (platforms/game-bundles.md, 'The contract'): files and facts only; run, launch, options, extra and command keys of pup/profiles are refused.",
  "type": "object",
  "required": [
-  "id",
-  "run"
+  "id"
  ],
  "additionalProperties": false,
  "properties": {
@@ -55,10 +54,7 @@
    "type": "object"
   },
   "run": {
-   "type": "object",
-   "required": [
-    "start"
-   ]
+   "type": "object"
   },
   "options": {
    "type": "object"
@@ -86,6 +82,157 @@
   },
   "precheck": {
    "type": "array"
+  },
+  "format": {
+   "enum": [
+    1,
+    2
+   ]
+  },
+  "mpf": {
+   "type": "object",
+   "properties": {
+    "configs": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "hardware": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    }
+   }
+  },
+  "dmd": {
+   "type": "object",
+   "properties": {
+    "rom": {
+     "type": "string"
+    },
+    "size": {
+     "type": "string"
+    }
+   }
+  },
+  "addons": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": [
+     "id",
+     "dir"
+    ],
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "dir": {
+      "type": "string"
+     },
+     "setting": {
+      "type": "string"
+     },
+     "when": {}
+    }
+   }
+  },
+  "settings": {
+   "type": "object",
+   "properties": {
+    "schema": {
+     "type": "string"
+    }
+   }
   }
- }
+ },
+ "allOf": [
+  {
+   "if": {
+    "properties": {
+     "format": {
+      "const": 2
+     }
+    },
+    "required": [
+     "format"
+    ]
+   },
+   "then": {
+    "not": {
+     "anyOf": [
+      {
+       "required": [
+        "run"
+       ]
+      },
+      {
+       "required": [
+        "launch"
+       ]
+      },
+      {
+       "required": [
+        "options"
+       ]
+      },
+      {
+       "required": [
+        "extra"
+       ]
+      }
+     ]
+    },
+    "properties": {
+     "pup": {
+      "type": "object",
+      "properties": {
+       "rom": {
+        "type": "string"
+       },
+       "manifest": {
+        "type": "string"
+       }
+      },
+      "additionalProperties": false
+     },
+     "profiles": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "object",
+       "properties": {
+        "limits": {
+         "type": "object"
+        },
+        "defaults": {
+         "type": "object"
+        },
+        "godot_args": {
+         "type": "array"
+        }
+       },
+       "additionalProperties": false
+      }
+     }
+    }
+   },
+   "else": {
+    "properties": {
+     "run": {
+      "required": [
+       "start"
+      ]
+     }
+    },
+    "required": [
+     "run"
+    ]
+   }
+  }
+ ]
 }

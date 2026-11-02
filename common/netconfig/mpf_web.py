@@ -20,9 +20,11 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpf_common as C  # noqa: E402
+import mpf_dmd as DMD  # noqa: E402
 import mpf_games as G  # noqa: E402
 import mpf_netconfig as N  # noqa: E402
 import mpf_monitor as MON  # noqa: E402
+import mpf_audio as AU  # noqa: E402
 import mpf_ota as O  # noqa: E402
 from mpf_common import run  # noqa: E402
 
@@ -91,7 +93,7 @@ def cover_file(g):
         found = icon
     if not found:
         found = inside(str((b.get("monitor") or {}).get("image") or "game/monitor/playfield.jpg"))
-    pack = (b.get("pup") or {}).get("pack_dir")
+    pack = G.pack_dir(b) if b.get("pup") else None
     if not found and pack and os.path.isdir(os.path.join(g["path"], pack)):
         best, vids = (0, None), []
         for f in _walk_files(os.path.join(g["path"], pack)):
@@ -118,6 +120,22 @@ def cover_file(g):
     return found
 
 
+def dmd_state():
+    s = DMD.load()
+    best = {}
+    for g in G.installed_games():       # one row a game id: the active version, else the newest
+        if g["id"] not in best or g["active"] or (not best[g["id"]]["active"] and g["mtime"] > best[g["id"]]["mtime"]):
+            best[g["id"]] = g
+    return {"output": s["output"], "color": s["color"], "bridge": bool(DMD.bridge_dir()), "library": DMD.library(),
+            "games": [{"id": g["id"], "name": g["name"], "pick": s["serum"].get(g["id"], ""),
+                       "used": DMD.chosen_serum(g["id"], g["bundle"], s)} for g in best.values()]}
+
+
+def store_serum_job(path, name):
+    rom = DMD.store_serum(path, name)
+    G.job_set(state="done", msg=f"Serum colourisation {rom} is in the library: assign it to a game (default: the game whose ROM is {rom})")
+
+
 def state():
     games = []
     for g in G.installed_games():
@@ -126,7 +144,7 @@ def state():
             "folder": g["folder"], "id": g["id"], "name": g["name"], "version": g["version"], "active": g["active"],
             "description": str(b.get("description", ""))[:300], "icon": game_icon(g),
             "pup": {"supported": bool(b.get("pup")), "installed": G.pup_installed(g["path"], b), "assigned": G.pup_assigned(g["path"], b)},
-            "settings": bool(G.options_tool(g["path"])),
+            "settings": G.has_settings(g["path"]),
             "installed": int(g["mtime"]), "built": str(b.get("built") or ""),
         })
     for g in games:         # the newest of each game (by build date, else by install date): the others are older versions
@@ -141,6 +159,7 @@ def state():
         "game": {"running": G.game_running(), "autostart": G.game_autostart()},
         "games": games,
         "pups": G.pup_library(),
+        "dmd": dmd_state(),
         "storage": {"games": disk(C.GAMES if os.path.isdir(C.GAMES) else "/"), "readonly": C.READONLY,
                     "degraded": os.path.exists("/run/mpf-persist.degraded")},
         "mode": {"mode": mode[0], "stay": mode[1]} if mode else None,
@@ -154,7 +173,7 @@ def settings_form(game):
     """The settings of a game as a form, built from the bundle's own schema (the board's limits already applied)."""
     try:
         schema = G.settings_schema(game)
-        cur = json.loads(G.tool(game, "get").stdout or "{}")
+        cur = G.settings_values(game)
     except (OSError, ValueError):
         return "<p>Settings unavailable.</p>"
     out = []
@@ -222,15 +241,17 @@ class Handler(BaseHTTPRequestHandler):
         off, total = int(q.get("offset", ["0"])[0]), int(q.get("total", ["0"])[0])
         name = os.path.basename(q.get("name", [""])[0]) or kind
         folder = q.get("folder", [""])[0] or None
-        path = os.path.join(C.UPLOADS, "game.tar.xz" if kind == "game" else "pup.zip")
+        path = os.path.join(C.UPLOADS, {"game": "game.tar.xz", "serum": "serum.upload"}.get(kind, "pup.zip"))
         try:
             if G.JOB["state"] == "running" or G.JOB_LOCK.locked():
                 raise ValueError("an install is already running")
             if off == 0:
-                ok = name.endswith(".tar.xz") if kind == "game" else name.lower().endswith(".zip")
+                ok = (name.endswith(".tar.xz") if kind == "game" else name.endswith(DMD.EXTS) if kind == "serum"
+                      else name.lower().endswith(".zip"))
                 me = C.ARCH.get(platform.machine(), platform.machine())
                 if not ok:
-                    raise ValueError("expected a .tar.xz bundle" if kind == "game" else "expected a .zip pack")
+                    raise ValueError("expected a .tar.xz bundle" if kind == "game" else "expected <rom>.cROMc, .cRZ or .cROM"
+                                     if kind == "serum" else "expected a .zip pack")
                 if "linux-" in name and kind == "game" and not name.endswith((f"linux-{me}.tar.xz", "linux-all.tar.xz")):
                     raise ValueError(f"this machine is {me}: wrong bundle")
                 if G.free_gb(C.UPLOADS) * 1e9 < total * (4 if kind == "game" else 2) + 5e8:
@@ -261,6 +282,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(409, "busy", "text/plain")
         if kind == "game":
             fn, args = G.install_game, (path, q.get("sha", [""])[0], q.get("keep", ["1"])[0] != "0")
+        elif kind == "serum":
+            fn, args = store_serum_job, (path, name)
         else:
             fn, args = G.store_pup, (path, name)
         G.job_set(state="running", msg="Received, installing" if kind == "game" else "Received, checking the pack")
@@ -279,6 +302,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(G.job_state())
         if p == "/api/state":
             return self._json(state())
+        if p == "/api/audio":
+            return self._json(AU.state())
         if p == "/api/ota/list":
             try:
                 return self._json(O.list_remote())
@@ -332,7 +357,7 @@ class Handler(BaseHTTPRequestHandler):
                                       [("Cache-Control", "max-age=300")])
             return self._send(404, "not found", "text/plain")
         if p.startswith("/upload/size/"):
-            f = os.path.join(C.UPLOADS, "game.tar.xz" if p.endswith("game") else "pup.zip")
+            f = os.path.join(C.UPLOADS, "game.tar.xz" if p.endswith("game") else "serum.upload" if p.endswith("serum") else "pup.zip")
             return self._send(200, str(os.path.getsize(f) if os.path.exists(f) else 0), "text/plain")
         self._send(404, "not found", "text/plain")
 
@@ -340,7 +365,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._auth():
             return
         u = urlparse(self.path)
-        if u.path in ("/upload/game", "/upload/pup"):
+        if u.path in ("/upload/game", "/upload/pup", "/upload/serum"):
             return self._upload(u.path.rsplit("/", 1)[1], parse_qs(u.query))
         n = int(self.headers.get("Content-Length", 0))
         form = {k: v[0] for k, v in parse_qs(self.rfile.read(min(n, 262144)).decode()).items()}
@@ -380,6 +405,15 @@ class Handler(BaseHTTPRequestHandler):
                 fn, args = G.delete_pup_job, (form.get("pack", ""),)
             threading.Thread(target=G.run_job, args=(fn,) + args, daemon=True).start()
             return "Working on it"
+        if path == "/api/dmd":
+            DMD.set_output(form.get("output") or None, form.get("color") or None)
+            return "DMD output saved: it applies at the next start of the game"
+        if path == "/api/dmd/serum":
+            DMD.assign_serum(form.get("game", ""), form.get("rom", ""))
+            return "Serum colourisation saved: it applies at the next start of the game"
+        if path == "/api/dmd/serum/delete":
+            DMD.delete_serum(form.get("rom", ""))
+            return "Colourisation removed"
         if path == "/api/logs/save":
             name = MON.save_log(next((g for g in G.installed_games() if g["active"]), None))
             return f"Saved as {name} in {MON.SAVED}"
@@ -406,6 +440,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/monitor/switch":
             MON.MON.set_switch(form.get("name", ""), form.get("do", "toggle"))
             return "ok"
+        if path == "/api/audio":
+            do = form.get("do", "set")
+            if do == "test":
+                return AU.test_tone()
+            if do == "reboot":
+                r = run("systemctl", "reboot", "--no-block")
+                if r.returncode:
+                    raise ValueError((r.stderr or r.stdout).strip() or "reboot failed")
+                return "Rebooting."
+            msg, restart = AU.choose(form.get("output", "auto"), form.get("dac", ""))
+            if restart and G.game_running():
+                G.game_restart()
+                msg += " The game restarts."
+            return msg
         if path == "/api/ssh":
             if form.get("key"):
                 N.add_ssh_key(form["key"].strip())
@@ -583,6 +631,14 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
  <label><span data-t="country"></span><input name="country" maxlength="2" placeholder="FR" style="max-width:90px"></label>
  <div><button class="pri" type="submit"><span data-t="connect"></span></button></div></form></div></section>
 
+<section id="dmdSec"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="dmdTitle"></span></h2><div class="card">
+ <form class="form" id="dmdForm"><label><span data-t="dmdOut"></span><select name="output" id="dmdOut"><option value="auto" data-t="dmdAuto"></option><option value="lcd" data-t="dmdLcd"></option><option value="pin2dmd">PIN2DMD</option><option value="zedmd">ZeDMD</option></select></label>
+ <label><span data-t="dmdColor"></span><input name="color" id="dmdColor" type="color" style="max-width:90px"></label>
+ <div><button type="submit"><span data-t="save"></span></button></div></form>
+ <p class="muted mt" data-t="dmdHint"></p><p class="muted hide" id="dmdNoBridge" data-t="dmdNoBridge"></p>
+ <h3 class="mt" data-t="serumTitle"></h3><div class="nets" id="serumLib"></div><div class="nets" id="serumGames"></div>
+ <div class="drop mt" id="dropSerum"><svg><use href="#i-up"/></svg><b data-t="dropSerum"></b><span data-t="dropSerumHint"></span></div><input type="file" id="fSerum" class="hide" accept=".cROMc,.cRZ,.cROM"></div></section>
+
 <section><h2><svg stroke="currentColor"><use href="#i-lock"/></svg><span data-t="system"></span></h2><div class="card">
  <form class="form" id="sshForm"><label><span data-t="sshKey"></span><input name="key" placeholder="ssh-ed25519 AAAA…" autocomplete="off"></label>
  <label><span data-t="sshPw"></span><select name="pwlogin"><option value="" data-t="unchanged"></option><option value="yes">yes</option><option value="no">no</option></select></label>
@@ -590,6 +646,14 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
  <div id="modeBox" class="mt hide"></div>
  </div></section>
 </div>
+<section data-tab="config" id="audioSec"><h2><svg stroke="currentColor"><use href="#i-play"/></svg><span data-t="audTitle"></span></h2><div class="card">
+ <p class="muted" id="audPlat"></p>
+ <div id="audBanner"></div>
+ <form class="form" id="audForm"><label><span data-t="audOut"></span><select name="output" id="audOut"></select></label>
+ <label id="audDacRow" class="hide"><span data-t="audDac"></span><select name="dac" id="audDac"></select></label>
+ <p class="muted" id="audHint"></p>
+ <div class="row"><button class="pri" type="submit"><span data-t="audApply"></span></button><button type="button" id="audTest"><span data-t="audTest"></span></button><button type="button" id="audScan"><svg><use href="#i-redo"/></svg><span data-t="scan"></span></button></div></form>
+</div></section>
 <section data-tab="config"><h2><svg stroke="currentColor"><use href="#i-term"/></svg><span data-t="diag"></span></h2><div class="card">
  <div class="row"><button id="logsBtn"><svg><use href="#i-term"/></svg><span data-t="logs"></span></button><button id="saveLogBtn" class="pri"><svg><use href="#i-disk"/></svg><span data-t="saveLog"></span></button><button id="monBtn"><svg><use href="#i-cpu"/></svg><span data-t="monitor"></span></button></div>
  <p class="muted mt" data-t="saveLogHint"></p><div class="nets" id="savedLogs"></div></div></section>
@@ -602,7 +666,7 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
 <div id="toast"></div>
 
 <script>
-const T={en:{tabGames:"Games",tabInstall:"Install and updates",tabConfig:"Configuration",diag:"Diagnostics",saveLog:"Save the game log",saveLogHint:"Writes the game output, the machine state and the latest switch changes to one file on the data partition (the live logs are in RAM), to hand it over for debugging.",savedLogs:"Saved logs",monitor:"Switch monitor",monFilter:"Filter…",monToggle:"Click flips the switch",monTap:"Click taps the switch",monHint:"Live view through MPF's BCP connection (the game must be running). Short press = the switch closes and opens, long press = it stays closed while you hold, right click = flips it. Ctrl + wheel zooms.",monLog:"Latest changes",monNone:"No switch yet",monZoom:"Zoom",monSize:"Size",monViewPf:"Playfield",monViewList:"List",monOn:"on",monOff:"off",monConn:"Connected",monDisc:"Not connected",games:"Games",add:"Add a game or a PuP Pack",dropGame:"Game bundle",dropGameHint:"Drop a .tar.xz here or click",dropPup:"PuP Pack",dropPupHint:"Drop the pack's .zip here or click",
+const T={en:{dmdTitle:"DMD output",dmdOut:"Display of the DMD",dmdAuto:"Automatic (what is detected)",dmdLcd:"LCD DMD (HD)",dmdColor:"Colour",dmdHint:"One output at a time. Automatic picks a PIN2DMD or a ZeDMD when one is plugged in, else the screen. A ZeDMD shows the game's 128x32 DMD in this colour, or in colour with a Serum colourisation. Applies at the next start of the game.",dmdNoBridge:"This system has no dmd_bridge: a ZeDMD cannot be used.",serumTitle:"Serum colourisations",serumNone:"No colourisation uploaded.",serumDefault:"Default (the one named like the game's ROM)",serumOff:"No colour",dropSerum:"Serum colourisation",dropSerumHint:"Drop trn_174h.cROMc (or .cRZ) here or click",tabGames:"Games",tabInstall:"Install and updates",tabConfig:"Configuration",diag:"Diagnostics",saveLog:"Save the game log",saveLogHint:"Writes the game output, the machine state and the latest switch changes to one file on the data partition (the live logs are in RAM), to hand it over for debugging.",savedLogs:"Saved logs",monitor:"Switch monitor",monFilter:"Filter…",monToggle:"Click flips the switch",monTap:"Click taps the switch",monHint:"Live view through MPF's BCP connection (the game must be running). Short press = the switch closes and opens, long press = it stays closed while you hold, right click = flips it. Ctrl + wheel zooms.",monLog:"Latest changes",monNone:"No switch yet",monZoom:"Zoom",monSize:"Size",monViewPf:"Playfield",monViewList:"List",monOn:"on",monOff:"off",monConn:"Connected",monDisc:"Not connected",games:"Games",add:"Add a game or a PuP Pack",dropGame:"Game bundle",dropGameHint:"Drop a .tar.xz here or click",dropPup:"PuP Pack",dropPupHint:"Drop the pack's .zip here or click",
 goGame:"Upload and install",goPup:"Add to the library",packs:"PuP Packs",assign:"Pack of each game",assignHint:"A pack is added to the library once, then given to a game here. Switching it costs no new upload (the game keeps a link to the pack).",noPack:"No pack",ownPack:"installed with the game",packNone:"No pack in the library yet.",scDl:"Download (replay_scenario.py plays it into MPF in simulation)",scRec:"Record a scenario",scStop:"Stop and save",scRecording:"Recording your clicks",scNone:"No scenario recorded for this game.",scEmpty:"Nothing was recorded.",scName:"Name of the scenario",scConfirmDel:"Delete this scenario?",loose:"at the root",looseHint:"Not in a sub-folder: webdav_tidy.py puts it in one",del:"Delete",noZip:"no zip",unpacked:"unpacked",usedBy:"used by",inUse:"In use: take it away from the game first",confirmDelPack:"Remove this pack from the library?",otaFolder:"Folder on the server",otaUpdates:"updates",otaNew:"new game",builtOn:"built",installedOn:"installed",latestV:"latest version",olderV:"older version",keepOld:"Keep the older versions of this game",sha:"Its .sha256 file (optional)",packFor:"Install the pack for",network:"Network",system:"System",scan:"Scan",ssid:"Network name",psk:"Password",country:"Country code",connect:"Save and connect",
 sshKey:"SSH public key",sshPw:"SSH password login",unchanged:"unchanged",save:"Save",logs:"Game output",active:"Active",activate:"Activate at startup",start:"Start",stop:"Stop",restart:"Restart",settings:"Settings",delete:"Remove",
 running:"Running",stopped:"Stopped",noGames:"No game installed yet. Add a bundle below.",pupYes:"PuP Pack installed",pupNo:"no PuP Pack",version:"Version",confirmDel:"Remove this game with its settings and scores?",
@@ -611,7 +675,7 @@ mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"The syste
 maintTxt:"The system is writable (for updates of the operating system). Go back to production when you are done.",toMaint:"Maintenance until reboot",toMaintStay:"Maintenance, also after reboots",toProd:"Back to production",
 degraded:"No data partition: settings and scores are kept in RAM and are lost at power-off.",inbox:"Waiting in the inbox (installed at the next boot): ",inboxHelp:"Files copied to the inbox folder are installed at boot.",
 uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none",ota:"Updates (WebDAV)",otaUrl:"Server address",otaUser:"User",otaPw:"Password",otaPwKept:"unchanged",otaSave:"Save",otaCheck:"Check for updates",otaInstall:"Install",otaDone:"Installed",otaChanged:"Changed on the server",otaNone:"Nothing found in this folder",otaGame:"Game",otaPack:"PuP Pack",otaHint:"The address is the server only; the folder (default MPF Games) holds bundles (.tar.xz, with a .sha256), in sub-folders per game if you like, and PuP Pack .zip files (they go to the library)."},
-fr:{tabGames:"Jeux",tabInstall:"Installation et mises à jour",tabConfig:"Configuration",diag:"Diagnostic",saveLog:"Enregistrer le jeu (log)",saveLogHint:"Écrit la sortie du jeu, l'état de la machine et les derniers changements de switches dans un fichier sur la partition de données (les logs en cours sont en RAM), à fournir pour le débogage.",savedLogs:"Logs enregistrés",monitor:"Moniteur de switches",monFilter:"Filtrer…",monToggle:"Un clic inverse le switch",monTap:"Un clic fait une impulsion",monHint:"Vue en direct par la connexion BCP de MPF (le jeu doit être démarré). Appui court = le switch se ferme puis s'ouvre, appui long = il reste fermé tant que vous maintenez, clic droit = bascule. Ctrl + molette = zoom.",monLog:"Derniers changements",monNone:"Aucun switch",monZoom:"Zoom",monSize:"Taille",monViewPf:"Plateau",monViewList:"Liste",monOn:"actif",monOff:"inactif",monConn:"Connecté",monDisc:"Non connecté",games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
+fr:{dmdTitle:"Sortie DMD",dmdOut:"Affichage du DMD",dmdAuto:"Automatique (selon la détection)",dmdLcd:"DMD LCD (HD)",dmdColor:"Couleur",dmdHint:"Une seule sortie à la fois. Automatique choisit un PIN2DMD ou un ZeDMD s'il est branché, sinon l'écran. Un ZeDMD affiche le DMD 128x32 du jeu dans cette couleur, ou en couleur avec une colorisation Serum. Appliqué au prochain démarrage du jeu.",dmdNoBridge:"Ce système n'a pas dmd_bridge : un ZeDMD est inutilisable.",serumTitle:"Colorisations Serum",serumNone:"Aucune colorisation envoyée.",serumDefault:"Défaut (celle qui porte le nom de la ROM du jeu)",serumOff:"Sans couleur",dropSerum:"Colorisation Serum",dropSerumHint:"Déposez trn_174h.cROMc (ou .cRZ) ici ou cliquez",tabGames:"Jeux",tabInstall:"Installation et mises à jour",tabConfig:"Configuration",diag:"Diagnostic",saveLog:"Enregistrer le jeu (log)",saveLogHint:"Écrit la sortie du jeu, l'état de la machine et les derniers changements de switches dans un fichier sur la partition de données (les logs en cours sont en RAM), à fournir pour le débogage.",savedLogs:"Logs enregistrés",monitor:"Moniteur de switches",monFilter:"Filtrer…",monToggle:"Un clic inverse le switch",monTap:"Un clic fait une impulsion",monHint:"Vue en direct par la connexion BCP de MPF (le jeu doit être démarré). Appui court = le switch se ferme puis s'ouvre, appui long = il reste fermé tant que vous maintenez, clic droit = bascule. Ctrl + molette = zoom.",monLog:"Derniers changements",monNone:"Aucun switch",monZoom:"Zoom",monSize:"Taille",monViewPf:"Plateau",monViewList:"Liste",monOn:"actif",monOff:"inactif",monConn:"Connecté",monDisc:"Non connecté",games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
 goGame:"Envoyer et installer",goPup:"Ajouter à la bibliothèque",packs:"PuP Packs",assign:"Pack de chaque jeu",assignHint:"Un pack est ajouté une fois à la bibliothèque, puis affecté à un jeu ici. Le changer ne demande pas de nouvel envoi (le jeu garde un lien vers le pack).",noPack:"Aucun pack",ownPack:"installé avec le jeu",packNone:"Aucun pack dans la bibliothèque.",scDl:"Télécharger (replay_scenario.py le rejoue dans MPF en simulation)",scRec:"Enregistrer un scénario",scStop:"Arrêter et enregistrer",scRecording:"Enregistrement de vos clics",scNone:"Aucun scénario enregistré pour ce jeu.",scEmpty:"Rien n'a été enregistré.",scName:"Nom du scénario",scConfirmDel:"Supprimer ce scénario ?",loose:"à la racine",looseHint:"Pas dans un sous-dossier : webdav_tidy.py le range",del:"Supprimer",noZip:"pas de zip",unpacked:"décompressé",usedBy:"utilisé par",inUse:"Utilisé : le retirer du jeu d'abord",confirmDelPack:"Retirer ce pack de la bibliothèque ?",otaFolder:"Dossier sur le serveur",otaUpdates:"met à jour",otaNew:"nouveau jeu",builtOn:"construite le",installedOn:"installée le",latestV:"dernière version",olderV:"ancienne version",keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
 sshKey:"Clé publique SSH",sshPw:"Connexion SSH par mot de passe",unchanged:"inchangé",save:"Enregistrer",logs:"Sortie du jeu",active:"Actif",activate:"Activer au démarrage",start:"Démarrer",stop:"Arrêter",restart:"Redémarrer",settings:"Réglages",delete:"Supprimer",
 running:"En marche",stopped:"Arrêté",noGames:"Aucun jeu installé. Ajoutez un bundle ci-dessous.",pupYes:"PuP Pack installé",pupNo:"pas de PuP Pack",version:"Version",confirmDel:"Supprimer ce jeu avec ses réglages et ses scores ?",
@@ -699,6 +763,14 @@ function resetPick(drop,input,btn,key){input._f=null;input.value='';drop.querySe
 $('#goGame').onclick=async()=>{const f=$('#fGame')._f;if(!f)return;$('#goGame').disabled=true;await upload('game',f,'&keep='+($('#keepOld').checked?1:0));$('#fSha').value='';resetPick($('#dropGame'),$('#fGame'),$('#goGame'),'dropGame')};
 $('#goPup').onclick=async()=>{const f=$('#fPup')._f;if(!f)return;$('#goPup').disabled=true;await upload('pup',f,'');resetPick($('#dropPup'),$('#fPup'),$('#goPup'),'dropPup')};
 let packBusy=false;
+function dmdRender(s){const d=s.dmd;if(!d)return;const f=$('#dmdForm');if(!f.contains(document.activeElement)){$('#dmdOut').value=d.output;$('#dmdColor').value=d.color}
+ $('#dmdNoBridge').classList.toggle('hide',d.bridge);
+ $('#serumLib').innerHTML=d.library.length?d.library.map(x=>`<div class="net"><b class="grow">${esc(x.rom)}</b><span class="muted">${esc(x.file)} · ${(x.size/1048576).toFixed(1)} MB</span><button data-sdelete="${esc(x.rom)}" title="${t('del')}">${ico('trash')}</button></div>`).join(''):`<p class="muted">${t('serumNone')}</p>`;
+ $('#serumGames').innerHTML=d.games.map(g=>`<div class="net"><b class="grow">${esc(g.name)}</b><select data-sgame="${esc(g.id)}"><option value=""${g.pick===''?' selected':''}>${t('serumDefault')}${g.pick===''&&g.used?' ('+esc(g.used)+')':''}</option><option value="none"${g.pick==='none'?' selected':''}>${t('serumOff')}</option>${d.library.map(x=>`<option value="${esc(x.rom)}"${g.pick===x.rom?' selected':''}>${esc(x.rom)}</option>`).join('')}</select></div>`).join('')}
+$('#dmdForm').onsubmit=e=>{e.preventDefault();post('/api/dmd',Object.fromEntries(new FormData(e.target)))};
+document.addEventListener('change',e=>{const sg=e.target.dataset&&e.target.dataset.sgame;if(sg!==undefined&&e.target.tagName==='SELECT')post('/api/dmd/serum',{game:sg,rom:e.target.value})});
+document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('[data-sdelete]');if(b&&confirm(b.dataset.sdelete+' ?'))post('/api/dmd/serum/delete',{rom:b.dataset.sdelete})});
+$('#fSerum')._go=f=>{upload('serum',f,'')};pick($('#dropSerum'),$('#fSerum'));
 function packs(s){const lib=s.pups||[],gs=s.games.filter(g=>g.pup.supported);
  $('#packList').innerHTML=lib.map(p=>`<div class="net"><b class="grow">${esc(p.name)}</b><span class="muted">${p.zip?fmtB(p.size):t('noZip')}${p.installed?' · '+t('unpacked')+' '+fmtB(p.installed):''}${p.used_by&&p.used_by.length?' · '+t('usedBy')+' '+esc(p.used_by.join(', ')):''}</span><button data-pdel="${esc(p.name)}" title="${p.used_by&&p.used_by.length?t('inUse'):t('del')}"${p.used_by&&p.used_by.length?' disabled':''}>${ico('trash')}</button></div>`).join('');
  $('#packNone').textContent=lib.length?'':t('packNone');
@@ -725,10 +797,10 @@ $('#otaCheck').onclick=async()=>{const b=$('#otaCheck');b.disabled=true;$('#otaL
  try{const r=await fetch('/api/ota/list');const j=await r.json();if(!r.ok){toast(j.msg||'?',true);$('#otaList').innerHTML='';b.disabled=false;return}
  $('#otaList').innerHTML=j.map(i=>`<div class="net"><b class="grow">${esc(i.version?i.label+' '+i.version:(i.group?i.group+' / ':'')+i.name)}</b>${i.kind==='game'&&!(i.version&&i.installed&&!i.update)?`<span class="badge">${i.for?t('otaUpdates')+' '+esc(i.for):t('otaNew')}</span>`:''}<span class="muted">${i.kind==='game'?t('otaGame'):t('otaPack')} · ${fmtB(i.size)}${i.mtime&&fmtD(i.mtime)?' · '+fmtD(i.mtime):''}</span>${i.loose?`<span class="badge" title="${t('looseHint')}">${t('loose')}</span>`:''}${i.changed?`<span class="badge">${t('otaChanged')}</span>`:i.installed?`<span class="badge">${t('otaDone')}</span>`:''}${i.compatible?`<button data-k="${esc(i.key)}">${t('otaInstall')}</button>`:''}</div>`).join('')||'<span class="muted">'+t('otaNone')+'</span>'}catch(e){toast('?',true)}b.disabled=false};
 $('#otaList').onclick=async e=>{const b=e.target.closest('button[data-k]');if(!b)return;b.disabled=true;await post('/api/ota/install',{key:b.dataset.k});poll()};
-async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);packs(S);otaFill(S.ota)}catch(e){}}
+async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);packs(S);dmdRender(S);otaFill(S.ota)}catch(e){}}
 const TABS=['games','install','config','monitor'];let TAB=(location.hash||'').slice(1);if(!TABS.includes(TAB))TAB='games';
 function showTab(){if(TAB==='monitor')monStart();else monStop();document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('hide',e.dataset.tab!==TAB));document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.go===TAB))}
-$('#tabs').onclick=e=>{const b=e.target.closest('button[data-go]');if(!b)return;TAB=b.dataset.go;history.replaceState(null,'','#'+TAB);showTab();if(TAB==='config')savedList()};
+$('#tabs').onclick=e=>{const b=e.target.closest('button[data-go]');if(!b)return;TAB=b.dataset.go;history.replaceState(null,'','#'+TAB);showTab();if(TAB==='config'){savedList();audLoad()}};
 async function savedList(){try{const l=await (await fetch('/api/logs/saved')).json();$('#savedLogs').innerHTML=l.map(n=>`<a class="net" href="/api/logs/saved/${encodeURIComponent(n)}" download>${ico('disk')}<b class="grow">${esc(n)}</b></a>`).join('')}catch(e){}}
 $('#saveLogBtn').onclick=async()=>{const b=$('#saveLogBtn');b.disabled=true;await post('/api/logs/save',{});b.disabled=false;savedList()};
 let monT=null,monSince=0,monLast='',monLog=[],monLay=null,monRev=0,monEpoch=0,monSw={},monOrder=[],monDev={},monBusy=false,monQ=Promise.resolve();
@@ -798,6 +870,30 @@ $('#monFull').onclick=()=>{const c=$('#monCard'),on=!c.classList.contains('fsx')
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)fsOff()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape')fsOff()});
 scDraw();scLoad();monBind($('#pfw'),'.sp.switch');monBind($('#monGrid'),'button[data-n]');monApply();
-applyLang();showTab();if(TAB==="config")savedList();refresh();poll();setInterval(refresh,4000);
+
+/* ---- sound output (mpf_audio.py): the devices come from the kernel, the choice is kept on the data partition ---- */
+Object.assign(T.en,{audTitle:"Sound output",audOut:"Output",audDac:"I2S DAC",audApply:"Apply",audTest:"Test tone",audAuto:"Automatic (the image's default)",audI2s:"I2S DAC…",audNoMon:"no monitor",audMissing:"The saved output is not present: the image's default is used.",audReboot:"Reboot to load the I2S overlay.",audRebootBtn:"Reboot",audNone:"none found",audPlat:"Machine",audHintI2s:"An I2S DAC is read at boot: the choice is saved, then the machine must restart.",audPending:"I2S DAC saved, waiting for the reboot.",audRescanHint:"Plug a USB sound card, then Scan."});
+Object.assign(T.fr,{audTitle:"Sortie audio",audOut:"Sortie",audDac:"DAC I2S",audApply:"Appliquer",audTest:"Son de test",audAuto:"Automatique (défaut de l'image)",audI2s:"DAC I2S…",audNoMon:"pas d'écran",audMissing:"La sortie enregistrée est absente : le défaut de l'image est utilisé.",audReboot:"Redémarrez pour charger l'overlay I2S.",audRebootBtn:"Redémarrer",audNone:"aucune",audPlat:"Machine",audHintI2s:"Un DAC I2S est lu au démarrage : le choix est enregistré, puis la machine doit redémarrer.",audPending:"DAC I2S enregistré, en attente du redémarrage.",audRescanHint:"Branchez une carte son USB, puis Rechercher."});
+const PLATS={rpi4:'Raspberry Pi 4',rpi5:'Raspberry Pi 5',jetson:'Jetson',x86:'x86 PC',other:'?'};
+let AUD=null,audBusy=false;
+function audRender(){const a=AUD;if(!a||audBusy)return;
+ $('#audPlat').textContent=t('audPlat')+': '+(PLATS[a.platform]||a.platform);
+ let o=`<option value="auto">${esc(t('audAuto'))}</option>`;
+ for(const k of a.kinds){const d=a.devices.filter(x=>x.kind===k.id&&x.offered);
+  o+=`<optgroup label="${esc(k.label)}">`+(d.length?d.map(x=>`<option value="${esc(x.id)}">${esc(x.label)}${x.connected===false?' ('+esc(t('audNoMon'))+')':''}</option>`).join(''):(k.id==='i2s'?'':`<option disabled>${esc(t('audNone'))}</option>`))+(k.id==='i2s'?`<option value="i2s">${esc(t('audI2s'))}</option>`:'')+`</optgroup>`}
+ const sel=$('#audOut'),cur=a.output==='i2s-pending'?'i2s':a.output;sel.innerHTML=o;
+ if([...sel.options].some(x=>x.value===cur))sel.value=cur;
+ $('#audDac').innerHTML=a.dacs.map(x=>`<option value="${esc(x.id)}">${esc(x.label)}</option>`).join('');if(a.dac)$('#audDac').value=a.dac;
+ audShowDac();
+ $('#audBanner').innerHTML=(a.missing?`<div class="banner bad">${esc(t('audMissing'))}</div>`:'')+(a.reboot?`<div class="banner">${esc(t('audReboot'))} <button type="button" id="audReb">${esc(t('audRebootBtn'))}</button></div>`:'');
+ const rb=$('#audReb');if(rb)rb.onclick=()=>{if(confirm(t('audRebootBtn')+'?'))post('/api/audio',{do:'reboot'})}}
+function audShowDac(){const i=$('#audOut').value==='i2s';$('#audDacRow').classList.toggle('hide',!i);$('#audHint').textContent=i?t('audHintI2s'):t('audRescanHint')}
+async function audLoad(){try{AUD=await (await fetch('/api/audio')).json();audRender()}catch(e){}}
+$('#audOut').onchange=audShowDac;$('#audOut').onfocus=()=>{audBusy=true};$('#audOut').onblur=()=>{audBusy=false};
+$('#audForm').onsubmit=async e=>{e.preventDefault();const r=await post('/api/audio',{do:'set',...Object.fromEntries(new FormData(e.target))});audBusy=false;audLoad()};
+$('#audTest').onclick=async()=>{const b=$('#audTest');b.disabled=true;await post('/api/audio',{do:'test'});b.disabled=false};
+$('#audScan').onclick=()=>{audBusy=false;audLoad()};
+const _applyLang=applyLang;applyLang=function(){_applyLang();audRender()};
+applyLang();showTab();if(TAB==="config"){savedList();audLoad()}refresh();poll();setInterval(refresh,4000);
 </script></body></html>
 """

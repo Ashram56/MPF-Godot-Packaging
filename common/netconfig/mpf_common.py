@@ -31,7 +31,23 @@ GAMES = os.environ.get("MPF_GAMES_DIR", "/opt/games")
 GAME_ENV = os.environ.get("MPF_GAME_ENV", "/etc/default/mpf-game")
 GOZEN_SO = os.environ.get("MPF_GOZEN_SO", "")
 GAME_OVERRIDE = os.environ.get("MPF_GAME_OVERRIDE", "")
-PLATFORM_DIR = os.environ.get("MPF_PLATFORM_DIR", "")
+
+
+def find_platform_dir(user=None, here=None):
+    """This platform's checkout: MPF_PLATFORM_DIR, else the copy the image builds put in the game user's home (~/MPF-Godot), else the
+    checkout these files run from. The platform starts format 2 games with its `mpf_godot` package and installs its add-ons from it."""
+    if os.environ.get("MPF_PLATFORM_DIR"):
+        return os.environ["MPF_PLATFORM_DIR"]
+    here = here or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import glob
+    others = sorted(glob.glob("/home/*/MPF-Godot"))       # a shell without MPF_USER (the services set it): any user's copy
+    for d in [os.path.join("/home", user or USER, "MPF-Godot"), "/opt/MPF-Godot"] + others + [here]:
+        if os.path.isfile(os.path.join(d, "mpf_godot", "__init__.py")):
+            return d
+    return ""
+
+
+PLATFORM_DIR = find_platform_dir()
 GOZEN_NEEDS = os.environ.get("MPF_GOZEN_NEEDS", "v4l2m2m zero_copy").split()
 RO_CONF = os.environ.get("MPF_READONLY_CONF", "/etc/mpf-readonly.conf")
 

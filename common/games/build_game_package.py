@@ -40,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PLATFORM = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(PLATFORM, "common", "netconfig"))
 import mpf_bundlecheck as BC  # noqa: E402
+import mpf_contract as K  # noqa: E402
 TARGET_ARCH = {"arm64": "arm64", "x86_64": "x86_64", "all": "arm64+x86_64"}
 CABINET = re.compile(r"(^|/)(game/(data|audits|logs)(/|$)|[^/]*\.local\.cfg$|machine_vars\.yaml$|scorbit_device_key\.txt$)")
 
@@ -226,8 +227,8 @@ def verify(archive, recipe, target):
         die(f"{archive} is not a readable .tar.xz bundle: {e}")
     if meta is None:
         die(f"{archive}: no bundle.json at the top of the archive")
-    if meta.get("format") != 1:
-        problems.append(f"bundle.json format is {meta.get('format')!r}, the page reads 1")
+    if meta.get("format") not in (1, 2):
+        problems.append(f"bundle.json format is {meta.get('format')!r}, the page reads 1 and 2")
     if meta.get("id") != recipe["id"]:
         problems.append(f"bundle.json id is {meta.get('id')!r}, the recipe says {recipe['id']!r}")
     if not meta.get("version"):
@@ -283,7 +284,12 @@ def start_check(archive, repo, meta):
             t.extractall(tmp)
         roots = [d for d in os.listdir(tmp) if os.path.isdir(os.path.join(tmp, d))]
         root = os.path.join(tmp, roots[0])
-        bad = BC.problems(root, python, meta, source=repo if repo and os.path.isdir(repo) else None)
+        src = repo if repo and os.path.isdir(repo) else None
+        if K.is_v2(meta):           # format 2: the contract, the declared files, the imports of all the game's Python
+            bad = K.problems(meta, root) or BC.problems(root, python, meta, source=src,
+                                                        starts=BC.python_files(os.path.join(root, meta.get("game_dir") or "game")))
+        else:
+            bad = BC.problems(root, python, meta, source=src)
         cmd = BC.check_command(meta)
         if cmd and not bad:
             if cmd[0] in ("python3", "python"):
