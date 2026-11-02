@@ -4,7 +4,8 @@ The server address is the server only (https://host/…); the *folder* on it is 
 The server holds bundles (`*.tar.xz`, with an optional `*.tar.xz.sha256` beside) and PuP Packs (`<id>.pup.zip` or
 `<id>@<version>.pup.zip`: the name says which game a pack is for) either in the configured folder or in sub-folders of it (one per
 game). The page lists them (PROPFIND), installs the chosen one exactly like an upload (same checks, same new-version rules, see
-common/games/README.md) and remembers what it installed, so the list says *installed* or *changed on the server*.
+common/games/README.md) and remembers what it installed, so the list says *installed* or *changed on the server*. That record is `ota.json` (file name -> size|mtime), not the games
+really present: an install the check refused leaves no game but an old record can still say *installed*.
 
 The address, user and password are typed on the page and kept on this machine only, in `ota.json` of the state folder (mode 0600,
 on the data partition in read-only mode). Redirects are refused (the password must not follow one to another host).
