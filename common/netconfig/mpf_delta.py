@@ -15,9 +15,15 @@ import json
 import lzma
 import os
 import shutil
+import threading
+import time
+import concurrent.futures
 
 import mpf_common as C
 import mpf_games as G
+
+
+WORKERS = 8
 
 
 def sha_file(path):
@@ -108,9 +114,8 @@ def install(item, fetch, keep_old=True):
     for d in doc.get("dirs", []):
         os.makedirs(os.path.join(root, _safe(d)), exist_ok=True)
     idx = local_index()
-    reused = got = fetched = 0
-    todo = len(files)
-    for n, f in enumerate(files, 1):
+    reused, remote = 0, []
+    for f in files:
         dest = os.path.join(root, _safe(f["path"]))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         src = idx.get(f["sha256"])
@@ -119,27 +124,56 @@ def install(item, fetch, keep_old=True):
                 os.link(src, dest)
             except OSError:
                 shutil.copy2(src, dest)
+            os.chmod(dest, f.get("mode", 0o644))
             reused += 1
         else:
-            h, dec = hashlib.sha256(), lzma.LZMADecompressor()
-            try:
-                with fetch(item["objects"] + f"{f['sha256'][:2]}/{f['sha256']}.xz") as r, open(dest, "wb") as out:
-                    while True:
-                        chunk = r.read(1 << 20)
-                        if not chunk:
-                            break
-                        fetched += len(chunk)
-                        data = dec.decompress(chunk)
-                        h.update(data)
-                        out.write(data)
-            except lzma.LZMAError:
-                raise G.JobError(f"{f['path']}: the download is damaged, try again")
-            if h.hexdigest() != f["sha256"] or not dec.eof:
-                raise G.JobError(f"{f['path']}: checksum mismatch, try again")
-            got += 1
+            remote.append((f, dest))
+    total = sum(f["size"] for f, _ in remote)
+    G.job_set(msg=f"Delta: {reused} files already here, {len(remote)} to download ({total >> 20} MB)")
+    state = {"files": 0, "bytes": 0, "t": 0.0, "stop": False}
+    lock = threading.Lock()
+
+    def progress(done_bytes, done_file=False):
+        with lock:
+            state["bytes"] += done_bytes
+            state["files"] += 1 if done_file else 0
+            if time.time() - state["t"] >= 1.0:
+                state["t"] = time.time()
+                G.job_set(msg=f"Delta: {state['files']}/{len(remote)} files, {state['bytes'] >> 20} of {total >> 20} MB downloaded ({reused} kept)")
+
+    def get(job):
+        f, dest = job
+        h, dec = hashlib.sha256(), lzma.LZMADecompressor()
+        try:
+            with fetch(item["objects"] + f"{f['sha256'][:2]}/{f['sha256']}.xz") as r, open(dest, "wb") as out:
+                while True:
+                    if state["stop"]:
+                        return
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    data = dec.decompress(chunk)
+                    h.update(data)
+                    out.write(data)
+                    progress(len(data))
+        except lzma.LZMAError:
+            raise G.JobError(f"{f['path']}: the download is damaged, try again")
+        if h.hexdigest() != f["sha256"] or not dec.eof:
+            raise G.JobError(f"{f['path']}: checksum mismatch, try again")
         os.chmod(dest, f.get("mode", 0o644))
-        if n % 20 == 0 or n == todo:
-            G.job_set(msg=f"Delta: {n}/{todo} files ({reused} kept, {got} downloaded, {fetched >> 20} MB)")
+        progress(0, True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as pool:     # one connection per file: many small ones are slow one by one
+        futures = [pool.submit(get, j) for j in remote]
+        try:
+            for fu in concurrent.futures.as_completed(futures):
+                fu.result()
+        except BaseException:
+            state["stop"] = True
+            for fu in futures:
+                fu.cancel()
+            raise
+    got, fetched = len(remote), state["bytes"]
     for l in doc.get("links", []):
         dest = os.path.join(root, _safe(l["path"]))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -149,4 +183,5 @@ def install(item, fetch, keep_old=True):
             raise G.JobError(f"unsafe link in files.json: {l['path']}")
         os.symlink(l["target"], dest)
     G.job_log(f"delta: {reused} files already here, {got} downloaded ({fetched >> 20} MB)")
+    G.job_set(msg="Checking the game (trial start)")
     G.install_staged(stage, None, keep_old, str(item.get("branch") or doc.get("branch") or ""))
