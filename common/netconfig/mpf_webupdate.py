@@ -106,7 +106,8 @@ def _get(url, headers=None, limit=None):
 
 
 def branches(repo=None):
-    """[{name, sha, date}] of the repository's branches (GitHub API, public repository)."""
+    """[{name, sha, pr, title, state, date}] of the repository's branches (GitHub API, public repository): `pr` and `title` are the
+    newest pull request whose head is that branch (open ones first), else the title is the branch's last commit subject."""
     repo = repo or load()["repo"]
     if not REPO.match(repo):
         raise ValueError("invalid repository")
@@ -114,9 +115,25 @@ def branches(repo=None):
     for page in (1, 2, 3):
         with _get(f"https://api.github.com/repos/{repo}/branches?per_page=100&page={page}") as r:
             part = json.loads(r.read(1 << 22))
-        out += [{"name": b["name"], "sha": b["commit"]["sha"][:8]} for b in part]
+        out += [{"name": b["name"], "sha": b["commit"]["sha"][:8], "pr": 0, "title": "", "state": ""} for b in part]
         if len(part) < 100:
             break
+    prs = {}
+    for page in (1, 2, 3):
+        with _get(f"https://api.github.com/repos/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=100&page={page}") as r:
+            part = json.loads(r.read(1 << 23))
+        for p in part:
+            if p.get("head", {}).get("repo", {}).get("full_name", "").lower() != repo.lower():
+                continue
+            prev = prs.get(p["head"]["ref"])
+            if prev is None or (p["state"] == "open" and prev["state"] != "open"):
+                prs[p["head"]["ref"]] = {"pr": p["number"], "title": p["title"], "state": "merged" if p.get("merged_at") else p["state"],
+                                         "date": p.get("updated_at", "")}
+        if len(part) < 100:
+            break
+    for b in out:
+        b.update(prs.get(b["name"], {}))
+    out.sort(key=lambda b: (b["name"] != "main", b["state"] != "open", -(b.get("pr") or 0), b["name"]))
     return out
 
 
@@ -168,7 +185,14 @@ def _read_github(repo, branch):
             if m.isreg() and len(parts) == 4 and parts[1:3] == ["common", "netconfig"] and NAME.match(parts[3]) and m.size < 4 << 20:
                 files[parts[3]] = t.extractfile(m).read()
     pid = re.sub(r"[^A-Za-z0-9._-]+", "_", branch) + "-" + sha
-    return files, {"id": pid, "branch": branch, "sha": sha, "source": f"github:{repo}"}
+    desc, pr = "", 0
+    try:
+        for b in branches(repo):
+            if b["name"] == branch:
+                desc, pr = b.get("title", ""), b.get("pr", 0)
+    except ValueError:
+        pass
+    return files, {"id": pid, "branch": branch, "sha": sha, "source": f"github:{repo}", "description": desc, "pr": pr}
 
 
 def _read_webdav(name):
@@ -200,7 +224,8 @@ def _read_webdav(name):
                     man = json.loads(t.extractfile(m).read())
     os.remove(dest)
     pid = man.get("id") or name[len("mpf-web-"):-len(".tar.xz")]
-    return files, {"id": pid, "branch": man.get("branch", ""), "sha": man.get("sha", ""), "source": "webdav"}
+    return files, {"id": pid, "branch": man.get("branch", ""), "sha": man.get("sha", ""), "source": "webdav",
+                   "description": man.get("description", ""), "pr": man.get("pr", 0)}
 
 
 def list_webdav():
@@ -210,7 +235,14 @@ def list_webdav():
     out = []
     for e in O.propfind(cfg, O.base(cfg) + "web/"):
         if not e["dir"] and re.match(r"^mpf-web-.*\.tar\.xz$", e["name"]):
-            out.append({"name": e["name"], "size": e["size"], "mtime": e["mtime"]})
+            info = {}
+            try:
+                with O._open(cfg, e["url"] + ".info.json") as r:
+                    info = json.loads(r.read(1 << 16))
+            except (ValueError, OSError):
+                pass
+            out.append({"name": e["name"], "size": e["size"], "mtime": e["mtime"], "id": info.get("id", ""), "branch": info.get("branch", ""),
+                        "sha": info.get("sha", ""), "pr": info.get("pr", 0), "title": info.get("description", "")})
     return sorted(out, key=lambda x: x["mtime"] or "", reverse=True)
 
 

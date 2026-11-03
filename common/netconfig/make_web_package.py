@@ -29,13 +29,14 @@ def git(*a):
         return ""
 
 
-def build(out_dir="."):
+def build(out_dir=".", description="", pr=0):
     sha = git("rev-parse", "--short=8", "HEAD") or "nogit"
     branch = git("rev-parse", "--abbrev-ref", "HEAD") or "unknown"
     pid = f"{re.sub(r'[^A-Za-z0-9._-]+', '_', branch)}-{sha}"
     names = sorted(f for f in os.listdir(HERE) if f.startswith("mpf_") and f.endswith(".py"))
     files = {n: hashlib.sha256(open(os.path.join(HERE, n), "rb").read()).hexdigest() for n in names}
-    man = {"format": 1, "id": pid, "api": mpf_launch.API, "branch": branch, "sha": sha,
+    description = description or git("log", "-1", "--format=%s")
+    man = {"format": 1, "id": pid, "description": description, "pr": pr, "api": mpf_launch.API, "branch": branch, "sha": sha,
            "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "files": files}
     path = os.path.join(out_dir, f"mpf-web-{pid}.tar.xz")
     with tarfile.open(path, "w:xz") as t:
@@ -47,9 +48,16 @@ def build(out_dir="."):
         t.addfile(ti, io.BytesIO(data))
     digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
     open(path + ".sha256", "w").write(f"{digest}  {os.path.basename(path)}\n")
+    json.dump({k: man[k] for k in ("id", "branch", "sha", "description", "pr", "built")}, open(path + ".info.json", "w"), indent=1)
     return path, man
 
 
 if __name__ == "__main__":
-    p, m = build(sys.argv[1] if len(sys.argv) > 1 else ".")
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("out", nargs="?", default=".")
+    ap.add_argument("--description", default="", help="what this version is (default: the last commit's subject)")
+    ap.add_argument("--pr", type=int, default=0, help="pull request number, shown in the page's branch list")
+    a = ap.parse_args()
+    p, m = build(a.out, a.description, a.pr)
     print(p, m["id"], f"api {m['api']}")
