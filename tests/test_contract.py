@@ -23,6 +23,8 @@ SCHEMA = {"groups": [{"id": "d", "label": "Display"}], "options": [
      "target": {"godot_arg": "--dmd"}},
     {"id": "pup.music", "group": "d", "label": "Music", "type": "bool", "default": True,
      "target": {"ini": "game/pup.local.cfg", "section": "pup", "key": "music"}},
+    {"id": "pup.layout", "group": "d", "label": "Layout", "type": "choice", "choices": ["split", "stacked"], "default": "split",
+     "target": {"ini": "game/pup.local.cfg", "section": "pup", "key": "layout"}},
     {"id": "machine.hw", "group": "d", "label": "Hardware", "type": "choice", "choices": ["virtual", "proc"], "default": "virtual",
      "target": {"hardware": True}}]}
 
@@ -137,6 +139,7 @@ class Platform(Base):
         self.assertEqual(env["MPF_ADDONS"], os.path.join(game, "addons/hd_art"))
         self.assertNotIn("MPF_PUP_PACK", env)
         self.assertIn("music = true", open(os.path.join(game, "game/pup.local.cfg")).read())
+        self.assertIn('layout = "split"', open(os.path.join(game, "game/pup.local.cfg")).read())     # text is quoted for Godot's ConfigFile
 
     def test_platform_addons_and_board_settings_go_into_game_dir(self):
         """A game whose Godot project is not in game/ (game_dir "."): GMC and override.cfg must land beside its project.godot,

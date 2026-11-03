@@ -199,6 +199,13 @@ def _arg(v):
     return ("true" if v else "false") if isinstance(v, bool) else str(v)
 
 
+def _ini_value(v, kind=None):
+    """A value as the game's Godot ConfigFile reads it: text between quotes (layout="split"), numbers and booleans bare."""
+    if isinstance(v, bool) or kind in ("bool", "integer", "number", "int", "float"):
+        return _arg(v)
+    return json.dumps(str(v))
+
+
 def apply_ini(game, writes):
     """Write the `ini` settings into the game's files (configparser; the other keys of a file stay as they are)."""
     for rel, keys in writes.items():
@@ -229,7 +236,7 @@ def plan(game, b, board_name=None):
         if "godot_arg" in t:
             godot.append(f"{t['godot_arg']}={_arg(v)}")
         elif "ini" in t:
-            ini.setdefault(t["ini"], {})[(t.get("section", "main"), t["key"])] = _arg(v)
+            ini.setdefault(t["ini"], {})[(t.get("section", "main"), t["key"])] = _ini_value(v, opts[k].get("type"))
         elif t.get("hardware"):
             hw = str(v)
     if hw is None and hw_sets:
