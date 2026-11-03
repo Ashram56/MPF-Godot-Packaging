@@ -20,6 +20,12 @@ GoZen in `/home/pi/MPF-Godot`, autologin and `startx -- -nocursor` on tty1. Logi
 | Video decoder | H.264 `bcm2835-codec` (stateful, `GOZEN_HWDEC=1` with a fixed module) | **HEVC only** (`rpi-hevc-dec`, stateless V4L2 request API); no H.264 decoder |
 | Game base | | `GODOT` / `MPF_GAME_VENV` in [cabinet/mpf-game.env](../cabinet/mpf-game.env) (as the x86 image) |
 
+## ZeDMD / PIN2DMD output (dmd_bridge)
+
+`DMD_BRIDGE_TARBALL=/path/dmd_bridge-aarch64-libzedmd-ed69d49.tar.gz [DMD_BRIDGE_SHA256=...]` installs the prebuilt aarch64
+`dmd_bridge` (libzedmd, libserum, libgpiod) into `~/MPF-Godot/native/bin/dmd_bridge`, where the page finds it. Without the
+variable the script compiles it in the chroot (`native/dmd_bridge/build_all.sh`), which is slow under QEMU. Not tested with a ZeDMD.
+
 ## Video: HEVC and hardware decoding
 
 The Pi 5 decodes only HEVC in hardware, through a **stateless** decoder: FFmpeg needs its V4L2-request hwaccel

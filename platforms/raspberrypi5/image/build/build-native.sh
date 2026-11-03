@@ -245,7 +245,9 @@ in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.servic
 in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
 if [ "$READONLY" = 1 ]; then
     . "$REPO_ROOT/common/readonly/install-readonly.sh"
-    mpf_readonly_install "$R" pi /boot/firmware ""
+    # the X server of a user session writes ~/.local/share/xorg/Xorg.0.log and stops at once when it cannot (the login would end and
+    # restart every 2 s on a read-only root: seen on the x86 image), and the toolchain writes ~/.cache: RAM disks owned by pi
+    mpf_readonly_install "$R" pi /boot/firmware "" "/home/pi/.cache:128m /home/pi/.local/share/xorg:8m"
     # the game starts at power-on (the page's "start at power-on" switch toggles this link in a short writable window)
     in_chroot "systemctl enable mpf-game.service >/dev/null 2>&1"
 fi
@@ -265,6 +267,10 @@ if [ -n "$EXTRAS" ]; then
         printf 'allowed_users=console\nneeds_root_rights=auto\n' > "$R/etc/X11/Xwrapper.config"
         # every connected output on, left to right (backglass + full LCD DMD, like the Jetson image)
         install -m 755 "$CAB/xinitrc" "$R/home/pi/.xinitrc"
+        if [ "$READONLY" = 1 ]; then   # X server log in RAM (see mpf_readonly_install above)
+            printf '#!/bin/sh\n\nexec /usr/bin/X -nolisten tcp -logfile /tmp/Xorg.0.log "$@"\n' > "$R/etc/X11/xinit/xserverrc"
+            chmod 755 "$R/etc/X11/xinit/xserverrc"
+        fi
     fi
     if has mpf; then
         # The repository's own Linux installer, run as the cabinet user in the chroot (Python 3.11 via uv, MPF,
@@ -285,6 +291,19 @@ if [ -n "$EXTRAS" ]; then
         in_chroot "cd /home/pi/MPF-Godot && bash install/install_linux.sh --yes --no-setup --xvfb"
         rm -rf "$R/root/.local" "$R/root/.cache"   # root's copy of uv / Python 3.11, pi gets its own
         in_chroot "su - pi -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
+        # dmd_bridge, the platform's ZeDMD + Serum output (libzedmd and libserum, PPUC's, unmodified) in ~/MPF-Godot/native/bin/dmd_bridge,
+        # where common/netconfig/mpf_dmd.py finds it. DMD_BRIDGE_TARBALL=<aarch64 tarball> (+ DMD_BRIDGE_SHA256) installs a prebuilt one;
+        # without it libzedmd and libserum are compiled in the chroot (slow under QEMU).
+        if [ -n "${DMD_BRIDGE_TARBALL:-}" ]; then
+            [ -z "${DMD_BRIDGE_SHA256:-}" ] || echo "$DMD_BRIDGE_SHA256  $DMD_BRIDGE_TARBALL" | sha256sum -c - || exit 1
+            mkdir -p "$R/home/pi/MPF-Godot/native/bin"
+            tar xzf "$DMD_BRIDGE_TARBALL" -C "$R/home/pi/MPF-Godot/native/bin"   # contains dmd_bridge/ (binary + lib/, RUNPATH $ORIGIN/lib)
+            [ -x "$R/home/pi/MPF-Godot/native/bin/dmd_bridge/dmd_bridge" ] || { echo "no dmd_bridge in $DMD_BRIDGE_TARBALL"; exit 1; }
+            in_chroot "chown -R pi:pi /home/pi/MPF-Godot/native/bin"
+        else
+            in_chroot "apt-get install -y -qq autoconf automake libtool"
+            in_chroot "su - pi -c 'cd ~/MPF-Godot && bash native/dmd_bridge/build_all.sh'"
+        fi
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
         printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin pi --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
         cat >> "$R/home/pi/.profile" <<'PROF'
