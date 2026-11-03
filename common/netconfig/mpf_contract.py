@@ -36,6 +36,16 @@ def is_v2(b):
     return int((b or {}).get("format", 1)) >= FORMAT
 
 
+# Godot user arguments the platform's DMD add-on (addons/dmd_out) reads: a game option must not use these names (a game's `--dmd-size=` window
+# size was read as the device's size and the bridge got pictures of the wrong size, 2026-11-03)
+RESERVED_ARGS = ("--dmd-size", "--dmd-feed", "--zedmd", "--pin2dmd")
+
+
+def reserved_arg(arg):
+    name = str(arg).split("=", 1)[0]
+    return any(name == r or name.startswith(r + "-") for r in RESERVED_ARGS)
+
+
 def problems(b, root=None):
     """[str]: what makes `b` (a format 2 bundle.json) break the contract; with `root` (the unpacked bundle) also the files it declares."""
     bad = []
@@ -50,6 +60,10 @@ def problems(b, root=None):
     for board, p in (b.get("profiles") or {}).items():
         if not isinstance(p, dict) or set(p) - {"limits", "defaults", "godot_args"}:
             bad.append(f"`profiles.{board}` may only hold limits, defaults and godot_args (data, no command)")
+    for board, p in (b.get("profiles") or {}).items():
+        for a in (p.get("godot_args") or []) if isinstance(p, dict) else []:
+            if reserved_arg(a):
+                bad.append(f"`profiles.{board}.godot_args` uses `{a}`: that name belongs to the platform's DMD output ({', '.join(RESERVED_ARGS)})")
     if not b.get("game_dir"):
         bad.append("`game_dir` is missing: the folder with project.godot and MPF's config/")
     for a in b.get("addons") or []:
@@ -58,7 +72,11 @@ def problems(b, root=None):
     if root:
         bad += missing_files(b, root)
         try:
-            schema(root, b)
+            for o in schema(root, b).get("options", []):
+                a = (o.get("target") or {}).get("godot_arg")
+                if a and reserved_arg(a):
+                    bad.append(f"setting `{o.get('id')}` passes `{a}`: that name belongs to the platform's DMD output "
+                               f"({', '.join(RESERVED_ARGS)}); give the game's own option another name")
         except ValueError as e:
             bad.append(str(e))
     return bad
