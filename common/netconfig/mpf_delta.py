@@ -168,7 +168,8 @@ def install(item, fetch, keep_old=True):
             state["files"] += 1 if done_file else 0
             if time.time() - state["t"] >= 1.0:
                 state["t"] = time.time()
-                G.job_set(msg=f"Delta: {state['files']}/{len(remote)} files, {state['bytes'] >> 20} of {total >> 20} MB downloaded ({reused} kept)")
+                G.job_set(msg=f"Delta: {state['files']}/{len(remote)} files, {state['bytes'] >> 20} of {total >> 20} MB downloaded ({reused} kept)",
+                          pct=(state["bytes"] * 100 // total) if total else None)
 
     def get(job):
         f, dest = job
