@@ -45,7 +45,10 @@ def load():
         c = json.load(open(conf_path(), encoding="utf-8"))
     except (OSError, ValueError):
         c = {}
-    return {"source": c.get("source", "github"), "repo": c.get("repo") or DEFAULT_REPO, "branch": c.get("branch") or "main"}
+    br = c.get("branch") or "main"
+    if not BRANCH.match(br) or ".." in br or br.endswith((".tar.xz", ".sha256", ".json")):     # an older page stored a WebDAV file name here
+        br = "main"
+    return {"source": c.get("source", "github"), "repo": c.get("repo") or DEFAULT_REPO, "branch": br}
 
 
 def save(source, repo, branch):
@@ -54,8 +57,8 @@ def save(source, repo, branch):
     repo, branch = (repo or DEFAULT_REPO).strip(), (branch or "main").strip()
     if not REPO.match(repo):
         raise ValueError("the repository must look like owner/name")
-    if not BRANCH.match(branch) or ".." in branch:
-        raise ValueError("invalid branch name")
+    if not BRANCH.match(branch) or ".." in branch or branch.endswith((".tar.xz", ".sha256", ".json")):
+        branch = "main"                      # the branch is a GitHub branch; a WebDAV package name is never one
     os.makedirs(C.STATE_DIR, exist_ok=True)
     json.dump({"source": source, "repo": repo, "branch": branch}, open(conf_path(), "w"))
 
@@ -105,6 +108,11 @@ def _get(url, headers=None, limit=None):
         raise ValueError(f"cannot reach the server: {getattr(e, 'reason', e)}")
 
 
+def _neg(date):
+    """Sort key putting the newest ISO date first."""
+    return tuple(-ord(c) for c in date)
+
+
 def branches(repo=None):
     """[{name, sha, pr, title, state, date}] of the repository's branches (GitHub API, public repository): `pr` and `title` are the
     newest pull request whose head is that branch (open ones first), else the title is the branch's last commit subject."""
@@ -133,7 +141,9 @@ def branches(repo=None):
             break
     for b in out:
         b.update(prs.get(b["name"], {}))
-    out.sort(key=lambda b: (b["name"] != "main", b["state"] != "open", -(b.get("pr") or 0), b["name"]))
+    # main first, then the most recently active (a pull request's last update), open pull requests before closed or merged ones,
+    # branches with no pull request last
+    out.sort(key=lambda b: (b["name"] != "main", b.get("state", "") != "open", "" if b.get("date") else "~", _neg(b.get("date", "")), b["name"]))
     return out
 
 

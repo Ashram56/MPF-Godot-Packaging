@@ -72,3 +72,38 @@ def test_stage_refuses_other_api(tmp_path, monkeypatch):
         assert False
     except G.JobError as e:
         assert "new image" in str(e)
+
+
+def test_config_never_keeps_a_package_name_as_branch(tmp_path, monkeypatch):
+    import mpf_common as C
+    import mpf_webupdate as WU
+    monkeypatch.setattr(C, "STATE_DIR", str(tmp_path))
+    WU.save("webdav", "", "mpf-web-x-1.tar.xz")
+    assert WU.load()["branch"] == "main"
+    json.dump({"source": "webdav", "repo": "a/b", "branch": "mpf-web-y.tar.xz"}, open(WU.conf_path(), "w"))
+    assert WU.load()["branch"] == "main"
+    WU.save("github", "", "claude/x")
+    assert WU.load()["branch"] == "claude/x"
+
+
+def test_branches_main_first_then_newest_open_first(monkeypatch):
+    import io
+    import mpf_webupdate as WU
+
+    def br(n):
+        return {"name": n, "commit": {"sha": n.ljust(40, "0")}}
+    pulls = [{"number": 5, "title": "old merged", "state": "closed", "merged_at": "x", "updated_at": "2026-11-01T00:00:00Z", "head": {"ref": "a", "repo": {"full_name": "o/r"}}},
+             {"number": 9, "title": "new open", "state": "open", "updated_at": "2026-11-03T00:00:00Z", "head": {"ref": "c", "repo": {"full_name": "o/r"}}},
+             {"number": 7, "title": "older open", "state": "open", "updated_at": "2026-11-02T00:00:00Z", "head": {"ref": "b", "repo": {"full_name": "o/r"}}}]
+
+    class R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    def fake(url, headers=None, limit=None):
+        return R(json.dumps([br(n) for n in ("a", "z-nopr", "b", "main", "c")] if "/branches" in url else pulls).encode())
+    monkeypatch.setattr(WU, "_get", fake)
+    assert [b["name"] for b in WU.branches("o/r")] == ["main", "c", "b", "a", "z-nopr"]
