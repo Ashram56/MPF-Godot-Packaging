@@ -42,7 +42,7 @@ Therefore, in this first image:
 
 ## Tested
 
-- Built: `rpi5-debian13-sd.img.xz`, 685 MB, sha256 `5577baa0f1af2fc4b433fd281206df02be73a3c37f99588564cc8a16221fb9bf`
+- Built: `rpi5-debian13-sd.img.xz`, 687 MB (rebuild 2026-11-03 on main 1208133 + x86 image branch + dmd_bridge), sha256 `69e1c704b3129a1c5eafc7f9be58324be18f41d3d76356f56c8d96ba0793ff5e`
   (3.1 GB image: FAT `firmware` 256 MB + ext4 `rootfs`). About 80 min in an x86 sandbox: the packages' install
   scripts run in an arm64 chroot under QEMU user emulation, which dominates.
 - Checked statically in the image: partition table, `kernel_2712.img` / `initramfs_2712` / `bcm2712-rpi-5-b.dtb` /
