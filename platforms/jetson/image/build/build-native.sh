@@ -328,6 +328,9 @@ done
 exec openbox-session
 XRC
         chmod 755 "$R/home/jetson/.xinitrc"; in_chroot "chown jetson:jetson /home/jetson/.xinitrc"
+        if [ "$READONLY" = 1 ]; then   # Xorg would write ~/.local/share/xorg/Xorg.0.log: on a read-only root startx fails and getty restarts it in a loop
+            printf '#!/bin/sh\nexec /usr/bin/X -nolisten tcp -logfile /tmp/Xorg.0.log "$@"\n' > "$R/etc/X11/xinit/xserverrc"; chmod 755 "$R/etc/X11/xinit/xserverrc"
+        fi
         in_chroot "usermod -aG video,render,input,tty jetson 2>/dev/null || usermod -aG video,input,tty jetson"
     fi
     if has mpf; then
@@ -361,7 +364,9 @@ fi
 if [ "$READONLY" = 1 ]; then
     mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"   # where the page installs a game bundle (the data partition is bound here)
     . "$REPO_ROOT/common/readonly/install-readonly.sh"
-    mpf_readonly_install "$R" jetson "" "docker:/var/lib/docker containerd:/var/lib/containerd nvpmodel:/var/lib/nvpmodel net:/etc/mpf-network.txt"
+    mpf_readonly_install "$R" jetson "" "docker:/var/lib/docker containerd:/var/lib/containerd nvpmodel:/var/lib/nvpmodel net:/etc/mpf-network.txt" "/home/jetson/.cache:128m /home/jetson/.local/share/xorg:8m"
+    # nvgetty puts a login on ttyTHS0 (pins 8/10), which the PPUC link uses
+    in_chroot "systemctl disable nvgetty.service >/dev/null 2>&1; systemctl mask nvgetty.service >/dev/null 2>&1 || true"
     # The kernel command line is built by NVIDIA's flash.sh (build_fsimg: root=/dev/<rootdev> rw rootwait ...) when
     # jetson-disk-image-creator.sh runs, after this point; the extlinux.conf files here only hold "APPEND ${cbootargs}".
     # So the "rw" is changed in flash.sh itself (the kernel mounts / read-only; fstab then keeps it so).
