@@ -28,3 +28,47 @@ def test_package_roundtrip(tmp_path, monkeypatch):
     json.dump(m, open(pkg / "manifest.json", "w"))
     (pkg / "mpf_web.py").write_text("def (:")
     assert L.choose()[1] is None
+
+
+def test_switch_rollback_and_guard(tmp_path, monkeypatch):
+    """A new package is armed with a start counter; 3 starts without confirm roll it back; rollback() restores the previous one."""
+    import mpf_common as C
+    import mpf_games as G
+    import mpf_webupdate as WU
+    monkeypatch.setattr(L, "WEB_DIR", str(tmp_path))
+    monkeypatch.setattr(C, "STATE_DIR", str(tmp_path / "st"))
+    monkeypatch.setattr(WU, "_restart", lambda: None)
+    monkeypatch.setattr(G, "job_set", lambda **k: None)
+    src = os.path.join(os.path.dirname(__file__), "..", "common", "netconfig")
+    files = {n: open(os.path.join(src, n), "rb").read() for n in os.listdir(src) if n.startswith("mpf_") and n.endswith(".py")}
+    a = WU._stage(files, {"id": "a-1"})
+    WU.switch(a)
+    assert L.choose()[1]["id"] == "a-1"
+    b = WU._stage(files, {"id": "b-2"})
+    WU.switch(b)
+    assert WU.status()["current"]["id"] == "b-2" and WU.status()["pending"]
+    for _ in range(3):
+        L.guard()
+    assert L.choose()[1]["id"] == "b-2"             # 3 starts allowed
+    L.guard()                                       # the 4th start finds it unconfirmed: back to a-1
+    assert L.choose()[1]["id"] == "a-1" and os.path.exists(os.path.join(b, ".bad"))
+    WU.switch(b)                                    # .bad packages are refused by the launcher
+    assert L.choose()[1] is None
+    WU.rollback()
+    assert L.choose()[1]["id"] == "a-1"
+    WU.confirm()
+    assert not WU.status()["pending"]
+
+
+def test_stage_refuses_other_api(tmp_path, monkeypatch):
+    import mpf_games as G
+    import mpf_webupdate as WU
+    monkeypatch.setattr(L, "WEB_DIR", str(tmp_path))
+    src = os.path.join(os.path.dirname(__file__), "..", "common", "netconfig")
+    files = {n: open(os.path.join(src, n), "rb").read() for n in os.listdir(src) if n.startswith("mpf_") and n.endswith(".py")}
+    files["mpf_launch.py"] = files["mpf_launch.py"].replace(b"API = 1", b"API = 9")
+    try:
+        WU._stage(files, {"id": "x"})
+        assert False
+    except G.JobError as e:
+        assert "new image" in str(e)
