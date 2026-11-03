@@ -619,6 +619,10 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
  <div class="nets" id="packList"></div><p class="muted" id="packNone"></p>
  <h3 class="mt" data-t="assign"></h3><div class="nets" id="packGrid"></div><p class="muted mt" data-t="assignHint"></p></div></section>
 
+<section data-tab="install"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="serumTitle"></span></h2><div class="card">
+<div class="nets" id="serumLib"></div><div class="nets" id="serumGames"></div>
+ <div class="drop mt" id="dropSerum"><svg><use href="#i-up"/></svg><b data-t="dropSerum"></b><span data-t="dropSerumHint"></span></div><input type="file" id="fSerum" class="hide" accept=".cROMc,.cRZ,.cROM"></div></section>
+
 <section data-tab="install"><h2><svg stroke="currentColor"><use href="#i-redo"/></svg><span data-t="ota"></span></h2><div class="card">
  <form class="form" id="otaForm"><div class="two"><label><span data-t="otaUrl"></span><input name="url" id="otaUrl" placeholder="https://server.example" autocomplete="off"></label>
  <label><span data-t="otaFolder"></span><input name="folder" id="otaFolder" placeholder="MPF Games" autocomplete="off"></label></div><div class="two">
@@ -642,8 +646,7 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
  <div><button type="submit"><span data-t="save"></span></button></div></form>
  <div class="mt hide" id="dmdLiveBox"><canvas id="dmdLive" width="128" height="32" style="width:100%;max-width:768px;image-rendering:pixelated;background:#000;border-radius:8px;display:block"></canvas><p class="muted" id="dmdLiveMsg"></p></div>
  <p class="muted mt" data-t="dmdHint"></p><p class="muted hide" id="dmdNoBridge" data-t="dmdNoBridge"></p>
- <h3 class="mt" data-t="serumTitle"></h3><div class="nets" id="serumLib"></div><div class="nets" id="serumGames"></div>
- <div class="drop mt" id="dropSerum"><svg><use href="#i-up"/></svg><b data-t="dropSerum"></b><span data-t="dropSerumHint"></span></div><input type="file" id="fSerum" class="hide" accept=".cROMc,.cRZ,.cROM"></div></section>
+ </div></section>
 
 <section><h2><svg stroke="currentColor"><use href="#i-lock"/></svg><span data-t="system"></span></h2><div class="card">
  <form class="form" id="sshForm"><label><span data-t="sshKey"></span><input name="key" placeholder="ssh-ed25519 AAAA…" autocomplete="off"></label>
