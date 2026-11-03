@@ -154,7 +154,9 @@ def project_dir(b):
 
 
 def folder_name(b):
-    return f"{b['id']}@{b['version']}"
+    """`<id>@<version>`; a build of another branch than main is `<id>@<version>+<branch>`, so branches of one version live side by side."""
+    br = str(b.get("branch") or "")
+    return f"{b['id']}@{b['version']}" + (f"+{br}" if br and br != "main" else "")
 
 
 def check_identity(b):
@@ -458,7 +460,7 @@ def previous_version(b, exclude):
     return same[0] if same else None
 
 
-def install_game(archive, expect_sha, keep_old=True):
+def install_game(archive, expect_sha, keep_old=True, branch=""):
     job_set(state="running", msg="Checking the archive")
     h = hashlib.sha256()
     with open(archive, "rb") as f:
@@ -472,6 +474,13 @@ def install_game(archive, expect_sha, keep_old=True):
     os.makedirs(stage)
     job_set(msg="Unpacking (a few minutes)")
     sh("tar", "-xJf", archive, "-C", stage, "--no-same-owner")
+    install_staged(stage, archive, keep_old, branch)
+
+
+def install_staged(stage, archive=None, keep_old=True, branch=""):
+    """Everything after the bundle is unpacked in `stage` (one folder holding bundle.json): checks, a trial start, settings carried
+    over from the previous version, the active game. Shared by the archive install and the delta install (mpf_delta.py)."""
+    me = C.ARCH.get(platform.machine(), platform.machine())
     dirs = [d for d in os.listdir(stage) if os.path.isdir(os.path.join(stage, d))]
     if len(dirs) != 1 or not os.path.isfile(os.path.join(stage, dirs[0], "bundle.json")):
         raise JobError("not a game bundle: no bundle.json in the archive")
@@ -480,7 +489,7 @@ def install_game(archive, expect_sha, keep_old=True):
     if b.get("format", 1) > K.FORMAT:
         raise JobError(f"bundle format {b.get('format')} is newer than this page understands")
     check_identity(b)
-    tgt, me = b.get("target", {}), C.ARCH.get(platform.machine(), platform.machine())
+    tgt = b.get("target", {})
     # "arm64+x86_64": a bundle for several architectures (both texture formats, every native add-on); "all": no binary at all
     arches = str(tgt.get("arch", "all")).split("+")
     if tgt.get("os", "linux") != "linux" or ("all" not in arches and me not in arches):
@@ -497,6 +506,16 @@ def install_game(archive, expect_sha, keep_old=True):
         if not platform_addon(name):
             raise JobError(f"this bundle needs the platform's {name} add-on and this system has none, so it was not installed "
                            "(the current game is untouched): update the platform (MPF_PLATFORM_DIR)")
+    if branch and branch != b.get("branch"):        # the server says which branch this build is: kept in bundle.json (and its SHA256SUMS line)
+        b["branch"] = branch
+        with open(os.path.join(root, "bundle.json"), "w", encoding="utf-8") as f:
+            json.dump(b, f, indent=1)
+        sums = os.path.join(root, "SHA256SUMS")
+        if os.path.isfile(sums):
+            new = hashlib.sha256(open(os.path.join(root, "bundle.json"), "rb").read()).hexdigest()
+            lines = [(new + "  bundle.json" if l.rstrip().split("  ", 1)[-1].lstrip("*") == "bundle.json" else l.rstrip("\n"))
+                     for l in open(sums, encoding="utf-8")]
+            open(sums, "w", encoding="utf-8").write("\n".join(lines) + "\n")
     folder = folder_name(b)
     dest = os.path.join(C.GAMES, folder)
     old = dest + ".old"
@@ -540,7 +559,8 @@ def install_game(archive, expect_sha, keep_old=True):
     pw = pwd.getpwnam(C.USER)
     sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", dest)
     reimport_scripts(dest, b)
-    os.remove(archive)
+    if archive:
+        os.remove(archive)
     first_run_defaults(dest, b)
     board_profile(dest, b)
     # an update of the active game takes its place; a first game is the active one; another game waits to be chosen on the page

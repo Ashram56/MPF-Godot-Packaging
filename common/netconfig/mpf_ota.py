@@ -140,6 +140,10 @@ def read_manifest(cfg):
     return [i for i in items if isinstance(i, dict) and i.get("file") and i.get("id")] if isinstance(items, list) else None
 
 
+def O_url(cfg, rel):
+    return base(cfg) + "/".join(urllib.parse.quote(x) for x in rel.split("/"))
+
+
 def manifest_items(cfg, entries, installed, me):
     """Game items from the manifest: only the ones for this machine, each saying what it does to the installed games."""
     out = []
@@ -148,11 +152,16 @@ def manifest_items(cfg, entries, installed, me):
         if "all" not in arches and me not in arches:
             continue
         have = [g for g in installed if g["id"] == e["id"]]
-        names = {g["version"] for g in have}
+        def tag(v, br):
+            return str(v) + (f"+{br}" if br and br != "main" else "")
+        names = {tag(g["version"], g["bundle"].get("branch")) for g in have}
         key = e["file"]
-        newer = bool(have) and str(e.get("version", "")) not in names
+        etag = tag(e.get("version", ""), e.get("branch"))
+        newer = bool(have) and etag not in names
         out.append({"key": key, "name": e["file"].rsplit("/", 1)[-1], "group": "", "kind": "game", "size": int(e.get("size") or 0), "mtime": e.get("published", ""),
                     "url": base(cfg) + "/".join(urllib.parse.quote(x) for x in e["file"].split("/")), "sha_url": "", "sha": e.get("sha256", ""),
+                    "branch": str(e.get("branch", "")), "delta": (O_url(cfg, e["delta"]) if e.get("delta") else ""),
+                    "objects": (O_url(cfg, e["objects"]) if e.get("objects") else ""),
                     "compatible": True, "installed": bool(have) and not newer,
                     "changed": False, "version": str(e.get("version", "")), "label": e.get("name", e["id"]),
                     "for": (have[0]["name"] + " " + ", ".join(sorted(names))) if have else "", "update": newer})
@@ -223,19 +232,24 @@ def _download(cfg, url, dest, label):
         raise G.JobError("the download was cut: try again")
 
 
-def install_item(item):
+def install_item(item, mode="full"):
     """Download one listed item and install it (run in the page's job thread; the caller holds G.JOB_LOCK)."""
     cfg = load()
     name = item["name"]
     os.makedirs(C.UPLOADS, exist_ok=True)
-    if item["kind"] == "game":
+    if item["kind"] == "game" and mode == "delta":
+        if not item.get("delta") or not item.get("objects"):
+            raise G.JobError("this game has no delta on the server: install it complete")
+        import mpf_delta as D
+        D.install(item, lambda url: _open(cfg, url))
+    elif item["kind"] == "game":
         dest = os.path.join(C.UPLOADS, "game.tar.xz")
         sha = item.get("sha") or ""
         if not sha and item.get("sha_url"):
             with _open(cfg, item["sha_url"]) as r:
                 sha = (r.read(4096).decode(errors="replace").split() or [""])[0]
         _download(cfg, item["url"], dest, name)
-        G.install_game(dest, sha)
+        G.install_game(dest, sha, branch=str(item.get("branch") or ""))
     else:
         dest = os.path.join(C.UPLOADS, "pup.zip")
         _download(cfg, item["url"], dest, name)

@@ -23,6 +23,7 @@ class Dav(http.server.BaseHTTPRequestHandler):
     root = ""
     auth = "Basic " + __import__("base64").b64encode(b"claude:secret").decode()
     seen = []
+    gets = []
 
     def log_message(self, *a):
         pass
@@ -64,6 +65,7 @@ class Dav(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
+        Dav.gets.append(self.path)
         data = open(f, "rb").read()
         self.send_response(200)
         self.send_header("Content-Length", str(len(data)))
@@ -102,6 +104,62 @@ class Ota(TG.Base):
         open(os.path.join(self.remote, "web", "mpf-web-x-1.tar.xz"), "wb").write(b"x")
         O.save(self.url, "claude", "secret", "")
         self.assertEqual([i["name"] for i in O.list_remote()], ["demo-1.0-linux-all.tar.xz"])
+
+    def publish_delta(self, version, branch, files):
+        """What build_game_package.py --publish writes for one build: files.json, the objects, and the manifest entry."""
+        import tarfile
+        import mpf_delta as D
+        t = self.t.name
+        arc = os.path.join(t, f"b-{version}-{branch}.tar.xz")
+        TG.make_bundle(arc, version=version, files=files)
+        x = os.path.join(t, f"x-{version}-{branch}")
+        with tarfile.open(arc) as tf:
+            tf.extractall(x)
+        top = os.path.join(x, "demo")
+        rels = sorted(os.path.relpath(os.path.join(dp, n), top) for dp, _, fn in os.walk(top) for n in fn)
+        sums = "".join(f"{D.sha_file(os.path.join(top, n))}  {n}\n" for n in rels)
+        open(os.path.join(top, "SHA256SUMS"), "w").write(sums)
+        out = os.path.join(t, f"out-{version}-{branch}")
+        os.makedirs(out)
+        fj, _ = D.export(top, out, branch)
+        g = os.path.join(self.remote, "demo")
+        d = os.path.join(g, branch, version)
+        os.makedirs(d, exist_ok=True)
+        os.replace(fj, os.path.join(d, "files.json"))
+        for dp, _, fn in os.walk(os.path.join(out, "objects")):
+            for n in fn:
+                dst = os.path.join(g, "objects", n[:2])
+                os.makedirs(dst, exist_ok=True)
+                os.replace(os.path.join(dp, n), os.path.join(dst, n))
+        mf = os.path.join(self.remote, "mpf-games.json")
+        items = json.load(open(mf))["items"] if os.path.exists(mf) else []
+        items.append({"id": "demo", "name": "Demo", "version": version, "arch": "all", "branch": branch, "file": f"demo/{branch}/b-{version}.tar.xz",
+                      "size": 1, "sha256": "", "delta": f"demo/{branch}/{version}/files.json", "objects": "demo/objects/"})
+        json.dump({"format": 1, "items": items}, open(mf, "w"))
+
+    def test_delta_install_downloads_only_what_changed_and_keeps_branches_apart(self):
+        big = {"media/a.bin": b"A" * 5000, "media/b.bin": b"B" * 5000, "code.py": b"v1"}
+        self.publish_delta("1.0", "main", big)
+        self.publish_delta("1.1", "dev", dict(big, **{"code.py": b"v2 changed"}))
+        O.save(self.url, "claude", "secret", "")
+        items = {(i["version"], i["branch"]): i for i in O.list_remote()}
+        self.assertTrue(items[("1.0", "main")]["delta"] and items[("1.1", "dev")]["objects"].endswith("/demo/objects/"))
+        G.JOB_LOCK.acquire()
+        G.run_job(O.install_item, items[("1.0", "main")], "delta")
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"] + G.JOB["log"])
+        self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])
+        Dav.gets.clear()
+        G.JOB_LOCK.acquire()
+        G.run_job(O.install_item, items[("1.1", "dev")], "delta")
+        self.assertEqual(G.JOB["state"], "done", G.JOB["msg"] + G.JOB["log"])
+        self.assertEqual(sorted(g["folder"] for g in G.installed_games()), ["demo@1.0", "demo@1.1+dev"])
+        objects = [p for p in Dav.gets if "/objects/" in p]
+        self.assertLessEqual(len(objects), 3, objects)          # code.py, SHA256SUMS and bundle.json changed; the two media files came from 1.0
+        self.assertFalse(any(p for p in objects if hashlib.sha256(b"A" * 5000).hexdigest() in p))
+        game = [g for g in G.installed_games() if g["folder"] == "demo@1.1+dev"][0]
+        self.assertEqual(open(os.path.join(game["path"], "code.py"), "rb").read(), b"v2 changed")
+        self.assertEqual(game["bundle"]["branch"], "dev")
+        self.assertEqual({(i["version"], i["branch"]): i["installed"] for i in O.list_remote()}, {("1.0", "main"): True, ("1.1", "dev"): True})
 
     def test_config_never_exposes_the_password_and_keeps_it(self):
         O.save(self.url, "claude", "secret")
