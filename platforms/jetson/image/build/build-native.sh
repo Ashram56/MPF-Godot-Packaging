@@ -328,6 +328,9 @@ done
 exec openbox-session
 XRC
         chmod 755 "$R/home/jetson/.xinitrc"; in_chroot "chown jetson:jetson /home/jetson/.xinitrc"
+        if [ "$READONLY" = 1 ]; then   # Xorg would write ~/.local/share/xorg/Xorg.0.log: on a read-only root startx fails and getty restarts it in a loop
+            printf '#!/bin/sh\nexec /usr/bin/X -nolisten tcp -logfile /tmp/Xorg.0.log "$@"\n' > "$R/etc/X11/xinit/xserverrc"; chmod 755 "$R/etc/X11/xinit/xserverrc"
+        fi
         in_chroot "usermod -aG video,render,input,tty jetson 2>/dev/null || usermod -aG video,input,tty jetson"
     fi
     if has mpf; then
@@ -361,15 +364,19 @@ fi
 if [ "$READONLY" = 1 ]; then
     mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"   # where the page installs a game bundle (the data partition is bound here)
     . "$REPO_ROOT/common/readonly/install-readonly.sh"
-    mpf_readonly_install "$R" jetson "" "docker:/var/lib/docker containerd:/var/lib/containerd nvpmodel:/var/lib/nvpmodel net:/etc/mpf-network.txt"
-    # the kernel command line comes from NVIDIA's extlinux.conf (the template flash.sh copies, and the rootfs copy when there is one):
-    # "rw" becomes "ro"
-    ro_done=0
-    for f in "$L4T/bootloader/extlinux.conf" "$R/boot/extlinux/extlinux.conf"; do
-        [ -f "$f" ] || continue
-        if grep -qE '^\s*APPEND .*\brw\b' "$f"; then sed -i -E '/^\s*APPEND /s/\brw\b/ro/' "$f"; ro_done=1; fi
-    done
-    [ "$ro_done" = 1 ] || echo "WARNING: no 'rw' found in an extlinux.conf APPEND line: add ro to the kernel command line by hand (cat /proc/cmdline on the board)"
+    mpf_readonly_install "$R" jetson "" "docker:/var/lib/docker containerd:/var/lib/containerd nvpmodel:/var/lib/nvpmodel net:/etc/mpf-network.txt" "/home/jetson/.cache:128m /home/jetson/.local/share/xorg:8m"
+    # nvgetty puts a login on ttyTHS0 (pins 8/10), which the PPUC link uses
+    in_chroot "systemctl disable nvgetty.service >/dev/null 2>&1; systemctl mask nvgetty.service >/dev/null 2>&1 || true"
+    # The kernel command line is built by NVIDIA's flash.sh (build_fsimg: root=/dev/<rootdev> rw rootwait ...) when
+    # jetson-disk-image-creator.sh runs, after this point; the extlinux.conf files here only hold "APPEND ${cbootargs}".
+    # So the "rw" is changed in flash.sh itself (the kernel mounts / read-only; fstab then keeps it so).
+    if grep -q 'root=/dev/${target_rootdev} ro rootwait' "$L4T/flash.sh"; then
+        :   # already patched by an earlier run
+    elif grep -q 'root=/dev/${target_rootdev} rw rootwait' "$L4T/flash.sh"; then
+        sed -i 's|\(root=/dev/${target_rootdev}\) rw rootwait|\1 ro rootwait|' "$L4T/flash.sh"
+    else
+        echo "WARNING: no 'root=/dev/\${target_rootdev} rw rootwait' in flash.sh: add ro to the kernel command line by hand (cat /proc/cmdline on the board)"
+    fi
 fi
 
 # Unique SSH host keys per card: drop the build-time keys, regenerate on first boot
