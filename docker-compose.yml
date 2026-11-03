@@ -1,0 +1,22 @@
+# Test a game bundle locally (PC, Mac, Linux): docker compose up --build        then http://localhost:8080 (setup page)
+# and http://localhost:6080/vnc.html?autoconnect=1&resize=scale (the game's window). docker/README.md.
+services:
+  mpf:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: mpf-godot
+    restart: unless-stopped
+    ports:
+      # localhost only; MPF_BIND=0.0.0.0 to open them to the network (set MPF_WEB_PASSWORD first)
+      - "${MPF_BIND:-127.0.0.1}:8080:8080"
+      - "${MPF_BIND:-127.0.0.1}:6080:6080"
+    environment:
+      MPF_WEB_PASSWORD: ${MPF_WEB_PASSWORD:-mpf}   # the setup page's password (user name: anything)
+      MPF_AUTOSTART: ${MPF_AUTOSTART:-1}
+      MPF_SCREEN: ${MPF_SCREEN:-1280x720x24}
+    volumes:
+      - mpf-data:/data          # games, settings, PuP Packs, Serum files
+    shm_size: "1gb"
+volumes:
+  mpf-data:

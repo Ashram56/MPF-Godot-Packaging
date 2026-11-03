@@ -25,6 +25,7 @@ import mpf_screens as SCR  # noqa: E402
 import mpf_games as G  # noqa: E402
 import mpf_netconfig as N  # noqa: E402
 import mpf_monitor as MON  # noqa: E402
+import mpf_preview as PV  # noqa: E402
 import mpf_audio as AU  # noqa: E402
 import mpf_ota as O  # noqa: E402
 import mpf_webupdate as WU  # noqa: E402
@@ -137,6 +138,16 @@ def dmd_state():
                        "used": DMD.chosen_serum(g["id"], g["bundle"], s)} for g in best.values()]}
 
 
+def preview_state():
+    s = PV.load()
+    act = next((g for g in G.installed_games() if g["active"]), None)
+    wins = G.screens_state(act["path"]) if act else []
+    scr = detected_screens() if s["enabled"] else []
+    return dict(s, tools=PV.tools(), loopback=PV.loopback_present(), soundOutput=AU.effective() is not None,
+                windows=[{"id": w["id"], "label": w["label"], "ok": PV.grab_geometry(scr, w["index"]) is not None}
+                         for w in wins if w["id"] != "dmd"])
+
+
 _SCR = [0.0, []]
 
 
@@ -183,6 +194,7 @@ def state():
         "screens": screens_state(),
         "pups": G.pup_library(),
         "dmd": dmd_state(),
+        "preview": preview_state(),
         "storage": {"games": disk(C.GAMES if os.path.isdir(C.GAMES) else "/"), "readonly": C.READONLY,
                     "degraded": os.path.exists("/run/mpf-persist.degraded")},
         "mode": {"mode": mode[0], "stay": mode[1]} if mode else None,
@@ -243,6 +255,37 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(data)
+
+    def _preview(self, what):
+        """A live stream of the preview: `sound` (WAV) or a window id (MJPEG). Only while the option is on; the capture dies with the connection."""
+        if not PV.load()["enabled"]:
+            return self._send(404, "preview is off", "text/plain")
+        if what == "sound":
+            cmd, ctype, env = PV.arecord_cmd(), "audio/wav", None
+            if not (PV.load()["sound"] and PV.tools()["arecord"] and PV.loopback_present()):
+                return self._send(404, "no sound capture", "text/plain")
+        else:
+            act = next((g for g in G.installed_games() if g["active"]), None)
+            win = next((w for w in (G.screens_state(act["path"]) if act else []) if w["id"] == what and w["id"] != "dmd"), None)
+            geom = PV.grab_geometry(detected_screens(), win["index"]) if win else None
+            if not geom or not PV.tools()["ffmpeg"]:
+                return self._send(404, "no capture for this window", "text/plain")
+            env = {"DISPLAY": os.environ.get("DISPLAY") or ":0"}
+            xa = f"/tmp/.Xauthority-{C.USER}" if C.READONLY else os.path.join("/home", C.USER, ".Xauthority")
+            if os.path.exists(xa):
+                env["XAUTHORITY"] = xa
+            cmd, ctype = PV.ffmpeg_cmd(geom, env["DISPLAY"]), f"multipart/x-mixed-replace;boundary={PV.BOUNDARY}"
+        try:
+            proc = PV.start(cmd, env)
+        except OSError:
+            return self._send(404, "capture tool missing", "text/plain")
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        PV.stream(proc, self.wfile.write)
 
     def _json(self, obj, code=200):
         self._send(code, json.dumps(obj), "application/json")
@@ -369,6 +412,8 @@ class Handler(BaseHTTPRequestHandler):
             n = unquote(p.rsplit("/", 1)[1])
             return self._send(200, json.dumps({"format": 1, "game": g["bundle"]["id"], "events": ev}, indent=1), "application/json",
                               [("Content-Disposition", 'attachment; filename="%s.json"' % n)])
+        if p.startswith("/api/preview/"):
+            return self._preview(p.rsplit("/", 1)[1])
         if p == "/api/dmd/frame":
             f = DMD.preview_frame()
             if f is None:
@@ -465,6 +510,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/dmd":
             DMD.set_output(form.get("output") or None, form.get("color") or None, form.get("look"))
             return "DMD output saved: it applies at the next start of the game"
+        if path == "/api/preview":
+            PV.save(form.get("enabled") == "1", form.get("sound") == "1")
+            return "Preview saved: the sound copy applies at the next start of the game"
         if path == "/api/screens":
             game = G.installed_game(form.get("folder", ""))
             if not game:
@@ -713,13 +761,18 @@ main.wide{max-width:min(1800px,98vw)}
  <label id="dmdLookRow"><span data-t="dmdLook"></span><select name="look" id="dmdLook"></select></label>
  <label><span data-t="dmdColor"></span><input name="color" id="dmdColor" type="color" style="max-width:90px"></label>
  <div><button type="submit"><span data-t="save"></span></button></div></form>
- <div class="mt hide" id="dmdLiveBox"><label class="muted row" style="gap:8px"><span data-t="dmdSize"></span><input type="range" class="dmdz" min="20" max="100" step="5" style="width:160px;padding:0"></label><canvas id="dmdLive" width="128" height="32" style="width:calc(var(--dz,100) * 1%);image-rendering:pixelated;background:#000;border-radius:8px;display:block"></canvas><p class="muted" id="dmdLiveMsg"></p></div>
  <p class="muted mt" id="dmdLookNote"></p><p class="muted mt" data-t="dmdHint"></p><p class="muted hide" id="dmdNoBridge" data-t="dmdNoBridge"></p>
  </div></section>
 
 <section id="scrSec" class="hide"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="scrTitle"></span></h2><div class="card">
  <p class="muted" id="scrGame"></p><div class="nets" id="scrList"></div><div id="scrWin"></div>
  <p class="muted mt" id="scrDmdNote"></p><p class="muted mt" data-t="scrHint"></p></div></section>
+
+<section id="prevSec"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="prevTitle"></span></h2><div class="card">
+ <form class="form" id="prevForm"><label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="prevOn" style="width:auto"><span data-t="prevOn"></span></label>
+ <label style="display:flex;flex-direction:row;align-items:center;gap:8px"><input type="checkbox" id="prevSound" style="width:auto"><span data-t="prevSound"></span></label>
+ <div><button type="submit"><span data-t="save"></span></button></div></form>
+ <p class="muted mt" id="prevNote"></p><p class="muted mt" data-t="prevHint"></p></div></section>
 
 <section><h2><svg stroke="currentColor"><use href="#i-lock"/></svg><span data-t="system"></span></h2><div class="card">
  <form class="form" id="sshForm"><label><span data-t="sshKey"></span><input name="key" placeholder="ssh-ed25519 AAAA…" autocomplete="off"></label>
@@ -741,7 +794,7 @@ main.wide{max-width:min(1800px,98vw)}
  <p class="muted mt" data-t="saveLogHint"></p><div class="nets" id="savedLogs"></div></div></section>
 <section data-tab="monitor"><h2><svg stroke="currentColor"><use href="#i-cpu"/></svg><span data-t="monitor"></span>&nbsp;<span class="badge" id="monBadge"></span></h2><div class="card" id="monCard"><div class="row"><button id="monFull" type="button" title="">⛶</button><input id="monFilter" style="max-width:240px" data-ph="monFilter"><span id="monZoomBox" class="row hide"><label class="muted row" style="gap:6px"><span data-t="monZoom"></span><input type="range" id="monZ" min="0.5" max="4" step="0.1" style="width:110px;padding:0"></label><label class="muted row" style="gap:6px"><span data-t="monSize"></span><input type="range" id="monK" min="0.8" max="4" step="0.1" style="width:90px;padding:0"></label><button id="monFit" type="button">1:1</button></span><select id="monView" style="width:auto" class="hide"><option value="pf" data-t="monViewPf"></option><option value="list" data-t="monViewList"></option></select><span class="muted" id="monCount"></span></div>
 <div class="row mt" id="scBar"><button id="scRec" type="button"></button><span class="muted" id="scState"></span><span class="grow"></span><span class="muted" id="scNone"></span></div><div class="nets" id="scList"></div>
-<p class="muted" data-t="monHint"></p><div id="monRow" style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap"><div id="monPf" class="hide" style="text-align:center;overflow-x:auto;flex:0 1 auto"><div class="pfw" id="pfw"><img id="pfImg" alt=""></div></div><div id="monDmdBox" class="hide" style="flex:1 1 360px;min-width:300px;position:sticky;top:8px"><label class="muted row" style="gap:8px"><span data-t="dmdSize"></span><input type="range" class="dmdz" min="20" max="100" step="5" style="width:160px;padding:0"></label><canvas id="monDmd" class="dmdc" width="128" height="32" style="width:calc(var(--dz,100) * 1%);image-rendering:pixelated;background:#000;border-radius:8px;display:block"></canvas><p class="muted" id="monDmdMsg"></p></div></div><div class="sws mt" id="monGrid"></div><h2 class="mt"><span data-t="monLog"></span></h2><pre id="monLogBox" style="max-height:160px"></pre></div></section>
+<p class="muted" data-t="monHint"></p><div id="monRow" style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap"><div id="monPf" class="hide" style="text-align:center;overflow-x:auto;flex:0 1 auto"><div class="pfw" id="pfw"><img id="pfImg" alt=""></div></div><div id="monPrev" class="hide" style="flex:1 1 320px;min-width:260px;max-width:640px;position:sticky;top:8px"><div id="monPrevWins"></div><label class="muted row" style="gap:8px"><span data-t="dmdSize"></span><input type="range" class="dmdz" min="20" max="100" step="5" style="width:160px;padding:0"></label><canvas id="monDmd" class="dmdc" width="128" height="32" style="width:calc(var(--dz,100) * 1%);image-rendering:pixelated;background:#000;border-radius:8px;display:block"></canvas><p class="muted" id="monDmdMsg"></p><div class="row" id="monSndRow"><button id="monSnd" type="button"></button><audio id="monAudio" style="display:none"></audio></div></div></div></div><div class="sws mt" id="monGrid"></div><h2 class="mt"><span data-t="monLog"></span></h2><pre id="monLogBox" style="max-height:160px"></pre></div></section>
 </main>
 
 <dialog id="dlg"><div class="hd"><b id="dlgTitle" class="grow"></b><button id="dlgClose">✕</button></div><div class="bd" id="dlgBody"></div><div class="ft" id="dlgFoot"></div></dialog>
@@ -848,7 +901,13 @@ let packBusy=false;
 let dmdWeb=false,dmdT=null;
 function dmdZoom(z){if(z!=null){try{localStorage.setItem('mpfDmdZ',z)}catch(e){}}let v=100;try{v=+localStorage.getItem('mpfDmdZ')||100}catch(e){}document.documentElement.style.setProperty('--dz',v);document.querySelectorAll('input.dmdz').forEach(i=>i.value=v)}
 document.addEventListener('input',e=>{if(e.target.classList&&e.target.classList.contains('dmdz'))dmdZoom(e.target.value)});dmdZoom();
-function dmdLive(){clearInterval(dmdT);dmdT=null;const on=dmdWeb&&(TAB==='config'||TAB==='monitor');$('#dmdLiveBox').classList.toggle('hide',!(dmdWeb&&TAB==='config'));$('#monDmdBox').classList.toggle('hide',!(dmdWeb&&TAB==='monitor'));if(!on)return;dmdT=setInterval(dmdFrame,120);dmdFrame()}
+function dmdLive(){clearInterval(dmdT);dmdT=null;const on=dmdWeb&&TAB==='monitor';$('#monPrev').classList.toggle('hide',!on);prevStreams(on);if(!on)return;dmdT=setInterval(dmdFrame,120);dmdFrame()}
+let prevSig='';function prevStreams(on){const p=window._prev||{windows:[]};const box=$('#monPrevWins');const sig=p.windows.map(w=>w.id+(w.ok?1:0)).join();
+ if(sig!==prevSig){prevSig=sig;box.innerHTML=p.windows.map(w=>`<figure style="margin:0 0 10px"><figcaption class="muted">${esc(w.label)}</figcaption>${w.ok?`<img data-pw="${esc(w.id)}" alt="" style="width:100%;border-radius:8px;background:#000;display:block">`:`<p class="muted">${t('prevNoCap')}</p>`}</figure>`).join('')}
+ box.querySelectorAll('img[data-pw]').forEach(i=>{if(on){if(!i.getAttribute('src'))i.src='/api/preview/'+encodeURIComponent(i.dataset.pw)+'?t='+Date.now()}else i.removeAttribute('src')});
+ const row=$('#monSndRow'),can=!!(p.sound&&p.tools&&p.tools.arecord&&p.loopback&&p.soundOutput);row.classList.toggle('hide',!can);if(!on||!can)prevSound(false);else prevSound(null)}
+function prevSound(v){const a=$('#monAudio'),b=$('#monSnd');if(v===null){b.textContent=a.getAttribute('src')?t('prevMute'):t('prevListen');return}if(v&&!a.getAttribute('src')){a.src='/api/preview/sound?t='+Date.now();a.play().catch(()=>{})}if(!v&&a.getAttribute('src')){a.pause();a.removeAttribute('src');a.load()}b.textContent=v?t('prevMute'):t('prevListen')}
+document.addEventListener('click',e=>{if(e.target.id==='monSnd')prevSound(!$('#monAudio').getAttribute('src'))});
 async function dmdImage(msgs){const r=await fetch('/api/dmd/image');if(r.status!==200){msgs.forEach(m=>m.textContent=t('dmdLiveNone'));return}
  const bm=await createImageBitmap(await r.blob());document.querySelectorAll('canvas.dmdc,#dmdLive').forEach(c=>{if(c.width!==bm.width||c.height!==bm.height){c.width=bm.width;c.height=bm.height}c.getContext('2d').drawImage(bm,0,0)});msgs.forEach(m=>m.textContent='')}
 async function dmdFrame(){try{const r=await fetch('/api/dmd/frame');const msgs=document.querySelectorAll('#dmdLiveMsg,#monDmdMsg');if(r.status!==200){return await dmdImage(msgs)}
@@ -866,10 +925,13 @@ function dmdLookFill(d){const sel=$('#dmdLook');const ls=d.looks||[];$('#dmdLook
  sel.innerHTML=`<option value="">${t('dmdLookAuto')}</option>`+ls.map(l=>`<option value="${l}">${t('dmdLook_'+l)}</option>`).join('');sel.value=ls.includes(d.look)?d.look:'';
  const dev=d.output==='pin2dmd'||d.output==='zedmd';sel.disabled=dev||ls.length<2;
  $('#dmdLookNote').textContent=!ls.length?t('dmdLookNone'):dev?t('dmdLookFixed'):t('dmdLookNow').replace('{g}',d.game).replace('{l}',t('dmdLook_'+d.lookNow))}
-function dmdRender(s){window._scr=s.screens;scrRender(s);const d=s.dmd;if(!d)return;const w=!!d.live;if(w!==dmdWeb||(w&&!dmdT&&(TAB==='config'||TAB==='monitor'))){dmdWeb=w;dmdLive()}const f=$('#dmdForm');if(!f.contains(document.activeElement)){$('#dmdOut').value=d.output;$('#dmdColor').value=d.color;dmdLookFill(d)}
+function dmdRender(s){window._scr=s.screens;scrRender(s);const d=s.dmd;if(!d)return;window._prev=s.preview;prevRender(s.preview);const w=!!(s.preview&&s.preview.enabled);if(w!==dmdWeb||(w&&!dmdT&&TAB==='monitor')){dmdWeb=w;dmdLive()}else if(w&&TAB==='monitor')prevStreams(true);const f=$('#dmdForm');if(!f.contains(document.activeElement)){$('#dmdOut').value=d.output;$('#dmdColor').value=d.color;dmdLookFill(d)}
  $('#dmdNoBridge').classList.toggle('hide',d.bridge);
  $('#serumLib').innerHTML=d.library.length?d.library.map(x=>`<div class="net"><b class="grow">${esc(x.rom)}</b><span class="muted">${esc(x.file)} · ${(x.size/1048576).toFixed(1)} MB</span><button data-sdelete="${esc(x.rom)}" title="${t('del')}">${ico('trash')}</button></div>`).join(''):`<p class="muted">${t('serumNone')}</p>`;
  $('#serumGames').innerHTML=d.games.length&&d.library.length?`<table class="mx"><thead><tr><th></th><th>${t('serumDefault')}</th><th>${t('serumOff')}</th>${d.library.map(x=>`<th>${esc(x.rom)}</th>`).join('')}</tr></thead><tbody>${d.games.map(g=>`<tr><th>${esc(g.name)}${g.pick===''&&g.used?`<br><span class="muted">${esc(g.used)}</span>`:''}</th><td><input type="radio" name="sg-${esc(g.id)}" data-sgame="${esc(g.id)}" value=""${g.pick===''?' checked':''}></td><td><input type="radio" name="sg-${esc(g.id)}" data-sgame="${esc(g.id)}" value="none"${g.pick==='none'?' checked':''}></td>${d.library.map(x=>`<td><input type="radio" name="sg-${esc(g.id)}" data-sgame="${esc(g.id)}" value="${esc(x.rom)}"${g.pick===x.rom?' checked':''}></td>`).join('')}</tr>`).join('')}</tbody></table>`:''}
+function prevRender(p){if(!p||$('#prevForm').contains(document.activeElement))return;$('#prevOn').checked=p.enabled;$('#prevSound').checked=p.sound;
+ const m=[];if(!p.tools.ffmpeg)m.push(t('prevNoFfmpeg'));if(p.sound&&!p.soundOutput)m.push(t('prevNoOut'));if(p.sound&&!p.tools.arecord)m.push(t('prevNoArecord'));$('#prevNote').textContent=m.join(' ')}
+$('#prevForm').onsubmit=e=>{e.preventDefault();post('/api/preview',{enabled:$('#prevOn').checked?'1':'0',sound:$('#prevSound').checked?'1':'0'})};
 $('#dmdForm').onsubmit=e=>{e.preventDefault();post('/api/dmd',Object.fromEntries(new FormData(e.target)))};
 document.addEventListener('change',e=>{const sg=e.target.dataset&&e.target.dataset.sgame;if(sg!==undefined&&(e.target.tagName==='SELECT'||e.target.tagName==='INPUT'))post('/api/dmd/serum',{game:sg,rom:e.target.value})});
 document.addEventListener('click',e=>{const b=e.target.closest&&e.target.closest('[data-sdelete]');if(b&&confirm(b.dataset.sdelete+' ?'))post('/api/dmd/serum/delete',{rom:b.dataset.sdelete})});
@@ -981,6 +1043,8 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape')fsOff()});
 scDraw();scLoad();monBind($('#pfw'),'.sp.switch');monBind($('#monGrid'),'button[data-n]');monApply();
 
 /* ---- sound output (mpf_audio.py): the devices come from the kernel, the choice is kept on the data partition ---- */
+Object.assign(T.en,{prevTitle:"Cabinet preview",prevOn:"Show the preview in the Monitor tab (backglass, topper, DMD)",prevSound:"Also capture the game's sound",prevHint:"The backglass and the topper are captured from the screen each window is on (about 5 images a second, only while the Monitor tab is open). The DMD is the one chosen above. The sound is copied to a virtual sound card (snd-aloop) at the next start of the game, and needs a sound output chosen in the sound card above (Automatic is not copied).",prevNoCap:"No capture for this window (screen unknown).",prevNoFfmpeg:"ffmpeg is missing: no picture.",prevNoOut:"Choose a sound output: the Automatic one is not copied.",prevNoArecord:"arecord (alsa-utils) is missing: no sound.",prevListen:"Listen",prevMute:"Stop the sound"});
+Object.assign(T.fr,{prevTitle:"Aperçu du cabinet",prevOn:"Afficher l'aperçu dans l'onglet Moniteur (backglass, topper, DMD)",prevSound:"Capturer aussi le son du jeu",prevHint:"Le backglass et le topper sont capturés sur l'écran de chaque fenêtre (environ 5 images par seconde, seulement quand l'onglet Moniteur est ouvert). Le DMD est celui choisi plus haut. Le son est copié vers une carte son virtuelle (snd-aloop) au prochain démarrage du jeu, et demande une sortie son choisie dans la carte son ci-dessus (Automatique n'est pas copié).",prevNoCap:"Pas de capture pour cette fenêtre (écran inconnu).",prevNoFfmpeg:"ffmpeg manque : pas d'image.",prevNoOut:"Choisis une sortie son : l'automatique n'est pas copiée.",prevNoArecord:"arecord (alsa-utils) manque : pas de son.",prevListen:"Écouter",prevMute:"Couper le son"});
 Object.assign(T.en,{audTitle:"Sound output",audOut:"Output",audDac:"I2S DAC",audApply:"Apply",audTest:"Test tone",audAuto:"Automatic (the image's default)",audI2s:"I2S DAC…",audNoMon:"no monitor",audMissing:"The saved output is not present: the image's default is used.",audReboot:"Reboot to load the I2S overlay.",audRebootBtn:"Reboot",audNone:"none found",audPlat:"Machine",audHintI2s:"An I2S DAC is read at boot: the choice is saved, then the machine must restart.",audPending:"I2S DAC saved, waiting for the reboot.",audRescanHint:"Plug a USB sound card, then Scan."});
 Object.assign(T.fr,{audTitle:"Sortie audio",audOut:"Sortie",audDac:"DAC I2S",audApply:"Appliquer",audTest:"Son de test",audAuto:"Automatique (défaut de l'image)",audI2s:"DAC I2S…",audNoMon:"pas d'écran",audMissing:"La sortie enregistrée est absente : le défaut de l'image est utilisé.",audReboot:"Redémarrez pour charger l'overlay I2S.",audRebootBtn:"Redémarrer",audNone:"aucune",audPlat:"Machine",audHintI2s:"Un DAC I2S est lu au démarrage : le choix est enregistré, puis la machine doit redémarrer.",audPending:"DAC I2S enregistré, en attente du redémarrage.",audRescanHint:"Branchez une carte son USB, puis Rechercher."});
 const PLATS={rpi4:'Raspberry Pi 4',rpi5:'Raspberry Pi 5',jetson:'Jetson',x86:'x86 PC',other:'?'};
