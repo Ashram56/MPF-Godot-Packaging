@@ -1,6 +1,12 @@
 """native/dmd_bridge (PPUC's libzedmd for the ZeDMD, libserum for colour) with --rgb-out, so no ZeDMD is needed. Set
 LIBZEDMD_DIR to the output of native/libzedmd/build_libzedmd.sh plus native/dmd_bridge/build.sh (it takes a while to build, so
 the tests are skipped without it); LIBSERUM adds the real libserum, SERUM_ALTCOLOR/SERUM_ROM a real colourisation."""
+import sys as _sys
+import unittest as _unittest
+
+if _sys.platform == "win32":
+    raise _unittest.SkipTest("uses a pty (the serial feeder runs on Linux and macOS)")
+
 import os
 import subprocess
 import shutil
@@ -37,8 +43,7 @@ class TestBridge(unittest.TestCase):
                     break
                 time.sleep(0.1)
             time.sleep(0.3)
-            p.stdin.close()
-            err = p.communicate(timeout=15)[1].decode()
+            err = p.communicate(timeout=15)[1].decode()     # closes stdin (closing it first makes 3.11's communicate fail)
             with open(out, "rb") as f:
                 return f.read(), err
 
@@ -77,6 +82,41 @@ class TestBridge(unittest.TestCase):
                                  os.environ["SERUM_ALTCOLOR"], "--rom", os.environ["SERUM_ROM"]], shades([(9, 5, 15)]))
         self.assertIn("serum: " + os.environ["SERUM_ROM"] + " loaded", err)
         self.assertEqual((255, 0, 0), self.px(pic, 9, 5))        # a frame that is not the game's: the single colour
+
+
+WIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "native", "prebuilt", "windows-x86_64", "dmd_bridge")
+
+
+@unittest.skipUnless(os.environ.get("MPF_TEST_WINE") and shutil.which("wine") and os.path.isfile(os.path.join(WIN, "dmd_bridge.exe")),
+                     "set MPF_TEST_WINE=1 (with wine installed) to run the prebuilt Windows dmd_bridge.exe")
+class TestWindowsBridge(unittest.TestCase):
+    """The prebuilt Windows bridge (native/build_windows_bridge.sh) under Wine: stdin read on a thread, libserum by LoadLibrary."""
+
+    def picture(self, args, frame):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "rgb.bin")
+            p = subprocess.Popen(["wine", os.path.join(WIN, "dmd_bridge.exe"), "--shades", "--rgb-out", "Z:" + out] + args,
+                                 stdin=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(os.environ, WINEDEBUG="-all"))
+            p.stdin.write(frame)
+            p.stdin.flush()
+            for _ in range(600):
+                if os.path.exists(out) and os.path.getsize(out) == W * H * 3:
+                    break
+                time.sleep(0.1)
+            time.sleep(0.5)
+            err = p.communicate(timeout=60)[1].decode(errors="replace")
+            with open(out, "rb") as f:
+                return f.read(), err
+
+    def test_shades_scale_the_colour(self):
+        pic, _ = self.picture(["--color", "2a6cff"], shades([(9, 5, 15)]))
+        self.assertEqual(bytes((0x2A, 0x6C, 0xFF)), pic[(5 * W + 9) * 3:(5 * W + 9) * 3 + 3])
+
+    @unittest.skipUnless(os.environ.get("SERUM_ALTCOLOR") and os.environ.get("SERUM_ROM"), "set SERUM_ALTCOLOR and SERUM_ROM")
+    def test_real_colourisation_loads(self):
+        _, err = self.picture(["--serum-lib", "Z:" + os.path.join(WIN, "serum64.dll"), "--altcolor", "Z:" + os.environ["SERUM_ALTCOLOR"],
+                               "--rom", os.environ["SERUM_ROM"]], shades([(9, 5, 15)]))
+        self.assertIn("serum: " + os.environ["SERUM_ROM"] + " loaded", err)
 
 
 if __name__ == "__main__":

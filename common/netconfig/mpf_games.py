@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import platform
-import pwd
 import re
 import shlex
 import shutil
@@ -19,6 +18,11 @@ import subprocess
 import sys
 import threading
 import time
+
+try:
+    import pwd
+except ImportError:        # Windows: the local platform (mpf_godot/local.py) uses the portable helpers only
+    pwd = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpf_audio as AU  # noqa: E402
@@ -64,10 +68,16 @@ def job_state():
         return JOB
 
 
+def as_user(*cmd):
+    """The command prefixed to run as the game's user: runuser needs root, so when this process is not root (tests, a
+    desktop run) it is already the user and runs the command as it is."""
+    return ("runuser", "-u", C.USER, "--") + tuple(cmd) if getattr(os, "geteuid", lambda: 1)() == 0 else tuple(cmd)
+
+
 def sh(*cmd, cwd=None, user=False):
     """Run a command for the job, log its output, fail the job when it fails."""
     if user:
-        cmd = ("runuser", "-u", C.USER, "--") + cmd
+        cmd = as_user(*cmd)
     job_log("$ " + " ".join(cmd))
     r = run(*cmd, cwd=cwd)
     job_log((r.stdout + r.stderr)[-2000:])
@@ -108,7 +118,7 @@ def trial(root, b):
             cmd[0] = game_python()
         env = ["env"] + [f"{k}={v}" for k, v in game_env().items()] + ["MPF_BUNDLE_CHECK=1"]
         try:
-            r = run("runuser", "-u", C.USER, "--", *env, *cmd, cwd=root, timeout=BC.check_timeout(b))
+            r = run(*as_user(*env, *cmd), cwd=root, timeout=BC.check_timeout(b))
         except subprocess.TimeoutExpired:
             r = subprocess.CompletedProcess(cmd, 124, "", f"no answer after {BC.check_timeout(b)} s")
         if r.returncode:
@@ -129,6 +139,17 @@ def read_bundle(path):
         return b if isinstance(b, dict) else None
     except (OSError, ValueError):
         return None
+
+
+def project_dir(b):
+    """The bundle's Godot project folder, relative to the bundle: format 2 `game_dir`, a platform-run format 1 game's
+    `launch.project`, else `game`. The platform's add-ons, the board's override.cfg and the logs go there: an add-on put in
+    another folder is not seen by Godot (observed 2026-11-02: a game with game_dir "." lost its GMC, MPF never connected)."""
+    if K.is_v2(b):
+        rel = b.get("game_dir") or "game"
+    else:
+        rel = (b.get("launch") or {}).get("project") or "game"
+    return os.path.normpath(rel)
 
 
 def folder_name(b):
@@ -241,7 +262,7 @@ def tool(game, *args):
     t = options_tool(game)
     if not t:
         raise ValueError("this game has no settings tool")
-    return run("runuser", "-u", C.USER, "--", game_python(), t, *args, cwd=game)
+    return run(*as_user(game_python(), t, *args), cwd=game)
 
 
 def settings_schema(game):
@@ -324,7 +345,7 @@ def board_profile(game, b):
     args = shlex.split(cmd)
     if args[0] in ("python3", "python"):
         args[0] = game_python()
-    r = run("runuser", "-u", C.USER, "--", *args, cwd=game)
+    r = run(*as_user(*args), cwd=game)
     job_log((r.stdout + r.stderr).strip() or "board profile: nothing to apply")
 
 
@@ -334,11 +355,11 @@ def platform_addon(name):
     cands = [C.PLATFORM_DIR, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
     if C.GOZEN_SO:
         cands.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(C.GOZEN_SO)))))
-    marker = "gozen.gdextension" if name == "gde_gozen" else "plugin.cfg"
+    marker = {"gde_gozen": "gozen.gdextension", "mpf-gmc": "plugin.cfg"}.get(name)     # an add-on made of one script has no marker: the folder is it
     for c in cands:
         # the add-ons of the platform checkout (GoZen), and the ones its toolchain made (mpf-gmc, patched: mpf_godot/gmc_patch.py)
         for sub in ("addons", os.path.join("toolchain", "addons")):
-            if c and os.path.isfile(os.path.join(c, sub, name, marker)):
+            if c and (os.path.isfile(os.path.join(c, sub, name, marker)) if marker else os.path.isdir(os.path.join(c, sub, name))):
                 return os.path.join(c, sub, name)
     return None
 
@@ -350,7 +371,7 @@ def install_platform_addons(dest, b, me):
         src = platform_addon(name)
         if not src:
             raise JobError(f"the bundle needs the platform's {name} and this system has none (set MPF_PLATFORM_DIR)")
-        dst = os.path.join(dest, "game", "addons", name)
+        dst = os.path.join(dest, project_dir(b), "addons", name)
         shutil.rmtree(dst, ignore_errors=True)
         for base, _dirs, files in os.walk(src):
             for f in files:
@@ -364,7 +385,7 @@ def install_platform_addons(dest, b, me):
                 shutil.copy2(os.path.join(base, f), t)
         # Godot loads an add-on's native extension only if .godot/extension_list.cfg names it (the editor writes that file;
         # a bundle exported without the add-on's binaries does not have it)
-        lst = os.path.join(dest, "game", ".godot", "extension_list.cfg")
+        lst = os.path.join(dest, project_dir(b), ".godot", "extension_list.cfg")
         for f in sorted(os.listdir(dst)):
             if f.endswith(".gdextension"):
                 line = f"res://addons/{name}/{f}"
@@ -383,14 +404,14 @@ def reimport_scripts(dest, b):
     if not any(platform_addon(n) and not os.path.isdir(os.path.join(platform_addon(n), "bin")) for n in b.get("platform_addons", [])):
         return
     godot = game_env().get("GODOT") or shutil.which("godot") or ""
-    project = os.path.join(dest, "game")
+    project = os.path.join(dest, project_dir(b))
     if not godot or not os.path.isfile(os.path.join(project, "project.godot")):
         job_log("no Godot or no project.godot: the script classes of the platform add-ons are not re-imported")
         return
     pw = pwd.getpwnam(C.USER)
     env = dict(os.environ, HOME=pw.pw_dir, **ram_xdg_env())
     job_set(msg="Importing the project (a few seconds)")
-    cmd = ["runuser", "-u", C.USER, "--", "env"] + [f"{k}={v}" for k, v in env.items() if k in ("HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")]
+    cmd = list(as_user("env")) + [f"{k}={v}" for k, v in env.items() if k in ("HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")]
     cmd += [godot, "--headless", "--path", project, "--import"]
     job_log("$ " + " ".join(cmd[-5:]))
     r = run(*cmd)
@@ -469,6 +490,10 @@ def install_game(archive, expect_sha, keep_old=True):
     bad = trial(root, b)
     if bad:
         raise JobError("this bundle cannot start, so it was not installed (the current game is untouched): " + " | ".join(bad[:6]))
+    for name in b.get("platform_addons", []):       # before anything moves: a missing add-on must not leave a half-installed (root-owned) folder
+        if not platform_addon(name):
+            raise JobError(f"this bundle needs the platform's {name} add-on and this system has none, so it was not installed "
+                           "(the current game is untouched): update the platform (MPF_PLATFORM_DIR)")
     folder = folder_name(b)
     dest = os.path.join(C.GAMES, folder)
     old = dest + ".old"
@@ -498,11 +523,11 @@ def install_game(archive, expect_sha, keep_old=True):
     shutil.rmtree(old, ignore_errors=True)
     install_platform_addons(dest, b, me)
     if C.GAME_OVERRIDE and os.path.isfile(C.GAME_OVERRIDE):
-        os.makedirs(os.path.join(dest, "game"), exist_ok=True)
-        shutil.copy2(C.GAME_OVERRIDE, os.path.join(dest, "game", "override.cfg"))
-        job_log(f"board settings ({C.GAME_OVERRIDE}) copied to game/override.cfg")
+        os.makedirs(os.path.join(dest, project_dir(b)), exist_ok=True)
+        shutil.copy2(C.GAME_OVERRIDE, os.path.join(dest, project_dir(b), "override.cfg"))
+        job_log(f"board settings ({C.GAME_OVERRIDE}) copied to {project_dir(b)}/override.cfg")
     if C.GOZEN_SO and os.path.isfile(C.GOZEN_SO):
-        bindir = os.path.join(dest, "game/addons/gde_gozen/bin")
+        bindir = os.path.join(dest, project_dir(b), "addons", "gde_gozen", "bin")
         for n in os.listdir(bindir) if os.path.isdir(bindir) else ():
             if n in b.get("gozen", {}) and all(f in b["gozen"][n] for f in C.GOZEN_NEEDS):
                 job_log(f"{n}: the bundle's own build has {' '.join(C.GOZEN_NEEDS)}, kept")
@@ -569,7 +594,7 @@ def run_pup_installer(game, b, zipfile):
     if b.get("platform_addons"):
         install_platform_addons(game, b, C.ARCH.get(platform.machine(), platform.machine()))
         reimport_scripts(game, b)
-        sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", os.path.join(game, "game", "addons"))
+        sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", os.path.join(game, project_dir(b), "addons"))
 
 
 # ---------------------------------------------------------------- PuP Pack library
@@ -874,7 +899,7 @@ def volatile_game_dirs(game):
     pw = pwd.getpwnam(C.USER)
     os.makedirs(C.VOLATILE_LOGS, exist_ok=True)
     os.chown(C.VOLATILE_LOGS, pw.pw_uid, pw.pw_gid)
-    logs = os.path.join(game, "game", "logs")
+    logs = os.path.join(game, project_dir(read_bundle(game) or {}), "logs")
     if os.path.islink(logs):
         return
     if os.path.isdir(logs):
@@ -1020,6 +1045,7 @@ def game_exec():
         else:
             sys.exit("no X session after 180 s")      # the service restarts and waits again
         time.sleep(3)           # let the window manager settle
+    own_game(game, pw)
     volatile_game_dirs(game)
     xdg = ram_xdg_env()
     audio = AU.prepare()          # the sound output chosen on the page (root: it writes in /run)
@@ -1043,6 +1069,19 @@ def game_exec():
         child["PYTHONPATH"] = root + (os.pathsep + child["PYTHONPATH"] if child.get("PYTHONPATH") else "")
         child.update({str(k): str(v) for k, v in ((b.get("launch") or {}).get("env") or {}).items()})
     os.execve(argv[0] if os.path.isabs(argv[0]) else (shutil.which(argv[0]) or argv[0]), argv, child)
+
+
+def own_game(game, pw):
+    """The game runs as the game user (MPF writes its data and logs in its folder): a bundle that reached the machine owned by root
+    (an install by older page code, a copy by hand) is handed over before it starts, instead of failing with 'Permission denied' in
+    a restart loop. The folder and its first level are looked at (cheap); one that is not the game user's has the whole tree chowned."""
+    try:
+        names = [game] + [e.path for e in os.scandir(game) if not e.is_symlink()]
+        if all(os.lstat(n).st_uid == pw.pw_uid for n in names):
+            return
+        sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", game)
+    except (OSError, JobError) as e:
+        print(f"cannot hand {game} to {C.USER}: {e}", file=sys.stderr)
 
 
 def game_start():

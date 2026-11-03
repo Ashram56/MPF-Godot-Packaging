@@ -6,6 +6,7 @@
     bundle      build a game bundle (code and multimedia, no binary) from the game's spec (mpf_godot/bundle.py)
     patch-gmc   apply our GMC fixes to a GMC folder (default: toolchain/addons/mpf-gmc)
     run         start a game: Godot (GMC) first, then MPF, optionally MPF Monitor (mpf_godot/launcher.py)
+    local       the local platform: install and play game bundles on this desktop as a cabinet does (mpf_godot/local.py)
     info        the paths and versions in use
 """
 import argparse
@@ -76,6 +77,9 @@ def main(argv=None):
     if cmd == "run":
         from mpf_godot import launcher
         return launcher.main(rest)
+    if cmd == "local":
+        from mpf_godot import local
+        return local.main(rest)
     if cmd == "info":
         print(tc.summary())
         return 0

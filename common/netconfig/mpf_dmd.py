@@ -6,14 +6,21 @@ is assigned to the game). The game only draws its classic 128x32 DMD; every argu
 Settings: STATE_DIR/dmd.json. Colourisations: SERUM/<rom>/<rom>.cROMc|.cRZ|.cROM, one per ROM name, assigned per game."""
 import json
 import os
+import platform
 import re
+import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpf_common as C  # noqa: E402
 
-OUTPUTS = ("auto", "lcd", "pin2dmd", "zedmd")
+OUTPUTS = ("auto", "lcd", "pin2dmd", "zedmd", "web")
 EXTS = (".cROMc", ".cRZ", ".cROM")
+# "web": the same pictures a ZeDMD would get (Serum colour included) written by dmd_bridge to a file in RAM, which the setup page draws
+PREVIEW = os.environ.get("MPF_DMD_PREVIEW") or "/run/mpf-dmd/preview.rgb"
+PREVIEW_SIZES = {128 * 32 * 3: (128, 32), 192 * 64 * 3: (192, 64), 256 * 64 * 3: (256, 64)}
+PREVIEW_MAX_AGE = 5      # seconds: an older picture means the game is not running
 DEFAULT_COLOR = "#2a6cff"
 SERUM = os.environ.get("MPF_SERUM_DIR") or os.path.join(C.DATA, "serum")
 NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
@@ -159,21 +166,56 @@ def chosen_serum(game_id, bundle, s=None):
 
 
 # ---------------------------------------------------------------- launch
+BRIDGE = "dmd_bridge.exe" if os.name == "nt" else "dmd_bridge"
+# libserum's library as native/serum/build_libserum*.sh name it
+SERUM_LIBS = ("serum64.dll",) if os.name == "nt" else ("libserum64.so", "libserum.so", "libserum64.dylib", "libserum.dylib")
+
+
 def bridge_dir():
-    """Folder of dmd_bridge (and its libzedmd / libserum64.so), or None."""
+    """Folder of dmd_bridge (and its libzedmd / libserum), or None. Windows: the prebuilt native/prebuilt/windows-x86_64/dmd_bridge/
+    (native/dmd_bridge/build_windows.sh) of the local platform (mpf_godot/local.py)."""
     roots = [os.environ.get("MPF_DMD_BRIDGE_DIR", ""), C.PLATFORM_DIR,
              os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))]
-    arch = C.ARCH.get(os.uname().machine, os.uname().machine)
+    arch = C.ARCH.get(platform.machine().lower(), platform.machine())
+    subs = ["", os.path.join("native", "bin", arch, "dmd_bridge"), os.path.join("native", "bin", "dmd_bridge")]
+    if os.name == "nt":
+        subs.insert(1, os.path.join("native", "prebuilt", "windows-" + arch, "dmd_bridge"))
+    elif sys.platform == "darwin":
+        subs.insert(1, os.path.join("native", "bin", "macos-" + arch, "dmd_bridge"))
     for r in roots:
-        for sub in ("", os.path.join("native", "bin", arch, "dmd_bridge"), os.path.join("native", "bin", "dmd_bridge")):
+        for sub in subs:
             d = os.path.join(r, sub) if r else ""
-            if d and os.path.isfile(os.path.join(d, "dmd_bridge")):
+            if d and os.path.isfile(os.path.join(d, BRIDGE)):
                 return d
     return None
 
 
+def serum_lib(d):
+    """libserum next to dmd_bridge (or in its lib/), or ""."""
+    for name in SERUM_LIBS:
+        for p in (os.path.join(d, name), os.path.join(d, "lib", name)):
+            if os.path.isfile(p):
+                return p
+    return ""
+
+
+def probe_bridge(timeout=15):
+    """True when dmd_bridge --probe finds a ZeDMD (libzedmd looks on every serial port: Windows and macOS, where dmd_panel has no
+    sysfs)."""
+    d = bridge_dir()
+    if not d:
+        return False
+    try:
+        return subprocess.run([os.path.join(d, BRIDGE), "--probe"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              stdin=subprocess.DEVNULL, timeout=timeout).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def detect():
-    """"pin2dmd", "zedmd" or "" (an LCD DMD)."""
+    """"pin2dmd", "zedmd" or "" (an LCD DMD). Linux: sysfs (mpf_godot/dmd_panel.py); Windows and macOS: a ZeDMD that answers dmd_bridge."""
+    if not sys.platform.startswith("linux"):
+        return "zedmd" if probe_bridge() else ""
     try:
         from mpf_godot import dmd_panel
         return dmd_panel.find()
@@ -197,22 +239,52 @@ def plan(game_id, bundle, detected=None):
     global LAST
     s = load()
     out = resolve(s, detected)
-    LAST = out if out == "pin2dmd" or (out == "zedmd" and bridge_dir()) else "lcd"
+    LAST = out if out == "pin2dmd" or (out in ("zedmd", "web") and bridge_dir()) else "lcd"
+    if LAST == "web":
+        LAST = "zedmd"          # the game hides its screen DMD: the pictures go to the page
     if out == "pin2dmd":
         return [f"--pin2dmd={s['color']}"], []
-    if out != "zedmd":
+    if out not in ("zedmd", "web"):
         return [], []
     d = bridge_dir()
     if not d:
         return [], []           # no bridge on this system: the screen DMD
-    user = ["--zedmd-shades", "--zedmd-feed=" + os.path.join(d, "dmd_bridge")]
+    user = ["--zedmd-shades", "--zedmd-feed=" + os.path.join(d, BRIDGE)]
+    if out == "web":
+        prepare_preview()
+        user += ["--zedmd-feed-arg=--rgb-out", "--zedmd-feed-arg=" + PREVIEW]
     rom = chosen_serum(game_id, bundle, s)
     if rom:
-        lib = next((p for p in (os.path.join(d, "libserum64.so"), os.path.join(d, "lib", "libserum64.so")) if os.path.isfile(p)), "")
+        lib = serum_lib(d)
         if lib:
             for a in ("--serum-lib", lib, "--rom", rom, "--altcolor", SERUM):
                 user.append("--zedmd-feed-arg=" + a)
     return [f"--zedmd={s['color']}"], user
+
+
+def prepare_preview():
+    """The folder of the picture file, in RAM and writable by the game's user."""
+    try:
+        d = os.path.dirname(PREVIEW)
+        os.makedirs(d, exist_ok=True)
+        os.chmod(d, 0o777)
+        if os.path.exists(PREVIEW):
+            os.remove(PREVIEW)
+    except OSError:
+        pass
+
+
+def preview_frame():
+    """(width, height, rgb888 bytes) of the last picture the bridge wrote, or None (no game, no picture yet, or one being written)."""
+    try:
+        if time.time() - os.path.getmtime(PREVIEW) > PREVIEW_MAX_AGE:
+            return None
+        with open(PREVIEW, "rb") as f:
+            data = f.read(300000)
+    except OSError:
+        return None
+    size = PREVIEW_SIZES.get(len(data))
+    return (size[0], size[1], data) if size else None
 
 
 def merge_args(board, game_id, bundle):

@@ -1,5 +1,11 @@
 """Sound output choice (common/netconfig/mpf_audio.py): devices from a fake /proc/asound per platform, the saved choice, the I2S boot
 configuration, the ALSA configuration the game is started with (checked against the real alsa-lib when `aplay` is installed)."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import json
 import os
 import shutil

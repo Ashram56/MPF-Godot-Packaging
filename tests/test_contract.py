@@ -1,4 +1,10 @@
 """Bundle format 2: files and facts only, the platform starts the game (common/netconfig/mpf_contract.py, platforms/game-bundles.md)."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import json
 import os
 import sys
@@ -17,6 +23,8 @@ SCHEMA = {"groups": [{"id": "d", "label": "Display"}], "options": [
      "target": {"godot_arg": "--dmd"}},
     {"id": "pup.music", "group": "d", "label": "Music", "type": "bool", "default": True,
      "target": {"ini": "game/pup.local.cfg", "section": "pup", "key": "music"}},
+    {"id": "pup.layout", "group": "d", "label": "Layout", "type": "choice", "choices": ["split", "stacked"], "default": "split",
+     "target": {"ini": "game/pup.local.cfg", "section": "pup", "key": "layout"}},
     {"id": "machine.hw", "group": "d", "label": "Hardware", "type": "choice", "choices": ["virtual", "proc"], "default": "virtual",
      "target": {"hardware": True}}]}
 
@@ -81,6 +89,18 @@ class Contract(unittest.TestCase):
             if env is not None:
                 os.environ["MPF_BOARD"] = env
 
+    def test_windows_amd64_is_x86(self):
+        """platform.machine() is "AMD64" on Windows: it must not be taken for an ARM64 board."""
+        import unittest.mock as m
+        env = os.environ.pop("MPF_BOARD", None)
+        try:
+            for machine, name in (("AMD64", "x86"), ("x86_64", "x86"), ("arm64", "arm64"), ("aarch64", "arm64")):
+                with m.patch.object(K.platform, "machine", return_value=machine), m.patch.object(K, "DT_MODEL", "/nonexistent"):
+                    self.assertEqual(K.board(), name, machine)
+        finally:
+            if env is not None:
+                os.environ["MPF_BOARD"] = env
+
 
 class Platform(Base):
     def setUp(self):
@@ -119,6 +139,30 @@ class Platform(Base):
         self.assertEqual(env["MPF_ADDONS"], os.path.join(game, "addons/hd_art"))
         self.assertNotIn("MPF_PUP_PACK", env)
         self.assertIn("music = true", open(os.path.join(game, "game/pup.local.cfg")).read())
+        self.assertIn('layout = "split"', open(os.path.join(game, "game/pup.local.cfg")).read())     # text is quoted for Godot's ConfigFile
+
+    def test_platform_addons_and_board_settings_go_into_game_dir(self):
+        """A game whose Godot project is not in game/ (game_dir "."): GMC and override.cfg must land beside its project.godot,
+        else Godot cannot load GMC and MPF never connects (observed 2026-11-02 on a game built from the docs alone)."""
+        gmc = os.path.join(self.t.name, "platform", "mpf-gmc")
+        os.makedirs(gmc)
+        open(os.path.join(gmc, "plugin.cfg"), "w").write("[plugin]\n")
+        ov = os.path.join(self.t.name, "override.cfg")
+        open(ov, "w").write("[audio]\n")
+        saved = G.platform_addon, G.reimport_scripts
+        G.platform_addon, G.reimport_scripts = (lambda name: gmc if name == "mpf-gmc" else None), (lambda dest, b: None)
+        C.GAME_OVERRIDE = ov
+        files = {k[len("game/"):] if k.startswith("game/") else k: v for k, v in FILES.items()}
+        try:
+            game = self.game(extra={"game_dir": ".", "platform_addons": ["mpf-gmc"], "keep_on_update": ["data"]}, files=files)
+        finally:
+            G.platform_addon, G.reimport_scripts = saved
+            C.GAME_OVERRIDE = ""
+        self.assertTrue(os.path.isfile(os.path.join(game, "addons", "mpf-gmc", "plugin.cfg")))
+        self.assertTrue(os.path.isfile(os.path.join(game, "override.cfg")))
+        self.assertFalse(os.path.exists(os.path.join(game, "game", "addons")))
+        argv = G.contract_command(game, G.read_bundle(game), G.game_env())[0]
+        self.assertEqual(argv[4], game)
 
     def test_settings_are_the_platforms_and_follow_the_board(self):
         game = self.game()
