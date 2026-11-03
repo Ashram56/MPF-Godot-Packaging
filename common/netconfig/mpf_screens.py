@@ -44,8 +44,11 @@ def parse_drm(root="/sys/class/drm"):
 def detect(user_home=None):
     """The connected screens, the engine's order. xrandr on the game user's X session, else the kernel's list of connectors."""
     env = dict(os.environ, DISPLAY=os.environ.get("DISPLAY") or ":0")
-    if user_home and os.path.exists(os.path.join(user_home, ".Xauthority")):
-        env.setdefault("XAUTHORITY", os.path.join(user_home, ".Xauthority"))
+    user = os.path.basename((user_home or "").rstrip("/"))
+    for cookie in ([os.path.join(user_home, ".Xauthority")] if user_home else []) + ([f"/tmp/.Xauthority-{user}"] if user else []):
+        if os.path.exists(cookie):           # read-only images keep it in /tmp/.Xauthority-<user> (like game_exec)
+            env.setdefault("XAUTHORITY", cookie)
+            break
     try:
         r = subprocess.run(["xrandr", "--query"], capture_output=True, text=True, timeout=5, env=env)
         found = parse_xrandr(r.stdout)
