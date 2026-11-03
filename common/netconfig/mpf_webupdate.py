@@ -108,6 +108,11 @@ def _get(url, headers=None, limit=None):
         raise ValueError(f"cannot reach the server: {getattr(e, 'reason', e)}")
 
 
+def _neg(date):
+    """Sort key putting the newest ISO date first."""
+    return tuple(-ord(c) for c in date)
+
+
 def branches(repo=None):
     """[{name, sha, pr, title, state, date}] of the repository's branches (GitHub API, public repository): `pr` and `title` are the
     newest pull request whose head is that branch (open ones first), else the title is the branch's last commit subject."""
@@ -136,7 +141,9 @@ def branches(repo=None):
             break
     for b in out:
         b.update(prs.get(b["name"], {}))
-    out.sort(key=lambda b: (b["name"] != "main", b["state"] != "open", -(b.get("pr") or 0), b["name"]))
+    # main first, then the most recently active (a pull request's last update), open pull requests before closed or merged ones,
+    # branches with no pull request last
+    out.sort(key=lambda b: (b["name"] != "main", b.get("state", "") != "open", "" if b.get("date") else "~", _neg(b.get("date", "")), b["name"]))
     return out
 
 
