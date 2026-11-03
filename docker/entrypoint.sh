@@ -16,7 +16,7 @@ fi
 export VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
 # sound: a PulseAudio null sink (no sound card in a container); the game plays into it and the page's cabinet preview records its monitor
 export PULSE_SERVER=unix:/tmp/pulse.sock MPF_PULSE_SINK=mpf
-runuser -u mpf -- pulseaudio -n --exit-idle-time=-1 --daemonize=no --load="module-native-protocol-unix socket=/tmp/pulse.sock auth-anonymous=1" \
+HOME=/run/pulse-home XDG_RUNTIME_DIR=/run/pulse-home runuser -u mpfpulse -- pulseaudio -n --exit-idle-time=-1 --daemonize=no --load="module-native-protocol-unix socket=/tmp/pulse.sock auth-anonymous=1" \
     --load="module-null-sink sink_name=mpf" >/var/log/pulseaudio.log 2>&1 & pulse_pid=$!
 pids=($pulse_pid)
 Xvfb :0 -screen 0 "${MPF_SCREEN:-1280x720x24}" -ac -nolisten tcp +extension GLX >/var/log/Xvfb.log 2>&1 & pids+=($!)
