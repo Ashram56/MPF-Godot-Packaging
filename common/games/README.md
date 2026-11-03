@@ -79,7 +79,7 @@ with a log, visible from the page. Flash the result as usual (balenaEtcher, Rasp
   limited to 4 GiB (FAT32). Keep it for what must be there at the first boot and add the rest from the page. The space of the seed
   stays used; the card needs room after it for the data partition (at least 512 MB).
 - Start again from the original image to change the content: an image that already carries a `MPFSEED` partition is refused.
-- Checked end to end: the x86 image with the Transformers bundle booted under QEMU, made its data partition, imported and installed
+- Checked end to end: the x86 image with a pinball game bundle booted under QEMU, made its data partition, imported and installed
   the game and made it the active one.
 
 ## Building the package of a game from its repository
