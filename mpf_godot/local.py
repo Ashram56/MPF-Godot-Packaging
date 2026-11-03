@@ -721,7 +721,7 @@ def parser():
     s = sub.add_parser("serum", help="store a Serum colourisation (<rom>.cROMc, .cRZ or .cROM)")
     s.add_argument("file")
     s = sub.add_parser("dmd", help="the DMD output and its colour, Serum per game, the ZeDMD's port")
-    s.add_argument("--output", choices=DMD.OUTPUTS)
+    s.add_argument("--output", choices=[o for o in DMD.OUTPUTS if o != "web"])
     s.add_argument("--color")
     s.add_argument("--serum", metavar="GAME=ROM|none|default")
     s.add_argument("--port", help="the ZeDMD's serial port (COM5, /dev/cu.usbserial-...); empty: found by libzedmd")
@@ -737,7 +737,7 @@ def parser():
     s.add_argument("--game")
     s = sub.add_parser("start", help="play a game (default: the active one)")
     s.add_argument("game", nargs="?")
-    s.add_argument("--dmd", choices=DMD.OUTPUTS + ("preview",), help="this run's DMD output (default: the saved one); preview: the ZeDMD's "
+    s.add_argument("--dmd", choices=[o for o in DMD.OUTPUTS if o != "web"] + ["preview"], help="this run's DMD output (default: the saved one); preview: the ZeDMD's "
                    "pictures, Serum colour included, in a window")
     s.add_argument("--seconds", type=float)
     s.add_argument("--monitor", action="store_true")

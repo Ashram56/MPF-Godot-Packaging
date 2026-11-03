@@ -67,6 +67,26 @@ class DmdOutput(Base):
         self.assertEqual(D.chosen_serum("mygame", b), "trn_174h")
         self.assertEqual(D.chosen_serum("other_game", {}), "")
 
+    def test_web_output_writes_pictures_for_the_page(self):
+        import time
+        D.PREVIEW = os.path.join(self.t.name, "run", "preview.rgb")
+        D.set_output("web")
+        self.upload("trn_174h.cROMc")
+        pre, user = D.plan("mygame", {"dmd": {"rom": "trn_174h"}})
+        self.assertEqual(pre, ["--zedmd=#2a6cff"])
+        self.assertIn("--zedmd-feed-arg=--rgb-out", user)
+        self.assertIn("--zedmd-feed-arg=" + D.PREVIEW, user)
+        self.assertIn("--zedmd-feed-arg=trn_174h", user)                    # Serum colours the page's picture too
+        self.assertEqual(D.LAST, "zedmd")                                  # the game hides its screen DMD
+        self.assertIsNone(D.preview_frame())                               # no picture yet
+        open(D.PREVIEW, "wb").write(b"\x01" * 100)                          # half written: ignored
+        self.assertIsNone(D.preview_frame())
+        open(D.PREVIEW, "wb").write(bytes(128 * 32 * 3))
+        self.assertEqual(D.preview_frame()[:2], (128, 32))
+        old = time.time() - 60
+        os.utime(D.PREVIEW, (old, old))                                    # the game stopped: no stale picture
+        self.assertIsNone(D.preview_frame())
+
     def test_board_args_with_godot_section(self):
         D.set_output("zedmd")
         args = D.merge_args(["--x", "--", "--", "--y"], "g", {})

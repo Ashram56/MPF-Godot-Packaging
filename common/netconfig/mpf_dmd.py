@@ -10,12 +10,17 @@ import platform
 import re
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpf_common as C  # noqa: E402
 
-OUTPUTS = ("auto", "lcd", "pin2dmd", "zedmd")
+OUTPUTS = ("auto", "lcd", "pin2dmd", "zedmd", "web")
 EXTS = (".cROMc", ".cRZ", ".cROM")
+# "web": the same pictures a ZeDMD would get (Serum colour included) written by dmd_bridge to a file in RAM, which the setup page draws
+PREVIEW = os.environ.get("MPF_DMD_PREVIEW") or "/run/mpf-dmd/preview.rgb"
+PREVIEW_SIZES = {128 * 32 * 3: (128, 32), 192 * 64 * 3: (192, 64), 256 * 64 * 3: (256, 64)}
+PREVIEW_MAX_AGE = 5      # seconds: an older picture means the game is not running
 DEFAULT_COLOR = "#2a6cff"
 SERUM = os.environ.get("MPF_SERUM_DIR") or os.path.join(C.DATA, "serum")
 NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
@@ -234,15 +239,20 @@ def plan(game_id, bundle, detected=None):
     global LAST
     s = load()
     out = resolve(s, detected)
-    LAST = out if out == "pin2dmd" or (out == "zedmd" and bridge_dir()) else "lcd"
+    LAST = out if out == "pin2dmd" or (out in ("zedmd", "web") and bridge_dir()) else "lcd"
+    if LAST == "web":
+        LAST = "zedmd"          # the game hides its screen DMD: the pictures go to the page
     if out == "pin2dmd":
         return [f"--pin2dmd={s['color']}"], []
-    if out != "zedmd":
+    if out not in ("zedmd", "web"):
         return [], []
     d = bridge_dir()
     if not d:
         return [], []           # no bridge on this system: the screen DMD
     user = ["--zedmd-shades", "--zedmd-feed=" + os.path.join(d, BRIDGE)]
+    if out == "web":
+        prepare_preview()
+        user += ["--zedmd-feed-arg=--rgb-out", "--zedmd-feed-arg=" + PREVIEW]
     rom = chosen_serum(game_id, bundle, s)
     if rom:
         lib = serum_lib(d)
@@ -250,6 +260,31 @@ def plan(game_id, bundle, detected=None):
             for a in ("--serum-lib", lib, "--rom", rom, "--altcolor", SERUM):
                 user.append("--zedmd-feed-arg=" + a)
     return [f"--zedmd={s['color']}"], user
+
+
+def prepare_preview():
+    """The folder of the picture file, in RAM and writable by the game's user."""
+    try:
+        d = os.path.dirname(PREVIEW)
+        os.makedirs(d, exist_ok=True)
+        os.chmod(d, 0o777)
+        if os.path.exists(PREVIEW):
+            os.remove(PREVIEW)
+    except OSError:
+        pass
+
+
+def preview_frame():
+    """(width, height, rgb888 bytes) of the last picture the bridge wrote, or None (no game, no picture yet, or one being written)."""
+    try:
+        if time.time() - os.path.getmtime(PREVIEW) > PREVIEW_MAX_AGE:
+            return None
+        with open(PREVIEW, "rb") as f:
+            data = f.read(300000)
+    except OSError:
+        return None
+    size = PREVIEW_SIZES.get(len(data))
+    return (size[0], size[1], data) if size else None
 
 
 def merge_args(board, game_id, bundle):
