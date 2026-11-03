@@ -1,0 +1,22 @@
+#!/bin/bash
+# A stand-in for systemctl in the container (no systemd): only mpf-game.service exists, the page's start, stop, restart, status and
+# autostart buttons work on it. "reboot" restarts the container (compose: restart: unless-stopped); everything else is accepted and ignored.
+PID=/run/mpf/game.pid LOG=/var/log/mpf-game/service.log FLAG=${MPF_STATE_DIR:-/data/state}/game.enabled
+args=(); for a in "$@"; do case "$a" in --*) [ "$a" = --quiet ] && Q=1 ;; *) args+=("$a");; esac; done
+cmd=${args[0]:-}; unit=${args[1]:-}
+running() { [ -s $PID ] && kill -0 "$(cat $PID)" 2>/dev/null; }
+case "$cmd" in
+    reboot|poweroff|halt) kill -TERM 1; exit 0 ;;
+esac
+[ "$unit" = mpf-game.service ] || exit 0
+case "$cmd" in
+    start)   running || setsid -f sh -c "echo \$\$ >$PID; exec /usr/local/bin/mpf-game-run" >>$LOG 2>&1 </dev/null ;;
+    stop)    running && { pid=$(cat $PID); kill -TERM -- -"$pid" 2>/dev/null || kill -TERM "$pid"; pkill -TERM -f '/mpf_netconfig.py game' ;
+                          pkill -TERM -u mpf 2>/dev/null; sleep 1; pkill -KILL -u mpf 2>/dev/null; }; rm -f $PID; exit 0 ;;
+    restart) "$0" stop mpf-game.service; "$0" start mpf-game.service ;;
+    is-active)  if running; then [ -n "${Q:-}" ] || echo active; exit 0; else [ -n "${Q:-}" ] || echo inactive; exit 3; fi ;;
+    is-enabled) if [ -e "$FLAG" ]; then [ -n "${Q:-}" ] || echo enabled; exit 0; else [ -n "${Q:-}" ] || echo disabled; exit 1; fi ;;
+    enable)  mkdir -p "$(dirname $FLAG)"; touch "$FLAG" ;;
+    disable) rm -f "$FLAG" ;;
+esac
+exit 0

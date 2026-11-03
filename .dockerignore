@@ -1,0 +1,8 @@
+.git
+.github
+toolchain
+.venv
+__pycache__
+*.pyc
+captures
+native/bin
