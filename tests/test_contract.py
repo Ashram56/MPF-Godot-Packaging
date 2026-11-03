@@ -87,6 +87,18 @@ class Contract(unittest.TestCase):
             if env is not None:
                 os.environ["MPF_BOARD"] = env
 
+    def test_windows_amd64_is_x86(self):
+        """platform.machine() is "AMD64" on Windows: it must not be taken for an ARM64 board."""
+        import unittest.mock as m
+        env = os.environ.pop("MPF_BOARD", None)
+        try:
+            for machine, name in (("AMD64", "x86"), ("x86_64", "x86"), ("arm64", "arm64"), ("aarch64", "arm64")):
+                with m.patch.object(K.platform, "machine", return_value=machine), m.patch.object(K, "DT_MODEL", "/nonexistent"):
+                    self.assertEqual(K.board(), name, machine)
+        finally:
+            if env is not None:
+                os.environ["MPF_BOARD"] = env
+
 
 class Platform(Base):
     def setUp(self):
