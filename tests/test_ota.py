@@ -117,6 +117,11 @@ class Ota(TG.Base):
         self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])
         self.assertTrue(O.list_remote()[0]["installed"])
         self.assertFalse(O.list_remote()[0]["changed"])
+        G.delete_game("demo@1.0")                                                  # removed on the machine: offered again, not "done"
+        self.assertFalse(O.list_remote()[0]["installed"])
+        G.JOB_LOCK.acquire()
+        G.run_job(O.install_item, O.list_remote()[0])
+        self.assertTrue(O.list_remote()[0]["installed"])
         self.put_bundle(extra={"description": "now bigger"}, files={"x": b"1" * 100})              # replaced on the server
         self.assertTrue(O.list_remote()[0]["changed"])
 
@@ -177,6 +182,24 @@ class Ota(TG.Base):
         G.JOB_LOCK.acquire()
         G.run_job(O.install_item, [i for i in O.list_remote() if i["kind"] == "game"][0])
         self.assertEqual(G.JOB["state"], "error")                                      # a wrong hash in the manifest is refused
+
+    def test_manifest_with_combined_arch_and_games_it_does_not_list(self):
+        """The server's manifest names one game with arch "arm64+x86_64"; the other games are only archives in their folders.
+        With nothing installed every one of them must be offered."""
+        path = self.put_bundle()
+        me = O.C.ARCH.get(O.platform.machine(), O.platform.machine())
+        other = os.path.join(self.remote, "other")
+        os.makedirs(other)
+        import shutil
+        shutil.copy(path, os.path.join(other, "other-2.0-linux-all.tar.xz"))
+        O.save(self.url, "claude", "secret", "")
+        doc = {"format": 1, "items": [{"id": "demo", "name": "Demo", "version": "1.0", "arch": "arm64+x86_64",
+                                       "file": "demo/" + os.path.basename(path), "size": 1, "sha256": "0" * 64}]}
+        json.dump(doc, open(os.path.join(self.remote, "mpf-games.json"), "w"))
+        if me in ("arm64", "x86_64"):
+            games = [i for i in O.list_remote() if i["kind"] == "game"]
+            self.assertEqual(sorted(i["key"] for i in games), ["demo/" + os.path.basename(path), "other/other-2.0-linux-all.tar.xz"])
+            self.assertTrue(all(i["compatible"] and not i["installed"] for i in games))
 
     def test_folder_field(self):
         O.save(self.url, "claude", "secret")                                     # default folder
