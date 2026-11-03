@@ -8,15 +8,20 @@ extends Node
 ##   ... --zedmd-shades --zedmd-feed-arg=--serum --zedmd-feed-arg=LIB ...   the feeder gets the 128x32 DMD as 4096 shades (0-15),
 ##       one byte a dot, and the feeder's own arguments (--zedmd-feed-arg=, repeated): native/zedmd_feed colours it with
 ##       Serum (platforms/dmd_devices.md, "Serum colour")
+##   ... --dmd-preview=/run/mpf-dmd/preview.png                      also (or alone, on an LCD) writes the DMD picture as a PNG for the setup page
 ## MPF needs the matching overlay (examples/dmd_devices/). Each changed frame (up to FPS a second) is 12288 bytes, three
 ## per dot, row by row, rgb_dmds "default". Monochrome: the picture's brightness (0-15, as a DMD's 16 shades) scales
 ## one colour (16 shades for the 128x32 classic dots, 8 bits for 192x64, 256x64 and the HD picture), #RRGGBB (default #ff730d, a DMD's orange). platforms/dmd_devices.md.
 
 const SIZE_ARG := "--dmd-size="        # WxH of the device: 128x32 (default), 192x64 (PIN2DMD XL), 256x64 (PIN2DMD HD, ZeDMD HD)
+const PREVIEW_ARG := "--dmd-preview="  # PATH: a PNG of the DMD picture, rewritten twice a second, for the platform's setup page
 const FEED_NAME_ARG := "--dmd-feed="   # which picture the game published (publish()): "classic" (default, the root viewport)
 
 var WIDTH := 128
 var HEIGHT := 32
+var _preview_path := ""
+var _preview_elapsed := 0.0
+var _send := false                     # frames go to a device (--pin2dmd / --zedmd)
 var _feeds := {}                       # name -> Viewport, set by the game with publish()
 var _feed_name := "classic"
 const FPS := 30.0
@@ -46,6 +51,8 @@ func _ready() -> void:
 			if wh.size() == 2 and int(wh[0]) > 0 and int(wh[1]) > 0:
 				WIDTH = int(wh[0])
 				HEIGHT = int(wh[1])
+		elif a.begins_with(PREVIEW_ARG):
+			_preview_path = a.trim_prefix(PREVIEW_ARG)
 		elif a.begins_with(FEED_NAME_ARG):
 			_feed_name = a.trim_prefix(FEED_NAME_ARG)
 		elif a == "--zedmd-shades":
@@ -65,7 +72,8 @@ func _ready() -> void:
 			_feed_args.insert(0, "--color")
 			_feed_args.append("--shades")
 		_start_feed(_feed_path)
-	set_process(on)
+	_send = on
+	set_process(on or _preview_path != "")
 	_palette = shade_palette(_color)
 
 
@@ -143,7 +151,21 @@ func shade_frame(image: Image) -> PackedByteArray:
 	return frame
 
 
+func _write_preview() -> void:
+	var image := _source().get_texture().get_image()
+	var tmp := _preview_path + ".tmp"
+	if image.save_png(tmp) == OK:
+		DirAccess.rename_absolute(tmp, _preview_path)      # whole file or nothing for the page
+
+
 func _process(delta: float) -> void:
+	if _preview_path != "":
+		_preview_elapsed += delta
+		if _preview_elapsed >= 0.5:
+			_preview_elapsed = 0.0
+			_write_preview()
+	if not _send:
+		return
 	_elapsed += delta
 	if _elapsed < 1.0 / FPS:
 		return

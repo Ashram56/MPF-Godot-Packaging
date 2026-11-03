@@ -38,7 +38,7 @@ def is_v2(b):
 
 # Godot user arguments the platform's DMD add-on (addons/dmd_out) reads: a game option must not use these names (a game's `--dmd-size=` window
 # size was read as the device's size and the bridge got pictures of the wrong size, 2026-11-03)
-RESERVED_ARGS = ("--dmd-size", "--dmd-feed", "--zedmd", "--pin2dmd")
+RESERVED_ARGS = ("--dmd-size", "--dmd-feed", "--dmd-preview", "--zedmd", "--pin2dmd")
 
 
 def reserved_arg(arg):
@@ -64,6 +64,7 @@ def problems(b, root=None):
         for a in (p.get("godot_args") or []) if isinstance(p, dict) else []:
             if reserved_arg(a):
                 bad.append(f"`profiles.{board}.godot_args` uses `{a}`: that name belongs to the platform's DMD output ({', '.join(RESERVED_ARGS)})")
+    bad += dmd_problems(b)
     if not b.get("game_dir"):
         bad.append("`game_dir` is missing: the folder with project.godot and MPF's config/")
     for a in b.get("addons") or []:
@@ -79,6 +80,34 @@ def problems(b, root=None):
                                f"({', '.join(RESERVED_ARGS)}); give the game's own option another name")
         except ValueError as e:
             bad.append(str(e))
+    return bad
+
+
+def dmd_problems(b):
+    """`dmd.looks`: {look: [Godot user arguments]}, the looks of the DMD the page offers on an LCD (classic, hd, advanced); `dmd.look` the default.
+    The arguments are the game's own (a look is how the game draws its DMD); `--dmd-feed=NAME` (which picture the game published for the
+    page's preview) is the only reserved name allowed."""
+    d = b.get("dmd")
+    if d is None:
+        return []
+    if not isinstance(d, dict):
+        return ["`dmd` must be an object"]
+    bad = []
+    looks = d.get("looks")
+    if looks is not None:
+        names = ("classic", "hd", "advanced")
+        if not isinstance(looks, dict) or not looks:
+            return ["`dmd.looks` must be an object {look: [Godot arguments]}"]
+        for k, args in looks.items():
+            if k not in names:
+                bad.append(f"`dmd.looks.{k}`: the looks are {', '.join(names)}")
+            elif not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+                bad.append(f"`dmd.looks.{k}` must be a list of strings (Godot user arguments)")
+            else:
+                bad += [f"`dmd.looks.{k}` uses `{a}`: that name belongs to the platform's DMD output" for a in args
+                        if reserved_arg(a) and not a.startswith("--dmd-feed=")]
+        if d.get("look") is not None and d["look"] not in looks:
+            bad.append("`dmd.look` (the default) must be one of `dmd.looks`")
     return bad
 
 

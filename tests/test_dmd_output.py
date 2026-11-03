@@ -110,6 +110,36 @@ class DmdOutput(Base):
         self.assertEqual(D.library(), [])
         self.assertEqual(D.load()["serum"], {})
 
+    def test_looks_follow_the_device(self):
+        b = {"dmd": {"looks": {"classic": ["--dmd=classic"], "hd": ["--dmd=hd"], "advanced": ["--dmd=hd", "--bikes"]}, "look": "hd"}}
+        D.set_output("lcd")
+        pre, user = D.plan("g", b)                    # default look of the bundle, and the page's picture of the screen DMD
+        self.assertEqual((pre, user), ([], ["--dmd=hd", "--dmd-preview=" + D.PREVIEW_PNG]))
+        D.set_output(look="advanced")
+        self.assertEqual(D.plan("g", b)[1][:2], ["--dmd=hd", "--bikes"])
+        D.set_output("zedmd", look="advanced")        # a device shows the exact classic dots, whatever the page says
+        self.assertEqual(D.plan("g", b)[1][0], "--dmd=classic")
+        D.set_output("pin2dmd")
+        self.assertEqual(D.plan("g", b), (["--pin2dmd=#2a6cff"], ["--dmd=classic"]))
+        D.set_output("web")
+        self.assertEqual(D.plan("g", b)[1][0], "--dmd=classic")
+
+    def test_a_look_the_bundle_lacks_falls_back(self):
+        D.set_output("lcd", look="advanced")
+        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"]}}})[1][0], "--c")
+        self.assertEqual(D.plan("g", {}), ([], []))   # no looks declared: nothing added
+        with self.assertRaises(ValueError):
+            D.set_output(look="fancy")
+
+    def test_preview_image(self):
+        self.addCleanup(setattr, D, "PREVIEW_PNG", D.PREVIEW_PNG)
+        D.PREVIEW_PNG = os.path.join(self.t.name, "p.png")
+        self.assertIsNone(D.preview_image())
+        open(D.PREVIEW_PNG, "wb").write(b"not a png")
+        self.assertIsNone(D.preview_image())
+        open(D.PREVIEW_PNG, "wb").write(b"\x89PNG\r\n")
+        self.assertEqual(D.preview_image(), b"\x89PNG\r\n")
+
 
 if __name__ == "__main__":
     unittest.main()

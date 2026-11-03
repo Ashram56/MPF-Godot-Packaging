@@ -19,6 +19,8 @@ OUTPUTS = ("auto", "lcd", "pin2dmd", "zedmd", "web")
 EXTS = (".cROMc", ".cRZ", ".cROM")
 # "web": the same pictures a ZeDMD would get (Serum colour included) written by dmd_bridge to a file in RAM, which the setup page draws
 PREVIEW = os.environ.get("MPF_DMD_PREVIEW") or "/run/mpf-dmd/preview.rgb"
+PREVIEW_PNG = os.environ.get("MPF_DMD_PREVIEW_PNG") or "/run/mpf-dmd/preview.png"     # written by the dmd_out add-on (--dmd-preview=)
+LOOKS = ("classic", "hd", "advanced")     # classic = the ROM's 128x32 dots; hd = LCD with a vector font; advanced = LCD with the game's extras
 PREVIEW_SIZES = {128 * 32 * 3: (128, 32), 192 * 64 * 3: (192, 64), 256 * 64 * 3: (256, 64)}
 PREVIEW_MAX_AGE = 5      # seconds: an older picture means the game is not running
 DEFAULT_COLOR = "#2a6cff"
@@ -39,7 +41,9 @@ def load():
     d = d if isinstance(d, dict) else {}
     out = d.get("output")
     color = d.get("color")
+    look = d.get("look")
     return {"output": out if out in OUTPUTS else "auto",
+            "look": look if look in LOOKS else "",
             "color": color if isinstance(color, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", color) else DEFAULT_COLOR,
             "serum": {k: v for k, v in (d.get("serum") or {}).items() if isinstance(v, str)}}
 
@@ -53,8 +57,12 @@ def save(s):
         os.replace(tmp, settings_file())
 
 
-def set_output(output=None, color=None):
+def set_output(output=None, color=None, look=None):
     s = load()
+    if look is not None:
+        if look not in LOOKS + ("",):
+            raise ValueError("unknown DMD look")
+        s["look"] = look
     if output is not None:
         if output not in OUTPUTS:
             raise ValueError("unknown DMD output")
@@ -234,6 +242,32 @@ def resolve(s=None, detected=None):
 LAST = "lcd"        # the output of the last plan(): exported to the game as MPF_DMD_OUTPUT
 
 
+def bundle_looks(bundle):
+    """{look: [Godot user arguments]} the bundle declares in `dmd.looks` (bundle.json), {} when it declares none."""
+    looks = ((bundle or {}).get("dmd") or {}).get("looks")
+    out = {}
+    for k, v in (looks.items() if isinstance(looks, dict) else []):
+        if k in LOOKS and isinstance(v, list) and all(isinstance(a, str) for a in v):
+            out[k] = list(v)
+    return out
+
+
+def effective_look(s, bundle, out):
+    """The look that runs: only an LCD shows more than the exact 128x32 classic dots (PIN2DMD, ZeDMD with or without Serum, the page's
+    preview of those). On an LCD: the setting if the bundle offers it, else its `dmd.looks` default (`dmd.look`), else its first look."""
+    looks = bundle_looks(bundle)
+    if not looks:
+        return ""
+    if out != "lcd":
+        return "classic" if "classic" in looks else ""
+    want = s.get("look") or ((bundle or {}).get("dmd") or {}).get("look")
+    return want if want in looks else next(iter(looks))
+
+
+def look_args(s, bundle, out):
+    return bundle_looks(bundle).get(effective_look(s, bundle, out), [])
+
+
 def plan(game_id, bundle, detected=None):
     """(launcher_args, godot_user_args) for the game packaged launcher: the part before `--` and the part after `-- --`."""
     global LAST
@@ -242,16 +276,21 @@ def plan(game_id, bundle, detected=None):
     LAST = out if out == "pin2dmd" or (out in ("zedmd", "web") and bridge_dir()) else "lcd"
     if LAST == "web":
         LAST = "zedmd"          # the game hides its screen DMD: the pictures go to the page
+    shown = "lcd" if LAST == "lcd" else out        # a device without its bridge falls back to the screen DMD
+    looks = look_args(s, bundle, shown)
     if out == "pin2dmd":
-        return [f"--pin2dmd={s['color']}"], []
+        return [f"--pin2dmd={s['color']}"], looks
     if out not in ("zedmd", "web"):
-        return [], []
+        if effective_look(s, bundle, "lcd") and not any(a.startswith("--dmd-preview") for a in looks):
+            prepare_preview()
+            looks = looks + ["--dmd-preview=" + PREVIEW_PNG]       # the page's view of the screen DMD
+        return [], looks
     d = bridge_dir()
     if not d:
         print(f"dmd: the output is {out} but dmd_bridge was not found (MPF_DMD_BRIDGE_DIR, native/bin/<arch>/dmd_bridge): the game shows "
               "its DMD on the screen instead", file=sys.stderr)
-        return [], []           # no bridge on this system: the screen DMD
-    user = ["--zedmd-shades", "--zedmd-feed=" + os.path.join(d, BRIDGE)]
+        return [], look_args(s, bundle, "lcd")           # no bridge on this system: the screen DMD
+    user = looks + ["--zedmd-shades", "--zedmd-feed=" + os.path.join(d, BRIDGE)]
     if out == "web":
         prepare_preview()
         user += ["--zedmd-feed-arg=--rgb-out", "--zedmd-feed-arg=" + PREVIEW]
@@ -270,8 +309,9 @@ def prepare_preview():
         d = os.path.dirname(PREVIEW)
         os.makedirs(d, exist_ok=True)
         os.chmod(d, 0o777)
-        if os.path.exists(PREVIEW):
-            os.remove(PREVIEW)
+        for f in (PREVIEW, PREVIEW_PNG):
+            if os.path.exists(f):
+                os.remove(f)
     except OSError:
         pass
 
@@ -287,6 +327,18 @@ def preview_frame():
         return None
     size = PREVIEW_SIZES.get(len(data))
     return (size[0], size[1], data) if size else None
+
+
+def preview_image():
+    """The PNG bytes of the screen DMD the dmd_out add-on last wrote (`--dmd-preview=`), or None when the game is not running."""
+    try:
+        if time.time() - os.path.getmtime(PREVIEW_PNG) > PREVIEW_MAX_AGE:
+            return None
+        with open(PREVIEW_PNG, "rb") as f:
+            data = f.read(4000000)
+    except OSError:
+        return None
+    return data if data.startswith(b"\x89PNG") else None
 
 
 def merge_args(board, game_id, bundle):
