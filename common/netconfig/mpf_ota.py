@@ -179,6 +179,8 @@ def list_remote(cfg=None):
     items = []
     for e in sorted(entries, key=lambda e: (e["group"], e["name"])):
         n = e["name"]
+        if e["group"] == "web" or n.startswith("mpf-web-"):
+            continue              # web packages (mpf_webupdate.py, folder web/) are not games
         key = (e["group"] + "/" if e["group"] else "") + n
         if n.endswith(".tar.xz"):
             if key in listed:

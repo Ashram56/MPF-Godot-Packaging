@@ -96,6 +96,13 @@ class Ota(TG.Base):
             f.write(hashlib.sha256(open(path, "rb").read()).hexdigest() + "  " + name + "\n")
         return path
 
+    def test_web_packages_are_not_listed_as_games(self):
+        self.put_bundle()
+        os.makedirs(os.path.join(self.remote, "web"))
+        open(os.path.join(self.remote, "web", "mpf-web-x-1.tar.xz"), "wb").write(b"x")
+        O.save(self.url, "claude", "secret", "")
+        self.assertEqual([i["name"] for i in O.list_remote()], ["demo-1.0-linux-all.tar.xz"])
+
     def test_config_never_exposes_the_password_and_keeps_it(self):
         O.save(self.url, "claude", "secret")
         self.assertEqual(O.public(), {"url": self.url, "folder": "MPF Games", "user": "claude", "has_password": True})
