@@ -29,7 +29,12 @@ plus de MPF, le jeu n'écrit que dans son propre dossier (la racine est en lectu
 3. Le jeu lit seulement les variables fixes de la plateforme (`MPF_DMD_OUTPUT`, `MPF_PUP_PACK`, `MPF_ADDONS`, `MPF_BOARD`, `MPF_GAME_DATA`)
    et accepte tout argument utilisateur Godot inconnu. Il ne détecte aucun matériel DMD, n'ouvre aucun port série, ne lance aucun processus.
 4. Tous les fichiers dont il a besoin sont dans le dossier (ou listés dans `copy`, voir §4) : le build ne génère rien.
-5. Le projet Godot a été importé une fois (`godot --headless --path DOSSIER --import`) pour que la machine n'ait pas à le faire.
+5. `project.godot` a une section `[rendering]` (le build y écrit les formats de texture et s'arrête sinon : « no [rendering] section ») ; mettre
+   `config/features=PackedStringArray("4.6", "Mobile")` et `renderer/rendering_method="mobile"` comme `examples/minimal/`.
+6. Le code du jeu n'importe que la bibliothèque standard et ce que MPF installe : **pas de PyYAML** (`import yaml` donne `No module named 'yaml'`
+   au chargement du premier mode, MPF s'arrête sur `KeyError: 'attract'`), utiliser `ruamel.yaml` (`YAML(typ="safe").load`). Le contrôle
+   `mpf_bundlecheck.problems(dossier, python=<venv de la plateforme>, b=bundle.json)` le signale avant l'envoi.
+7. Le projet Godot a été importé une fois (`godot --headless --path DOSSIER --import`) pour que la machine n'ait pas à le faire.
 
 ## 3. Chemin simple : `make_bundle.py` (un dossier, pas de build)
 
@@ -98,6 +103,12 @@ Un jeu qui génère médias/config ou a des étapes avant le build les place **d
 | `common/games/build_game_package.py` | construit le paquet d'un jeu depuis son dépôt (URL git ou clone) : met en place le dépôt, lance le `setup` et le `build` **du jeu** (`mpf-package.json`, convention SAM ou `bundle_spec.json`), puis vérifie l'archive (sha256, `bundle.json`, add-ons existants, pas de données de machine, pas de GoZen dans un paquet universel) ; refuse un commit qui n'est pas sur la branche par défaut (`--allow-branch` pour un essai) ; `--publish URL` envoie sur WebDAV | URL/dossier du jeu, `--ref`, `--version`, `--label`, `--target`, `--skip-setup`, `--check`, `--dry-run` | l'archive + `.sha256`, taille, hash, et (option) dépôt WebDAV avec `mpf-games.json` |
 | `common/games/check_installed.sh 60` | sur la machine : redémarre `mpf-game.service` et vérifie 60 s qu'il reste actif sans redémarrage (sinon affiche le journal) | durée en secondes | OK / échec + premières erreurs. **Un paquet qui « passe » le build n'est pas encore un paquet qui tourne** : toujours l'exécuter. |
 | `common/games/replay_scenario.py` | rejoue dans un MPF en marche un scénario enregistré par le *Monitor* de la page (changements de switch minutés) | `scenario.json`, `--host`, `--port` (BCP, 5051), `--speed`, `--wait` | code 0 ok / 1 switch inconnu / 2 connexion impossible : test de non-régression après un changement de règles |
+
+Un paquet n'a pas les add-ons de la plateforme (GMC) : pour l'essayer dans le bac à sable, `python -m mpf_godot addons DOSSIER/game`, puis **relancer deux fois**
+`godot --headless --path DOSSIER/game --import` (sinon `Could not find base class "MPFSlide"`, GMC n'ouvre jamais le port 5050), puis
+`python -m mpf_godot run DOSSIER/game -c config,hw_virtual --seconds 40 --xvfb` ; l'attract est atteint quand `logs/*mpf-vm.log` contient
+`mode_attract_started` et aucun `Traceback`. Sans GPU (`VK_KHR_surface not found`) Godot continue quand même.
+Un dossier `.csv` dans le projet Godot est importé comme traduction (`*.translation` écrits à côté) : sans conséquence, à ignorer dans git.
 
 Test sans machine : décompresser l'archive et lancer
 `python3 -c "import sys; sys.path.insert(0,'common/netconfig'); import json, mpf_contract as K; b=json.load(open('DIR/bundle.json')); print(K.problems(b,'DIR') or 'ok'); print(K.plan('DIR', b, 'x86'))"`.
