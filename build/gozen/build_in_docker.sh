@@ -12,7 +12,9 @@ CROSS_PKGS=(gcc-aarch64-linux-gnu g++-aarch64-linux-gnu)
 export DEBIAN_FRONTEND=noninteractive
 if ! command -v scons >/dev/null; then
   apt-get update -qq
-  apt-get install -y -qq --no-install-recommends gcc g++ "${CROSS_PKGS[@]}" make \
+  EXTRA_PKGS=()
+  [ "$ARCH" = x86_64 ] && EXTRA_PKGS=(libva-dev libdrm-dev)   # VAAPI (gozen_vaapi.patch)
+  apt-get install -y -qq --no-install-recommends gcc g++ "${CROSS_PKGS[@]}" "${EXTRA_PKGS[@]}" make \
     pkg-config python3 python3-pip git nasm ca-certificates >/dev/null
   pip3 install -q scons==4.8.1 || pip3 install -q --break-system-packages scons==4.8.1
 fi
@@ -23,6 +25,8 @@ CROSS=()
 if [ "$ARCH" = arm64 ] && [ "$NATIVE" = 0 ]; then
   CROSS=(--enable-cross-compile --cross-prefix=aarch64-linux-gnu- --arch=aarch64 --target-os=linux)
 fi
+VAAPI=()
+[ "$ARCH" = x86_64 ] && VAAPI=(--enable-vaapi --enable-hwaccel=h264_vaapi,hevc_vaapi,vp9_vaapi,vp8_vaapi,mpeg4_vaapi)
 ./configure --prefix="$PWD/bin" "${CROSS[@]}" --disable-shared --enable-static --enable-pic \
   --extra-cflags=-fPIC --enable-pthreads \
   --disable-everything --disable-programs --disable-doc --disable-avdevice --disable-avfilter \
@@ -34,9 +38,10 @@ fi
   --enable-parser=h264,hevc,mpeg4video,aac,vp8,vp9,opus,vorbis,mpegaudio \
   --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb \
   --enable-nvmpi --enable-decoder=h264_nvmpi,hevc_nvmpi,mpeg4_nvmpi,vp8_nvmpi,vp9_nvmpi \
-  --enable-v4l2-m2m --enable-decoder=h264_v4l2m2m,hevc_v4l2m2m,mpeg4_v4l2m2m,vp8_v4l2m2m,vp9_v4l2m2m
+  --enable-v4l2-m2m --enable-decoder=h264_v4l2m2m,hevc_v4l2m2m,mpeg4_v4l2m2m,vp8_v4l2m2m,vp9_v4l2m2m "${VAAPI[@]}"
 grep -q "CONFIG_H264_NVMPI_DECODER 1" config_components.h || { echo "nvmpi decoder not enabled"; exit 1; }
 grep -q "CONFIG_H264_V4L2M2M_DECODER 1" config_components.h || { echo "v4l2m2m decoder not enabled"; exit 1; }
+[ "$ARCH" = x86_64 ] && { grep -q "CONFIG_H264_VAAPI_HWACCEL 1" config_components.h || { echo "vaapi not enabled"; exit 1; }; }
 make -j"$(nproc)" >/dev/null
 make install >/dev/null
 cd "$SRC"

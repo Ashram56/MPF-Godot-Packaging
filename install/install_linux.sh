@@ -196,6 +196,13 @@ pacman)
     PKG_PROC=(base-devel cmake pkgconf libusb libusb-compat libftdi)
     ;;
 esac
+# x86_64: the GoZen library is linked to libva (VAAPI hardware decoding: Intel Quick Sync, AMD), so it needs it to load
+if [ "$(uname -m)" = x86_64 ]; then
+    case "$FAMILY" in
+    apt) PKG_GODOT+=(libva2 libva-drm2) ;;
+    dnf|pacman) PKG_GODOT+=(libva) ;;
+    esac
+fi
 
 have_tool() { command -v "$1" >/dev/null 2>&1; }
 

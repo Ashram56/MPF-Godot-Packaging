@@ -12,7 +12,7 @@ the ROM extraction and re-coding agents are in [Stern-SAM-Decryption](https://gi
 
 Flashable images (Raspberry Pi 4, Jetson Xavier NX, x86 mini PC) share their setup page, read-only production mode and game loader in
 [common/](common/): [games and bundles, putting your own MPF code or a game in an image](common/games/README.md),
-read-only mode, [setup page and network](common/netconfig/README.md).
+[read-only mode](common/readonly/README.md), [setup page and network](common/netconfig/README.md).
 
 | Pinned | Version | Why this one |
 |---|---|---|

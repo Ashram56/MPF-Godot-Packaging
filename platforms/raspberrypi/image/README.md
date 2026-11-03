@@ -10,7 +10,7 @@ but simpler: no vendor BSP, and no loop device is needed (FAT via mtools, ext4 v
 |---|---|
 | Login | `pi` / `raspberry` (`PI_PASSWORD=` at build time), in `sudo`; SSH on port 22 |
 | Network | Ethernet by DHCP; Wi-Fi by wpa_supplicant on `wlan0` (`WIFI_SSID`, `WIFI_PSK`, `WIFI_COUNTRY`) |
-| First boot | root partition grows to fill the card; unique SSH host keys |
+| First boot | Production mode (default, `READONLY=0` at build time for an ordinary image): root and boot partition read-only, logs in RAM, one small read/write partition `mpfdata` for the game, settings, scores, Wi-Fi and SSH keys, made at the first boot in the free space at the end of the card; unique SSH host keys. `sudo mpf-mode maintenance` (or the page on port 8080, or `MODE=maintenance` in `mpf-network.txt`) makes the system writable for updates: [common/readonly](../../../common/readonly/README.md)
 | Extras (default on) | `video` GStreamer + FFmpeg (software decode); `x11` Xorg + openbox + Mesa Vulkan (v3dv); `mpf` MPF, Monitor, Godot, GMC via `install/install_linux.sh` in `/home/pi/MPF-Godot`, autologin + `startx` on tty1 |
 
 ## Wi-Fi and SSH
