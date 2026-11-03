@@ -125,7 +125,11 @@ class Install(Base):
         os.chmod(fake, 0o755)
         open(C.GAME_ENV, "w").write(f"GODOT={fake}\n")
         saved = C.PLATFORM_DIR
+        saved_file = G.__file__
         C.PLATFORM_DIR = plat
+        # platform_addon also looks in the checkout this module lives in: a GMC that `mpf_godot setup` installed there would
+        # satisfy the install below, so the test points that candidate at an empty folder
+        G.__file__ = os.path.join(self.t.name, "nochk", "common", "netconfig", "mpf_games.py")
         try:
             state, msg = self.install(extra={"platform_addons": ["mpf-gmc"]},
                                       files={"game/project.godot": b"", "game/addons/mpf-gmc/scripts/bcp_server.gd": b"# the bundle's own, unpatched\n"})
@@ -135,7 +139,12 @@ class Install(Base):
         p = os.path.join(C.GAMES, "demo@1.0", "game", "addons", "mpf-gmc", "scripts", "bcp_server.gd")
         self.assertIn("mpf-godot fix", open(p).read())
         self.assertTrue(os.path.isfile(os.path.join(self.t.name, "godot.called")))      # the project was re-imported once
-        state, msg = self.install(version="2", extra={"platform_addons": ["mpf-gmc"]})       # no platform GMC: refused, not silently skipped
+        C.PLATFORM_DIR = os.path.join(self.t.name, "empty")       # no platform GMC: refused, not silently skipped
+        try:
+            state, msg = self.install(version="2", extra={"platform_addons": ["mpf-gmc"]})
+        finally:
+            C.PLATFORM_DIR = saved
+            G.__file__ = saved_file
         self.assertEqual(state, "error")
 
     def test_script_addon_without_marker_installs_and_missing_one_leaves_nothing(self):
