@@ -1,7 +1,7 @@
 """Build a game bundle: the game as it runs (generated MPF config, media, sounds, fonts, Godot import already
 made), with no binary. platforms/game-bundles.md says why; the game describes itself in a small JSON spec.
 
-    python -m mpf_godot bundle SPEC.json --target all --out DIR [--version V] [--no-archive]
+    python -m mpf_godot bundle SPEC.json --target all --out DIR [--version X.Y.Z] [--label LABEL] [--no-archive]
 
 SPEC.json (paths relative to the spec's folder, the game's repository root):
   id, name                     bundle id (the archive and its top folder) and display name
@@ -21,10 +21,16 @@ SPEC.json (paths relative to the spec's folder, the game's repository root):
   precheck                     a command (list) run in the game's root first; a non-zero exit stops the build (e.g. "are
                                the generated media current?")
   source_commits               {"name": "git rev-parse argument"} recorded in bundle.json "source" (default game_commit: HEAD)
-  run, options, requires,      copied into bundle.json as they are; "pup": {"install", "pack_dir", "needs_restart"}
-  pup, keep_on_update, extra   tells the setup page how to install the game's PuP Pack (install: a command with ZIP_PATH_OR_URL)
+  format                       2 (platforms/game-bundles.md, "The contract"): bundle.json holds facts only, the platform runs
+                               everything; game_dir, mpf, dmd, pup (rom, manifest), addons, settings, profiles (data),
+                               monitor, icon are copied as they are and checked (common/netconfig/mpf_contract.py)
+  run, options, requires,      format 1 only (no new bundle): copied into bundle.json as they are; "pup": {"install",
+  pup, keep_on_update, extra   "pack_dir", "needs_restart"} tells the setup page how to install the game's PuP Pack
 Run from this platform's checkout (python -m mpf_godot), with GODOT=/path/to/godot unless `mpf_godot setup` ran.
-The version defaults to YYYY.MM.DD-<short commit>; requires.godot is this platform's pinned Godot; keep_on_update
+Name: `<id>-<version>-<label>-linux-<target>.tar.xz`, e.g. `my-game-1.4.0-serum-zedmd-linux-all.tar.xz`: `--version` (else the
+spec's `version`, else the date YYYY.MM.DD) is the number, `--label` (else the spec's `label`) says what the build holds (letters,
+digits, `-`: `hd-colour`, `serum-zedmd`, `base`). bundle.json `version` is `<version>-<label>`, with `semver` and `label` beside it;
+the git commit is not in the name, only in bundle.json `source` (`game_commit`, `game_commit_short`). requires.godot is this platform's pinned Godot; keep_on_update
 defaults to []; game/.godot (the import) is packed on purpose.
 Texture formats follow the target: arm64 -> etc2, x86_64 -> s3tc, all -> both (imported offline, one archive for every machine).
 """
@@ -43,6 +49,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mpf_godot import fsutil  # noqa: E402
 from mpf_godot import toolchain as tc  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "common", "netconfig"))
+import mpf_contract as K  # noqa: E402
 
 FORMAT = 1
 FORMATS = {"arm64": "etc2", "x86_64": "s3tc", "all": "both"}
@@ -64,7 +72,10 @@ def git(root, *args):
 KEYS = {"id": str, "name": str, "description": str, "icon": str, "game_dir": str, "git_tracked": list, "git_exclude": list, "copy": list,
         "optional": list, "never": list, "never_names": list, "import_seed": list, "force_vram": list, "platform_addons": list,
         "requires": dict, "run": dict, "options": dict, "pup": dict, "keep_on_update": list, "monitor": dict, "profiles": dict,
-        "gozen": dict, "extra": dict, "source_commits": dict, "precheck": list}
+        "gozen": dict, "extra": dict, "version": str, "label": str, "source_commits": dict, "precheck": list,
+        "format": int, "mpf": dict, "dmd": dict, "addons": list, "settings": dict}
+# format 2 (platforms/game-bundles.md): files and facts only; these keys go into bundle.json as they are
+V2_KEYS = ("game_dir", "description", "icon", "mpf", "dmd", "pup", "addons", "settings", "profiles", "monitor")
 
 
 def validate_spec(spec):
@@ -75,6 +86,10 @@ def validate_spec(spec):
             problems.append("unknown key `{}` (typo? the contract lists: {})".format(k, ", ".join(sorted(KEYS))))
         elif not isinstance(v, KEYS[k]):
             problems.append("`{}` must be a {}".format(k, KEYS[k].__name__))
+    if K.is_v2(spec):
+        facts = {k: v for k, v in spec.items() if k != "precheck"}       # precheck is a build step of the repository, never in the bundle
+        facts.setdefault("game_dir", "game")
+        return problems + K.problems(facts)
     if not isinstance(spec.get("run", {}), dict) or not spec.get("run", {}).get("start"):
         problems.append("`run.start` is missing: the command that starts the game")
     return problems
@@ -129,7 +144,7 @@ def forbidden(spec, stage):
     for base, _, files in os.walk(stage):
         for name in files:
             if any(fnmatch.fnmatch(name, p) for p in pats):
-                found.append(os.path.relpath(os.path.join(base, name), stage))
+                found.append(os.path.relpath(os.path.join(base, name), stage).replace(os.sep, "/"))
     return found
 
 
@@ -273,15 +288,36 @@ def sizes(stage):
     return out
 
 
-def manifest(root, spec, version, target):
+LABEL_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+SEMVER_RE = re.compile(r"^[0-9]+(\.[0-9]+){1,2}$")
+
+
+def release(spec, version, label):
+    """(semver, label, full) from the command line, else the spec, else the date; full is the bundle's version: <semver>[-<label>]."""
+    semver = version or spec.get("version") or datetime.date.today().strftime("%Y.%m.%d")
+    label = label if label is not None else spec.get("label", "")
+    if not SEMVER_RE.match(semver):
+        raise SystemExit("--version must be numbers and dots, like 1.4.0 (the commit hash goes in bundle.json, not in the name): " + semver)
+    if label and not LABEL_RE.match(label):
+        raise SystemExit("--label must be lowercase words joined by '-', like serum-zedmd: " + label)
+    return semver, label, semver + ("-" + label if label else "")
+
+
+def manifest(root, spec, version, target, semver=None, label=""):
     m = {"format": FORMAT, "id": spec["id"], "name": spec.get("name", spec["id"]), "version": version,
+         "semver": semver or version, "label": label,
          "built": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
          "target": {"os": "linux", "arch": ARCH[target], "texture_formats": FORMATS[target]},
-         "source": dict({"game_commit": git(root, "rev-parse", "HEAD")},
+         "source": dict({"game_commit": git(root, "rev-parse", "HEAD"), "game_commit_short": git(root, "rev-parse", "--short", "HEAD")},
                         **{k: git(root, "rev-parse", v) for k, v in spec.get("source_commits", {}).items()}),
          "requires": dict(spec.get("requires", {}), godot=tc.GODOT_VERSION),
          "platform_addons": list(spec.get("platform_addons", [])),
          "keep_on_update": list(spec.get("keep_on_update", []))}
+    if K.is_v2(spec):
+        m["format"] = K.FORMAT
+        m["game_dir"] = spec.get("game_dir", "game")
+        m.update({k: spec[k] for k in V2_KEYS if k in spec})
+        return m
     for k in ("run", "options", "pup"):
         if k in spec:
             m[k] = spec[k]
@@ -294,7 +330,8 @@ def main(argv=None):
     p.add_argument("spec", help="the game's package description (JSON, `bundle_spec.json` or `game_package.json`)")
     p.add_argument("--root", help="the game's repository root (default: the folder of the spec)")
     p.add_argument("--target", choices=sorted(FORMATS), default="all")
-    p.add_argument("--version", help="default: the date and the short commit")
+    p.add_argument("--version", help="the number, like 1.4.0 (default: the spec's `version`, else today's date)")
+    p.add_argument("--label", help="what the build holds, like serum-zedmd or hd-colour (default: the spec's `label`)")
     p.add_argument("--out", default="dist")
     p.add_argument("--no-archive", action="store_true")
     args = p.parse_args(argv)
@@ -309,8 +346,9 @@ def main(argv=None):
     if spec.get("precheck"):
         if subprocess.run(spec["precheck"], cwd=root).returncode != 0:
             raise SystemExit("the game's precheck failed: " + " ".join(spec["precheck"]))
-    version = args.version or "{}-{}".format(datetime.date.today().strftime("%Y.%m.%d"),
-                                              git(root, "rev-parse", "--short", "HEAD") or "nogit")
+    semver, label, version = release(spec, args.version, args.label)
+    if not label:
+        say("   WARNING: no --label: the archive name says nothing about what the build holds")
     formats = FORMATS[args.target]
     out = os.path.abspath(args.out)
     parent = os.path.join(out, "stage")
@@ -336,8 +374,16 @@ def main(argv=None):
     for rel in spec.get("never", []):          # the import itself may have made some (.godot is not cabinet data)
         if rel != game_rel + "/.godot" and os.path.exists(os.path.join(stage, rel)):
             raise SystemExit("cabinet data appeared in the bundle: " + rel)
-    m = manifest(root, spec, version, args.target)
+    m = manifest(root, spec, version, args.target, semver, label)
     m["sizes"] = sizes(stage)
+    if K.is_v2(m) and m.get("addons"):         # an add-on whose repository this build cannot read (private) is left out
+        for a in [a for a in m["addons"] if not os.path.isdir(os.path.join(stage, a.get("dir", "")))]:
+            say("   add-on {} not in this build ({} missing): the bundle has the base assets only".format(a.get("id"), a.get("dir")))
+        m["addons"] = [a for a in m["addons"] if os.path.isdir(os.path.join(stage, a.get("dir", "")))]
+    if K.is_v2(m):
+        bad = K.problems(m, stage)
+        if bad:
+            raise SystemExit("the bundle breaks the format 2 contract:\n  - " + "\n  - ".join(bad))
     with open(os.path.join(stage, "bundle.json"), "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
     say("== SHA256SUMS: {} files".format(write_sums(stage)))

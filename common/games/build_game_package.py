@@ -40,6 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PLATFORM = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(PLATFORM, "common", "netconfig"))
 import mpf_bundlecheck as BC  # noqa: E402
+import mpf_contract as K  # noqa: E402
 TARGET_ARCH = {"arm64": "arm64", "x86_64": "x86_64", "all": "arm64+x86_64"}
 CABINET = re.compile(r"(^|/)(game/(data|audits|logs)(/|$)|[^/]*\.local\.cfg$|machine_vars\.yaml$|scorbit_device_key\.txt$)")
 
@@ -226,8 +227,8 @@ def verify(archive, recipe, target):
         die(f"{archive} is not a readable .tar.xz bundle: {e}")
     if meta is None:
         die(f"{archive}: no bundle.json at the top of the archive")
-    if meta.get("format") != 1:
-        problems.append(f"bundle.json format is {meta.get('format')!r}, the page reads 1")
+    if meta.get("format") not in (1, 2):
+        problems.append(f"bundle.json format is {meta.get('format')!r}, the page reads 1 and 2")
     if meta.get("id") != recipe["id"]:
         problems.append(f"bundle.json id is {meta.get('id')!r}, the recipe says {recipe['id']!r}")
     if not meta.get("version"):
@@ -242,11 +243,11 @@ def verify(archive, recipe, target):
     have = {n.split("/", 1)[1] for n in names if "/" in n}
     run_cfg = meta.get("run") or {}
     words = str(run_cfg.get("start", "")).split()
-    cwd = os.path.normpath(str(run_cfg.get("cwd", ".")))
+    cwd = os.path.normpath(str(run_cfg.get("cwd", "."))).replace(os.sep, "/")
     for w in words[1:] if words and words[0] in ("python", "python3") else words[:1]:
         if w.startswith("-"):
             continue
-        if ("/" in w or w.endswith((".py", ".sh"))) and os.path.normpath(os.path.join(cwd, w)) not in have:
+        if ("/" in w or w.endswith((".py", ".sh"))) and os.path.normpath(os.path.join(cwd, w)).replace(os.sep, "/") not in have:
             problems.append(f"run.start runs {w!r}, which is not in the archive (cwd {cwd!r})")
         break
     addons = meta.get("platform_addons", [])
@@ -283,7 +284,12 @@ def start_check(archive, repo, meta):
             t.extractall(tmp)
         roots = [d for d in os.listdir(tmp) if os.path.isdir(os.path.join(tmp, d))]
         root = os.path.join(tmp, roots[0])
-        bad = BC.problems(root, python, meta, source=repo if repo and os.path.isdir(repo) else None)
+        src = repo if repo and os.path.isdir(repo) else None
+        if K.is_v2(meta):           # format 2: the contract, the declared files, the imports of all the game's Python
+            bad = K.problems(meta, root) or BC.problems(root, python, meta, source=src,
+                                                        starts=BC.python_files(os.path.join(root, meta.get("game_dir") or "game")))
+        else:
+            bad = BC.problems(root, python, meta, source=src)
         cmd = BC.check_command(meta)
         if cmd and not bad:
             if cmd[0] in ("python3", "python"):
@@ -361,7 +367,8 @@ def main():
     ap.add_argument("--repo", help="the game's repository: a folder already cloned (used as it is) or a git URL")
     ap.add_argument("--ref", help="branch or tag to build (a cloned URL only)")
     ap.add_argument("--workdir", default=os.path.join(os.path.expanduser("~"), "mpf-game-builds"), help="where a URL is cloned")
-    ap.add_argument("--version")
+    ap.add_argument("--version", help="the number, like 1.4.0 (the archive is <id>-<version>-<label>-linux-<target>)")
+    ap.add_argument("--label", help="what the build holds, like serum-zedmd or hd-colour")
     ap.add_argument("--target", choices=sorted(TARGET_ARCH))
     ap.add_argument("--out", default="dist")
     ap.add_argument("--skip-setup", action="store_true")
@@ -412,7 +419,7 @@ def main():
             env["GODOT"] = found[0]
     if recipe.get("build"):
         cmd = fill(recipe["build"], values)
-        if not version:      # the game's builder chooses (date and commit)
+        if not version:      # the game's builder chooses (its spec's version, else the date)
             i = cmd.index("--version") if "--version" in cmd else -1
             if i >= 0:
                 del cmd[i:i + 2]
@@ -426,11 +433,11 @@ def main():
             sys.path.insert(0, PLATFORM)
             from mpf_godot import toolchain as tc
             run([py, "-m", "pip", "install", "--quiet"] + tc.BUILD_REQUIREMENTS, repo, env, a.dry_run)
-        for opt, val in (("--target", target), ("--version", version), ("--pup-zip", a.pup_zip)):
+        for opt, val in (("--target", target), ("--version", version), ("--label", a.label), ("--pup-zip", a.pup_zip)):
             if val and (a.dry_run or opt in helptext):
                 cmd += [opt, val]
     elif description_of(repo):
-        cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else [])
+        cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else []) + (["--label", a.label] if a.label else [])
     else:
         die("the repository has no scripts/package/build_bundle.py and no package description (" + ", ".join(DESCRIPTIONS) + "), and no recipe says how to build it "
             "(for your own MPF code without a build step: common/games/make_bundle.py)")

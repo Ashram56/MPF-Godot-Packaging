@@ -1,5 +1,6 @@
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 
@@ -31,6 +32,7 @@ class Detect(unittest.TestCase):
 
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "reads sysfs and a pty: Linux only")
 class FakeSysfs(unittest.TestCase):
     """A fake sysfs with symlinked devices (as /sys has them), and a ZeDMD on a pty."""
 
