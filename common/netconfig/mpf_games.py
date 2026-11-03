@@ -30,6 +30,7 @@ import mpf_bundlecheck as BC  # noqa: E402
 import mpf_common as C  # noqa: E402
 import mpf_contract as K  # noqa: E402
 import mpf_dmd as DMD  # noqa: E402
+import mpf_screens as SC  # noqa: E402
 from mpf_common import run  # noqa: E402
 
 JOB = {"state": "idle", "msg": "", "log": ""}      # one install at a time; the page polls /job
@@ -270,7 +271,9 @@ def settings_schema(game):
     (platforms/README.md, Platform limits); the file itself if the tool cannot run. Format 2: the platform narrows it (mpf_contract)."""
     b = read_bundle(game) or {}
     if K.is_v2(b):
-        return K.schema(game, b)
+        sch = K.schema(game, b)
+        own = SC.settings(b)        # the monitor of each window is the page's "Screens" card's, not a field of this form
+        return dict(sch, options=[o for o in sch.get("options", []) if o.get("id") not in own])
     try:
         return json.loads(tool(game, "list").stdout)
     except ValueError:
@@ -1119,3 +1122,23 @@ def set_autostart(on):
         r = run("systemctl", "enable" if on else "disable", "mpf-game.service")
     if r.returncode:
         raise ValueError((r.stderr or r.stdout).strip() or "systemctl failed")
+
+
+def screens_state(game):
+    """[{"id", "label", "index"}] the windows a format 2 game declares and the monitor each is on now."""
+    b = read_bundle(game) or {}
+    if not K.is_v2(b):
+        return []
+    try:
+        values = K.effective(game, b)
+    except ValueError:
+        return []
+    return [{"id": w["id"], "label": str(w.get("label") or w["id"]), "index": int(values.get(w["setting"]) or 0)} for w in SC.windows(b)]
+
+
+def screen_set(game, window, index):
+    b = read_bundle(game) or {}
+    w = next((w for w in SC.windows(b) if w["id"] == window), None)
+    if not w:
+        raise ValueError("this game has no such window")
+    K.set_values(game, b, [(w["setting"], index)])
