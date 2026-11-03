@@ -96,3 +96,4 @@ The installers of this repository were renamed from the first game's (`install_p
 | A board without GitHub credentials (Remote Control) cannot push | it hands changes back as `git format-patch` files; a cloud session applies and pushes them | observed, Tron on the AGX Orin |
 
 - [game-bundles.md](game-bundles.md): how a game builds its universal bundle (code and multimedia, no binary) and how this platform installs it.
+- [creer-un-package.md](creer-un-package.md): (français) faire un package format 2 pour un jeu MPF custom, et ce que fait chaque outil Python (entrées, sorties).

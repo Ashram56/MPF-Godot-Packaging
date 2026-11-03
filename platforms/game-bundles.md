@@ -13,7 +13,7 @@ never called by the platform.
 
 ## The contract (bundle.json format 2)
 
-How a game's session ports its bundle, step by step: [game-bundle-format2.md](game-bundle-format2.md). `common/netconfig/mpf_contract.py` reads it; `schema/game_package.schema.json` describes it; the builder and the page refuse a
+Guide court en français : [creer-un-package.md](creer-un-package.md). How a game's session ports its bundle, step by step: [game-bundle-format2.md](game-bundle-format2.md). `common/netconfig/mpf_contract.py` reads it; `schema/game_package.schema.json` describes it; the builder and the page refuse a
 format 2 bundle that breaks it (`mpf_contract.problems`).
 
 ```json
