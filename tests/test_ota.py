@@ -178,6 +178,24 @@ class Ota(TG.Base):
         G.run_job(O.install_item, [i for i in O.list_remote() if i["kind"] == "game"][0])
         self.assertEqual(G.JOB["state"], "error")                                      # a wrong hash in the manifest is refused
 
+    def test_manifest_with_combined_arch_and_games_it_does_not_list(self):
+        """The server's manifest names one game with arch "arm64+x86_64"; the other games are only archives in their folders.
+        With nothing installed every one of them must be offered."""
+        path = self.put_bundle()
+        me = O.C.ARCH.get(O.platform.machine(), O.platform.machine())
+        other = os.path.join(self.remote, "other")
+        os.makedirs(other)
+        import shutil
+        shutil.copy(path, os.path.join(other, "other-2.0-linux-all.tar.xz"))
+        O.save(self.url, "claude", "secret", "")
+        doc = {"format": 1, "items": [{"id": "demo", "name": "Demo", "version": "1.0", "arch": "arm64+x86_64",
+                                       "file": "demo/" + os.path.basename(path), "size": 1, "sha256": "0" * 64}]}
+        json.dump(doc, open(os.path.join(self.remote, "mpf-games.json"), "w"))
+        if me in ("arm64", "x86_64"):
+            games = [i for i in O.list_remote() if i["kind"] == "game"]
+            self.assertEqual(sorted(i["key"] for i in games), ["demo/" + os.path.basename(path), "other/other-2.0-linux-all.tar.xz"])
+            self.assertTrue(all(i["compatible"] and not i["installed"] for i in games))
+
     def test_folder_field(self):
         O.save(self.url, "claude", "secret")                                     # default folder
         self.assertEqual(O.base(O.load()), self.url + "MPF%20Games/")
