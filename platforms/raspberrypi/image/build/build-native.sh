@@ -232,7 +232,8 @@ in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.servic
 in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty,dialout -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
 if [ "$READONLY" = 1 ]; then
     . "$REPO_ROOT/common/readonly/install-readonly.sh"
-    mpf_readonly_install "$R" pi /boot/firmware ""
+    # ~/.cache and Xorg's log folder are rewritten at every session: user-owned RAM disks (a read-only root would end the X login at once)
+    mpf_readonly_install "$R" pi /boot/firmware "" "/home/pi/.cache:128m /home/pi/.local/share/xorg:8m"
     # the game starts at power-on (the page's "start at power-on" switch toggles this link in a short writable window)
     in_chroot "systemctl enable mpf-game.service >/dev/null 2>&1"
 fi
@@ -252,6 +253,12 @@ if [ -n "$EXTRAS" ]; then
         printf 'allowed_users=console\nneeds_root_rights=auto\n' > "$R/etc/X11/Xwrapper.config"
         # one screen, the game's (HDMI-2 at 1920x1080, else HDMI-1): a second X output costs a copy per frame
         install -m 755 "$CAB/xinitrc" "$R/home/pi/.xinitrc"
+        # read-only production mode: the X server's log in RAM (a user session's Xorg writes ~/.local/share/xorg/Xorg.0.log and
+        # stops at once when it cannot: the login would end and restart every 2 s). xinit exists only now, so it is written here
+        if [ "$READONLY" = 1 ]; then
+            printf '#!/bin/sh\n\nexec /usr/bin/X -nolisten tcp -logfile /tmp/Xorg.0.log "$@"\n' > "$R/etc/X11/xinit/xserverrc"
+            chmod 755 "$R/etc/X11/xinit/xserverrc"
+        fi
     fi
     if has mpf; then
         # The repository's own Linux installer, run as the cabinet user in the chroot (Python 3.11 via uv, MPF,

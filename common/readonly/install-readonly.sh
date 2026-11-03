@@ -50,9 +50,12 @@ mpf_readonly_install() {
     local v path size mode
     for v in $MPF_VOLATILE; do
         path="${v%%:*}"; size="${v#*:}"; mode=0755
+        local own=""
         case "$path" in /tmp|/var/tmp) mode=1777;; esac
+        # a folder of the cabinet user's home belongs to that user
+        case "$path" in /home/$user/*) own=",uid=$(chroot "$R" id -u "$user" 2>/dev/null || echo 1000),gid=$(chroot "$R" id -g "$user" 2>/dev/null || echo 1000)";; esac
         sed -i -E "\\@^tmpfs\\s+${path}\\s@d" "$fstab"
-        printf 'tmpfs %s tmpfs nosuid,nodev,mode=%s,size=%s 0 0\n' "$path" "$mode" "$size" >> "$fstab"
+        printf 'tmpfs %s tmpfs nosuid,nodev,mode=%s,size=%s%s 0 0\n' "$path" "$mode" "$size" "$own" >> "$fstab"
         mkdir -p "$R$path"
     done
 
