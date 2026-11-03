@@ -49,6 +49,7 @@ class JobError(Exception):
 def job_set(**kw):
     prev = (JOB.get("state"), JOB.get("msg"))
     JOB.update(kw)
+    JOB["at"] = int(time.time() * 1000)        # the page keeps a finished job on screen until it is dismissed (keyed by this)
     if (JOB.get("state"), JOB.get("msg")) != prev and JOB.get("msg"):
         job_trace(f"{JOB.get('state')}: {JOB.get('msg')}")
     try:                    # the page may run in another process than an install started at boot (the inbox)
