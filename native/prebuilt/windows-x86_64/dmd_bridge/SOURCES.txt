@@ -1,0 +1,7 @@
+dmd_bridge.exe: native/dmd_bridge/dmd_bridge.cpp of MPF-Godot-Packaging, built with mingw-w64 (native/dmd_bridge/build_windows.sh).
+zedmd64.dll: PPUC/libzedmd ed69d499d87d4d328bd328773cc6bbd3dadd64c3, unmodified (https://github.com/PPUC/libzedmd).
+libserialport64-0.dll, libsockpp64.dll: the commits pinned by that libzedmd's platforms/config.sh (sigrokproject/libserialport,
+  fpagliughi/sockpp), unmodified.
+serum64.dll: PPUC/libserum v2.8.2, unmodified (https://github.com/PPUC/libserum), GPL-2.0.
+libstdc++-6.dll, libgcc_s_seh-1.dll, libwinpthread-1.dll: the mingw-w64 GCC runtime (GPL with the GCC runtime library exception).
+Each library's licence is in its source repository; rebuild everything with native/build_windows_bridge.sh.

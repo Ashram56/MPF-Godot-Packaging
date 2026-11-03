@@ -10,8 +10,11 @@ Shared by every image (Raspberry Pi 4, Jetson Xavier NX, x86 mini PC). Standard 
 | `mpf_common.py` | Settings read from the environment and `/etc/mpf-readonly.conf`, the writable-window helper for read-only mode |
 | `mpf_games.py` | Everything about games: install, versions, the active game, PuP Packs, settings, start and stop, the inbox |
 | `mpf_monitor.py` | Switch monitor (BCP client of the running game) and saved log snapshots |
+| `mpf_contract.py` | Bundle format 2: refuses a bundle that carries a command, detects the board, keeps a game's settings (`.platform/settings.json`), composes its start (MPF configs, Godot arguments, ini keys, `MPF_PUP_PACK`, `MPF_ADDONS`) from the bundle's facts |
 | `mpf_bundlecheck.py` | Can this bundle start? Import check of the start chain and `run.check`, used by the builder and by the installer before anything is changed |
+| `mpf_dmd.py` | DMD output (auto, LCD, PIN2DMD, ZeDMD via dmd_bridge) and the Serum colourisation library, assignable per game; the launcher arguments the game gets (`dmd.json` in the state folder, files in `/data/serum/<rom>/`) |
 | `mpf_ota.py` | Updates of games and PuP Packs from a WebDAV folder (list, download, install; address, user and password kept in `ota.json`, mode 0600) |
+| `mpf_audio.py` | Sound output: the playback devices the kernel reports (kind: HDMI, analog, USB, I2S), the choice kept in `audio.json` on the data partition, the I2S DAC overlay at boot, the ALSA configuration written in RAM at each game start |
 | `mpf_web.py` | The page (one HTML file, English and French) and its HTTP routes |
 | `mpf-netconfig-*.service`, `mpf-game.service` | systemd units: apply, web, ap, inbox, and the game |
 
@@ -31,6 +34,7 @@ One screen, in the browser's language (English or French, a selector at the top)
 - **Settings** of the active game, built from the bundle's own settings schema (`options.tool`, `options.schema`).
 - **Wi-Fi**: the networks in range (tap to choose), password, country. **SSH**: a public key, password logins on or off.
 - **Mode**: production or maintenance ([common/readonly](../readonly/README.md)).
+- **Sound output** (*Configuration* tab): see below.
 
 ## Games: several versions, several games
 
@@ -141,3 +145,32 @@ How a game builds a bundle for this page: [platforms/game-bundles.md](../../plat
 The download button gives `{"format": 1, "events": [[seconds, switch, "on|off|toggle|tap"], ...]}`, which `common/games/replay_scenario.py`
 plays into any MPF started in simulation through its BCP server (for qualification after a change of the game's code; exit 1 when the game
 no longer has a switch of the scenario).
+
+## Sound output
+
+The same card on every platform; what it offers depends on the machine (`KINDS` in `mpf_audio.py`) and on what is plugged in now:
+
+| Platform | Kinds offered | Notes |
+|---|---|---|
+| x86 PC | HDMI / DisplayPort, analog, USB | no I2S header |
+| Raspberry Pi 4 | HDMI, analog (3.5 mm jack), I2S, USB | the image's default is the jack |
+| Raspberry Pi 5 | HDMI, I2S, USB | no jack; the image's default is HDMI-A-1 (`vc4hdmi0`) |
+| Jetson Xavier NX | HDMI, I2S, USB | the image's default is the HDMI monitor |
+
+- **Devices are listed, not assumed**: `/proc/asound` (cards, playback PCMs, HDMI monitor-present flags). A device is named by its card
+  *id* (`hw:CARD=vc4hdmi1,DEV=0`), so a USB sound card keeps its name when card numbers change; *Scan* re-reads after plugging one.
+- **Where the choice lives**: `<STATE_DIR>/audio.json` (the data partition on a read-only image). *Automatic* (default) changes nothing:
+  the image's `/etc/asound.conf` stays in charge.
+- **How it is applied**: at each game start `mpf_games.game_exec` calls `mpf_audio.prepare()`, which writes `/run/mpf-audio/alsa.conf` and
+  `override.conf` (RAM) and sets `ALSA_CONFIG_PATH` for the game only. The entry file includes the system's alsa.conf and loads the override
+  as a later hook, because ALSA reads `/etc/asound.conf` lazily and would otherwise win over a plain definition. Every game gets it, none
+  needs to know. A saved device that is no longer present falls back to the image's default (the page says so).
+- **I2S** needs a device-tree overlay read at boot, so it is two steps: pick *I2S DAC…* and the DAC, then reboot (the page shows a
+  Reboot button; the machine remembers it by the boot id). Raspberry Pi: a managed block (`# --- mpf-audio ... ---`) in `config.txt` on the
+  boot partition with the DAC's `dtoverlay=` (and `dtparam=audio=off` on a Pi 4); choosing another output or *Automatic* removes it.
+  Jetson: the header function (`i2s2`) is enabled with NVIDIA's `jetson-io` (`config-by-function.py -o dtbo i2s2`), and the first playback stream
+  is routed to I2S2 with `amixer` when the game starts. Once the DAC's card exists it appears in the list like any other device.
+- **Test tone**: plays 440 Hz on the chosen output with `aplay` (needs `alsa-utils` on the image; the game must be stopped, the device being exclusive).
+
+Checked in the sandbox with fake `/proc/asound` trees of each platform and against the real alsa-lib (`tests/test_audio.py`). **Not checked on
+hardware**: the Raspberry Pi DAC overlays, `jetson-io` and the APE routing on a Xavier NX, the HDMI monitor flags on a Pi.

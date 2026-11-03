@@ -1,4 +1,10 @@
 """The page asks for a game's settings with the folder name percent-encoded (`demo%401.0`): the server must decode it."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import json
 import os
 import sys

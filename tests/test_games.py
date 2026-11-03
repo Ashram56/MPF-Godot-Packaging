@@ -1,4 +1,10 @@
 """Several games on one image: install, versions, the active game, the inbox, how a bundle is started (common/netconfig/mpf_games.py)."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import io
 import json
 import os
@@ -19,6 +25,7 @@ def make_bundle(path, gid="demo", version="1.0", name="Demo", extra=None, files=
     b = {"format": 1, "id": gid, "name": name, "version": version, "target": {"os": "linux", "arch": arch},
          "run": {"start": "echo hi"}, "keep_on_update": ["game/data", "pup_pack"], "pup": {"pack_dir": "pup_pack/p", "media_dir": "pup_media/p"}}
     b.update(extra or {})
+    b = {k: v for k, v in b.items() if v is not None}      # None: a key the test wants left out
     with tarfile.open(path, "w:xz") as tf:
         def add(rel, data):
             ti = tarfile.TarInfo(f"{gid}/{rel}")
@@ -130,6 +137,22 @@ class Install(Base):
         self.assertTrue(os.path.isfile(os.path.join(self.t.name, "godot.called")))      # the project was re-imported once
         state, msg = self.install(version="2", extra={"platform_addons": ["mpf-gmc"]})       # no platform GMC: refused, not silently skipped
         self.assertEqual(state, "error")
+
+    def test_script_addon_without_marker_installs_and_missing_one_leaves_nothing(self):
+        plat = os.path.join(self.t.name, "plat")
+        os.makedirs(os.path.join(plat, "addons", "oneshot"))
+        open(os.path.join(plat, "addons", "oneshot", "oneshot.gd"), "w").write("# one script, no plugin.cfg\n")
+        saved = C.PLATFORM_DIR
+        C.PLATFORM_DIR = plat
+        try:
+            state, msg = self.install(extra={"platform_addons": ["oneshot"]}, files={"game/project.godot": b""})
+            self.assertEqual(state, "done", msg)
+            self.assertTrue(os.path.isfile(os.path.join(C.GAMES, "demo@1.0", "game", "addons", "oneshot", "oneshot.gd")))
+            state, msg = self.install(version="2", extra={"platform_addons": ["missing"]}, files={"game/project.godot": b""})
+            self.assertEqual(state, "error")
+            self.assertFalse(os.path.exists(os.path.join(C.GAMES, "demo@2")))        # refused before anything moved
+        finally:
+            C.PLATFORM_DIR = saved
 
     def test_a_second_game_waits_to_be_chosen(self):
         self.install()
@@ -282,6 +305,24 @@ class StartCheck(Base):
         self.assertIn("run.check", msg)
         self.assertIn("no display", msg)
         self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])
+
+
+class OwnGame(Base):
+    def test_a_game_not_owned_by_the_game_user_is_handed_over_before_it_starts(self):
+        import types
+        game = os.path.join(C.GAMES, "own@1")
+        os.makedirs(os.path.join(game, "game"))
+        calls = []
+        real = G.sh
+        G.sh = lambda *c, **k: calls.append(c)
+        try:
+            me = os.stat(game).st_uid
+            G.own_game(game, types.SimpleNamespace(pw_uid=me, pw_gid=0))              # already the game user's: nothing to do
+            self.assertEqual(calls, [])
+            G.own_game(game, types.SimpleNamespace(pw_uid=me + 1, pw_gid=5))          # owned by someone else: chown -R
+            self.assertEqual(calls, [("chown", "-R", f"{me + 1}:5", game)])
+        finally:
+            G.sh = real
 
 
 class PupLibrary(Base):

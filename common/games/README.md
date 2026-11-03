@@ -15,38 +15,44 @@ code with no PuP Pack at all.
 
 ## Your own MPF code, without a PuP Pack
 
-You need an MPF machine folder (`config/`, `modes/`, ...) or any program the base system can run. Say it is in `~/my-machine` and
-starts with `mpf both` (MPF and the media controller on a screen) or with a launcher script of yours.
+You need an MPF machine folder with a Godot (GMC) project: `project.godot` and MPF's `config/` side by side, say in `~/my-machine`. The
+bundle is **files and facts** (format 2, [platforms/game-bundles.md](../../platforms/game-bundles.md)): it carries no start command
+and no script; the platform launches the game itself (`python -m mpf_godot run game -c <configs>`) and applies its settings.
 
 ```sh
+godot --headless --path ~/my-machine --import          # once: the machine does not import at its first start
 python3 common/games/make_bundle.py ~/my-machine --id my-machine --name "My machine" --version 1.0 \
-        --start "mpf both" --keep data -o dist/
+        --hardware virtual=hw_virtual --hardware proc=hw_proc --keep data -o dist/
 # dist/my-machine@1.0.tar.xz  and  dist/my-machine@1.0.tar.xz.sha256
 ```
 
-1. `--start` is what runs the game, in the folder `game/` of the bundle (your folder is copied there). `python3` and `python` are the
-   base system's Python environment with MPF installed; any other program name is looked up in that environment's `bin` first (`mpf`),
-   then on the `PATH`. Several words are fine (`mpf both -t`, `python3 run.py --fullscreen`).
-2. `--keep PATH` lists what an update carries over to the next version: the files your game *writes* (settings, high scores, audits),
-   relative to `game/`. Everything else is replaced by the new version. Without `--keep` an update starts from a clean state.
-3. **Virtual or P-ROC**: every bundle made this way gets a *Hardware* setting on the page, `virtual` (default) or `proc`. The bundle
-   starts `scripts/package/start.py`, which runs your `--start` command plus `--hw-virtual-args=-x` (MPF's virtual platform) or
-   `--hw-proc-args=...` (nothing by default: the hardware platform your config asks for; for example `--hw-proc-args="-c proc"` for
-   an extra config file). The choice is kept in `settings/options.json` and carried over by updates. `--no-hw-option` leaves it out.
-4. No `--pup-dir`: the bundle has no PuP Pack, the page shows no pack upload for it. Godot, GoZen and the media controller are not
-   needed unless your game uses them. Use `--no-display` for a game that opens no window.
-5. Put the archive on the machine: upload it on the page (*Games*, *Add a game*), or copy it (and its `.sha256`) to `/data/inbox/` over
+1. `--configs` (default `config`) are the MPF config files of `config/` always loaded.
+2. **Virtual or P-ROC**: each `--hardware NAME=FILE[,FILE]` is a set of extra config files of `config/` (`hw_virtual.yaml` with
+   `hardware: platform: virtual`, `hw_proc.yaml` with `platform: p_roc`, ...). Two sets or more give a *Hardware* setting on the page
+   (default `virtual`); the platform adds the chosen set to `--configs`. Without `--hardware` your configs name the platform themselves.
+3. `--keep PATH` lists what an update carries over to the next version: the files your game *writes* (settings, high scores, audits),
+   relative to `game/`. `.platform/` (the page's settings, the PuP link and `MPF_GAME_DATA`, a writable folder of the game's own) is
+   always kept.
+4. Your own settings: `--settings settings.json`, a schema in your folder (`groups`, `options`, each with one target: `godot_arg`,
+   `ini` or `hardware`; the contract table in game-bundles.md). The platform stores the values and applies them at the start.
+5. **Platform add-ons**: GoZen and the patched GMC come from the platform (`gde_gozen`, `mpf-gmc` by default, `--platform-addon` to
+   choose); your own copies in `addons/` are left out. Optional facts: `--dmd-rom` (the Serum colourisation on a ZeDMD), `--pup-rom`
+   and `--pup-manifest` (a game that reads a PuP Pack from `MPF_PUP_PACK`), `--arch`, `--description`, `--icon`.
+6. The tool refuses a bundle that breaks the contract (`mpf_contract.problems`: no `project.godot`, a config file missing, a bad
+   settings schema), and names what is missing.
+7. Put the archive on the machine: upload it on the page (*Games*, *Add a game*), or copy it (and its `.sha256`) to `/data/inbox/` over
    SSH and reboot, or put it in the image before flashing (next section). It is checked, installed to `/opt/games/my-machine@1.0`
    and, if it is the first game, becomes the active one.
 
-What the base system provides to the command, as environment variables: `GODOT` (path to Godot, if the image has it),
-`MPF_GAME_VENV` (the Python environment with MPF), `DISPLAY`. A bundle that wants them under another name lists it in `requires.env`.
-Your game **must write only inside its own folder**: on a production image the root is read-only and only the games' folder and `/data`
-are writable. Logs: write them to `game/logs/` (it is a link to RAM on a production image: they are lost at power-off, which is what
-saves the flash); everything you want to keep goes under a path listed in `--keep`.
+What the platform gives the game at start: `MPF_DMD_OUTPUT`, `MPF_PUP_PACK`, `MPF_ADDONS`, `MPF_BOARD`, `MPF_GAME_DATA`, and the Godot
+user arguments of its settings (game-bundles.md, "What the game reads at start"). Your game **must write only inside its own folder**:
+on a production image the root is read-only. Logs go to `game/logs/` (in RAM on a production image); everything you want to keep goes
+under a path listed in `--keep` or in `MPF_GAME_DATA`.
 
-Test it first on a PC: `tar -xJf dist/my-machine@1.0.tar.xz && cd my-machine@1.0/game && mpf both` is the same command the image
-will run. `python3 -m unittest tests.test_inject` shows the tool producing a bundle the loader accepts.
+Test it first on a PC: `python -m mpf_godot run ~/my-machine -c config,hw_virtual` is what the platform runs.
+`python3 -m unittest tests.test_inject` shows the tool producing a bundle the loader installs.
+
+A program that is not an MPF + Godot game (no `project.godot`) cannot be a format 2 bundle: the platform runs only MPF and Godot.
 
 ## Before flashing: `inject_image.py`
 
@@ -94,12 +100,12 @@ or a **folder** holding a clone:
 ```sh
 python3 common/games/build_game_package.py https://example.com/my-game.git --out dist
 python3 common/games/build_game_package.py ~/my-game --out dist      # your clone, your branch, as it is
-# dist/my-game-<date>-<commit>-linux-all.tar.xz  and  ...tar.xz.sha256
+# dist/my-game-1.0.0-base-linux-all.tar.xz  and  ...tar.xz.sha256
 ```
 
 With a URL it clones the game's repository into `~/mpf-game-builds/<id>` (`--workdir` changes it), runs its setup, builds, and checks.
 Options: `--repo FOLDER` uses a clone you already made *as it is* (your branch, your changes: nothing is cloned or checked out),
-`--repo URL` another remote, `--ref BRANCH_OR_TAG`, `--version 2026.10.29` (default: the date and the commit), `--target arm64|x86_64|all`
+`--repo URL` another remote, `--ref BRANCH_OR_TAG`, `--version 1.4.0 --label serum-zedmd` (name: `<id>-<version>-<label>-linux-<target>`; the commit is only in bundle.json), `--target arm64|x86_64|all`
 (default `all`: one archive for every machine, no binary inside), `--skip-setup` when the workspace is already prepared (rebuilds
 take minutes instead of the first run's 30 to 60), `--dry-run` to see the commands.
 
@@ -108,7 +114,7 @@ local changes) unless you add `--allow-branch` for a test package. It prints `so
 once crashed in a loop on a machine because later fixes were missing.
 
 **No recipe needed for the SAM games.** Without a recipe the tool follows their convention: `scripts/setup.py` (with `--no-monitor` when it
-has that option), then `scripts/package/build_bundle.py` with `--out`, and `--target` / `--version` only when that script's `--help` lists them,
+has that option), then `scripts/package/build_bundle.py` with `--out`, and `--target` / `--version` / `--label` only when that script's `--help` lists them,
 else `bundle_spec.json` with `mpf_godot bundle`. The checks also refuse an archive whose `run.start` script is missing, or whose Godot project uses
 `mpf-gmc` that neither the archive nor `platform_addons` provides.
 
@@ -128,7 +134,7 @@ What each step does, so it can also be done by hand:
 1. **Get the repository** and its submodules (the game's `mpf-package.json` says whether it needs them).
 2. **Setup** (the game's `setup`, or by convention `python3 scripts/setup.py --no-monitor`) in the clone: a Python venv with MPF, Godot, the generated
    MPF config, media, sounds and baked fonts. About 12 GB of disk; the longest step.
-3. **Build** (the game's `build`, or by convention `.venv/bin/python scripts/package/build_bundle.py --target all --version V --out DIR`), which stages the game, makes the Godot
+3. **Build** (the game's `build`, or by convention `.venv/bin/python scripts/package/build_bundle.py --target all --version X.Y.Z --label L --out DIR`), which stages the game, makes the Godot
    import for both GPU families and writes `bundle.json` and `SHA256SUMS`. It uses this repository's `mpf_godot bundle` (the tool finds
    the checkout; the recipe sets `MPF_GODOT_PACKAGING`). Any game with a `bundle_spec.json` and no `build` is built with
    `python -m mpf_godot bundle bundle_spec.json` ([platforms/game-bundles.md](../../platforms/game-bundles.md)).
@@ -143,21 +149,22 @@ Then put it on a machine: drop the file on the page (*Install and updates*), or 
 
 This repository holds **no game**: no recipe, no spec, no file list, no name. The game's own repository (or the session that creates the
 game) produces a **complete game package** and describes it; this repository only checks the description, adds the platform's add-ons,
-imports the textures and packs. The PuP Pack is never part of it (`pup.install`, installed separately).
+imports the textures and packs. The PuP Pack is never part of it: the author's zip, uploaded separately on the page.
 
 1. **A complete package.** Every file the game needs at run time exists in the repository folder when the build starts, **generated files
    included** (config, media, sounds, baked fonts, generated slides and data tables that git ignores). The game's own setup or build
    step produces them, here nothing is generated. `mpf_godot bundle` stops and lists any path of the spec's `copy` that is missing
    (`optional` lists those that may be absent), and the check refuses a Godot project that uses `mpf-gmc` without the add-on.
-2. **`bundle_spec.json`** (or `game_package.json`, at the root or in `scripts/package/`) ([platforms/game-bundles.md](../../platforms/game-bundles.md), example in
-   `examples/bundle/bundle_spec.json`, JSON schema in `schema/game_package.schema.json`, checked by `mpf_godot bundle`): id, files, exclusions, `keep_on_update`, `requires`, `run`, `options`, `pup`, `platform_addons`.
-3. **Optionally `mpf-package.json`** at the repository root when the game is not built by the Stern SAM convention: `id` (what `bundle.json`
+2. **Facts, no command** (`"format": 2`, owner decision 2026-10-30): the bundle carries no start command, settings tool, install command or board script; the platform launches the game and applies its settings, profiles, PuP Pack and add-ons ([platforms/game-bundles.md](../../platforms/game-bundles.md), "The contract"). Format 1 below still builds for existing games until they move.
+3. **`bundle_spec.json`** (or `game_package.json`, at the root or in `scripts/package/`) ([platforms/game-bundles.md](../../platforms/game-bundles.md), example in
+   `examples/bundle/bundle_spec.json`, JSON schema in `schema/game_package.schema.json`, checked by `mpf_godot bundle`): id, files, exclusions, and the facts of format 2: `game_dir`, `mpf`, `dmd`, `pup` (`rom`, `manifest`), `addons`, `settings`, `profiles`, `platform_addons`, `keep_on_update`.
+4. **Optionally `mpf-package.json`** at the repository root when the game is not built by the Stern SAM convention: `id` (what `bundle.json`
    must say), `submodules`, `tools`, `disk_gb`, `min_python`, `setup` (commands, run in the clone), `build` (the command;
    `{python} {version} {target} {out} {platform}` are replaced), `env`, `target`, `publish_folder`, `needs`.
 
 The rule is enforced by `tests/test_no_game_content.py` (it fails on a game name, a recipes folder or a PuP Pack path outside `fixes/` and
 `platforms/`) and stated in [CONTRIBUTING.md](../../CONTRIBUTING.md). For plain MPF
-code use `make_bundle.py` above. `tests/test_build_game.py` runs the whole tool on a small game.
+code (an MPF + Godot folder with no build step) use `make_bundle.py` above. `tests/test_build_game.py` runs the whole tool on a small game.
 
 Not checked by the tool: that the game *runs*. **Always install the archive on a machine and watch it** (page upload, then on the machine
 `sh common/games/check_installed.sh 60`: the service must stay active for 60 s with no restart, else it prints the first errors). The rules
@@ -190,47 +197,44 @@ it the file name or sub-folder (starting with the game's `id`) decides.
 ## The bundle
 
 An archive (`tar -cJf`, `.tar.xz`) with **one top folder** of any name, holding `bundle.json` and, optionally, `SHA256SUMS` (checked with
-`sha256sum -c`; a `.sha256` next to the archive is checked too). `make_bundle.py` writes both. A bundle with `format` above 1 is
-refused by a page that does not know it.
+`sha256sum -c`; a `.sha256` next to the archive is checked too). `make_bundle.py` and `mpf_godot bundle` write both. A bundle with a
+`format` the page does not know is refused.
+
+**Format 2** (every new bundle): files and facts, no command. The keys, what the platform does with each, and what is refused are in
+[platforms/game-bundles.md](../../platforms/game-bundles.md#the-contract-bundlejson-format-2); `common/netconfig/mpf_contract.py` reads
+it. A bundle made by `make_bundle.py`:
 
 ```json
 {
-  "format": 1,
+  "format": 2,
   "id": "my-machine",              // lowercase letters, digits, . _ - (at most 64): the folder name and what --pup names
   "name": "My machine",            // shown on the page
   "version": "1.0",                // letters, digits, . _ + - (at most 64)
   "description": "text shown under the name",
   "icon": "game/icon.png",         // optional, relative to the bundle's folder
   "target": {"os": "linux", "arch": "all"},        // all | arm64 | x86_64 | arm64+x86_64: refused on other machines
-  "run": {"start": "mpf both", "cwd": "game", "needs_display": true},
-  "requires": {"env": {"GODOT": "path to Godot"}},  // variables it reads; a name ending in VENV gets the venv folder
-  "keep_on_update": ["game/data", "game/options.json"],
-  "options": {"tool": "scripts/package/bundle_options.py", "schema": "scripts/package/options.json"},
-  "pup": {"pack_dir": "pup_pack", "media_dir": "pup_media", "install": "python3 scripts/pup/pup_setup.py --pup-zip ZIP_PATH_OR_URL", "needs_restart": true},
+  "game_dir": "game",                              // project.godot and MPF's config/
+  "mpf": {"configs": ["config"], "hardware": {"virtual": ["hw_virtual"], "proc": ["hw_proc"]}},
+  "settings": {"schema": "settings.json"},         // the page's form; the Hardware setting picks a set of mpf.hardware
   "platform_addons": ["gde_gozen", "mpf-gmc"],     // add-ons taken from the platform (the same build for every game)
-  "gozen": {},                                      // what the bundle's own GoZen builds carry (v4l2m2m, zero_copy, vaapi...)
-  "profiles": {"apply": "python3 scripts/package/board_profile.py install"}   // once per install: settings that suit this board
+  "keep_on_update": ["game/data"]
 }
 ```
 
 | Field | Meaning |
 |---|---|
-| `run.start` | the command (default `python3 scripts/package/start.py`); `run.cwd` its folder, relative to the bundle (default the bundle); `needs_display` false: do not wait for the X session |
-| `run.check` | optional: a command (run in the bundle folder, `python3` meaning the game's venv Python) that exits 0 when the game can start, in a few seconds, with no display and nothing left running (`MPF_BUNDLE_CHECK=1` is set). The builder runs it on the extracted archive and the page before it installs; a failure refuses the bundle. `run.check_timeout`: seconds (default 90). Before it, both always check that every module the start script imports at the top of a file is in the bundle or importable by the game's Python (`common/netconfig/mpf_bundlecheck.py`) |
-| `run.game_args` | `true`: the board's Godot arguments (`MPF_GAME_ARGS` of `/etc/default/mpf-game`, for example `-- --rendering-driver opengl3`) are added to `run.start`. Default: only for a game started by `scripts/package/start.py` (which forwards them), never for another command (it would reject them). `make_bundle.py --game-args` sets it |
-| `keep_on_update` | paths (files or folders, relative to the bundle) carried from the previous version of the same game |
-| `options.tool` | a program that answers `list` (the settings schema as JSON), `get`, `set ID VALUE...`, `unset ID...`: the page builds its form from it. No tool, no settings card. The page never writes a game's files itself |
-| `pup` | present only if the game has a PuP Pack. `install` runs in the game's folder as the game user with `ZIP_PATH_OR_URL` replaced; `pack_dir` and `media_dir` are shared between versions |
-| `platform_addons` | add-ons (`gde_gozen`: GoZen binaries for the machine; `mpf-gmc`: the patched GMC) that the platform installs instead of the bundle shipping them |
+| `keep_on_update` | paths (files or folders, relative to the bundle) carried from the previous version of the same game; `.platform/` always is |
+| `platform_addons` | add-ons (`gde_gozen`: GoZen binaries for the machine; `mpf-gmc`: the patched GMC; `dmd_out`) that the platform installs instead of the bundle shipping them |
 | `monitor` | optional `{"layout": "game/monitor/monitor.yaml", "image": "game/monitor/playfield.jpg"}` (these are the defaults): the game's MPF Monitor layout, drawn by the page's *Switch monitor* tab (playfield, switches, lamps); without it the tab lists the switches |
-| `profiles.apply` | run once after the install; sets only what nobody set (the board's limits, see [platforms/README.md](../../platforms/README.md)) |
+
+**Format 1** (`run.start`, `run.check`, `options.tool`, `pup.install`, `profiles.apply`, `requires.env`): bundles built before
+2026-10-30 still install and start until they are rebuilt; nothing new is built in format 1, and a format 2 bundle with one of those
+keys is refused.
 
 ### What the base system gives a game, and what it must leave alone
 
-- **Environment**: `GODOT`, `MPF_GAME_VENV` (the Python environment with MPF), `DISPLAY`, and every variable ending in `_VENV` of
-  `/etc/default/mpf-game` (a platform can add `TF_VENV=...` for a game that reads that name). Names listed under `requires.env` that
-  end in `VENV` receive the venv folder too. A game that reads another name for its Python should say so in `requires.env`, or read
-  `MPF_GAME_VENV`, the standard name.
+- **Environment**: `GODOT`, `MPF_GAME_VENV` (the Python environment with MPF), `DISPLAY`, and the `MPF_*` names of the contract. The
+  names are fixed: a format 2 bundle cannot ask for others (`requires.env` is refused); format 1 bundles still get theirs.
 - **Board settings**: the platform's Godot `override.cfg` (audio buffer, mix rate, frame cap of the machine) is copied to
   `game/override.cfg` at every install: set the board's FPS and audio there, not by command-line arguments that a game may not accept.
 - **GMC is the platform's**: `platform_addons: ["gmc"]` is not a name; list **`"mpf-gmc"`** and the loader installs the platform's
@@ -240,8 +244,8 @@ refused by a page that does not know it.
   shipping its copy and does not list `mpf-gmc` (the platform's would overwrite them). The install is refused, not skipped, when
   the platform has no GMC.
 - **GoZen is the platform's**: a bundle that lists `platform_addons: ["gde_gozen"]` gets the platform's build (VAAPI on x86, V4L2 on a Pi 4,
-  NVMPI on a Jetson). Its PuP Pack install command **must not delete or replace `game/addons/gde_gozen`**; the loader puts the platform's
-  copy back after the pack install anyway. Keep the pack's videos as they are (H.264 plays on the GPU decoder): do not re-encode them to
+  NVMPI on a Jetson). The game ships no GoZen of its own, and the loader puts the platform's copy back after a
+  PuP Pack install anyway. Keep the pack's videos as they are (H.264 plays on the GPU decoder): do not re-encode them to
   another codec such as Theora, that forces software decoding.
 
 Anything else in `bundle.json` is the game's own: loaders ignore unknown keys.

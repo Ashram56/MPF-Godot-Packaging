@@ -4,7 +4,8 @@ The server address is the server only (https://host/…); the *folder* on it is 
 The server holds bundles (`*.tar.xz`, with an optional `*.tar.xz.sha256` beside) and PuP Packs (`<id>.pup.zip` or
 `<id>@<version>.pup.zip`: the name says which game a pack is for) either in the configured folder or in sub-folders of it (one per
 game). The page lists them (PROPFIND), installs the chosen one exactly like an upload (same checks, same new-version rules, see
-common/games/README.md) and remembers what it installed, so the list says *installed* or *changed on the server*.
+common/games/README.md) and remembers what it installed, so the list says *installed* or *changed on the server*. That record is `ota.json` (file name -> size|mtime), not the games
+really present: an install the check refused leaves no game but an old record can still say *installed*.
 
 The address, user and password are typed on the page and kept on this machine only, in `ota.json` of the state folder (mode 0600,
 on the data partition in read-only mode). Redirects are refused (the password must not follow one to another host).
@@ -143,8 +144,8 @@ def manifest_items(cfg, entries, installed, me):
     """Game items from the manifest: only the ones for this machine, each saying what it does to the installed games."""
     out = []
     for e in entries:
-        arch = e.get("arch", "all")
-        if arch not in ("all", me):
+        arches = {a.strip() for a in re.split(r"[+,/ ]", str(e.get("arch", "all"))) if a.strip()}     # "arm64+x86_64" is one entry for both
+        if "all" not in arches and me not in arches:
             continue
         have = [g for g in installed if g["id"] == e["id"]]
         names = {g["version"] for g in have}
@@ -174,26 +175,27 @@ def list_remote(cfg=None):
     manifest = read_manifest(cfg)
     done = cfg.get("installed", {})
     installed = G.installed_games()
+    listed = {i["file"] for i in manifest} if manifest else set()
     items = []
     for e in sorted(entries, key=lambda e: (e["group"], e["name"])):
         n = e["name"]
+        key = (e["group"] + "/" if e["group"] else "") + n
         if n.endswith(".tar.xz"):
-            if manifest is not None:
-                continue          # a manifest says which bundles are offered
-            kind = "game"
+            if key in listed:
+                continue          # the manifest already offers it, with its version
+            kind = "game"         # an archive the manifest does not list is offered too: any game on the server can be installed
         elif n.lower().endswith(".zip"):
             kind = "pup"
         else:
             continue
         compatible = not ("linux-" in n and kind == "game" and not n.endswith((f"linux-{me}.tar.xz", "linux-all.tar.xz")))
-        key = (e["group"] + "/" if e["group"] else "") + n
         stamp = f"{e['size']}|{e['mtime']}"
         target = next((g for g in installed if n.startswith(g["id"] + "-") or n.startswith(g["id"] + "@")
                        or (e["group"] and e["group"].lower() == g["id"].lower())), None) if kind == "game" else None
         items.append({"key": key, "for": (target["name"] + " " + target["version"]) if target else "", "name": n, "group": e["group"], "kind": kind, "size": e["size"], "mtime": e["mtime"], "url": e["url"],
                       "sha_url": e["url"] + ".sha256" if (e["group"], n + ".sha256") in names else "",
-                      "compatible": compatible, "installed": key in done, "loose": not e["group"],
-                      "changed": key in done and done[key] != stamp})
+                      "compatible": compatible, "installed": key in done and (kind != "game" or target is not None), "loose": not e["group"],
+                      "changed": key in done and done[key] != stamp and (kind != "game" or target is not None)})
     if manifest is not None:
         items = manifest_items(cfg, manifest, installed, me) + items
     return items

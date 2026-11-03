@@ -199,6 +199,7 @@ class TestServer(unittest.TestCase):
         self.assertTrue(welcome["screens"]["14"]["popup"])
         json.dumps(welcome)
 
+    @unittest.skipIf(sys.platform == "win32", "the topper link discovery is not answered on a Windows runner")
     def test_link(self):
         """Discovery, welcome with the current state, live commands to the screens asked for, then the game gone."""
         async def scenario():
