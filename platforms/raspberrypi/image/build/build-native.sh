@@ -16,7 +16,13 @@
 #       mpf    : MPF + Godot + GMC installed by install/install_linux.sh from this repository into
 #                /home/pi/MPF-Godot; automatic login on tty1 and startx (needs video and x11, added when missing)
 #   (Wi-Fi/SSH: edit mpf-network.txt on the boot partition, or use http://<ip>:8080; see common/netconfig/README.md)
-#   ROOT_PAD_MB=1024           free space left in the root filesystem of the image (grown at first boot anyway)
+#   ROOT_PAD_MB=1024           free space left in the root filesystem of the image (grown at first boot anyway; with READONLY=1 it
+#                              is only the room for a maintenance session: apt upgrade, a kernel)
+#   READONLY=1                 production mode (default): root and boot partition read-only, logs in RAM, one small read/write
+#                              partition "mpfdata" (settings, scores, games, Wi-Fi, SSH keys) made at the first boot in the free
+#                              space after the root partition (the rest of the card). READONLY=0: an ordinary writable image whose
+#                              root grows at first boot. common/readonly/README.md; the page on port 8080 or
+#                              `sudo mpf-mode maintenance` (or MODE=maintenance in mpf-network.txt) makes it writable
 # Output: $WORK/out/rpi4-debian13-sd.img.xz and .sha256
 
 set -euo pipefail
@@ -31,6 +37,7 @@ IMG_NAME="rpi4-debian13-sd.img"
 PI_PASSWORD="${PI_PASSWORD:-raspberry}"
 EXTRAS="${EXTRAS-video x11 mpf}"
 ROOT_PAD_MB="${ROOT_PAD_MB:-1024}"
+READONLY="${READONLY:-1}"
 FW_MB=256
 REPO_ROOT="$(cd "$KIT/../../../.." && pwd)"
 
@@ -162,13 +169,15 @@ display_auto_detect=1
 
 dtparam=audio=on
 CFG
-echo "console=serial0,115200 console=tty1 root=LABEL=rootfs rootfstype=ext4 fsck.repair=yes rootwait net.ifnames=0 quiet" > "$FWDIR/cmdline.txt"
+echo "console=serial0,115200 console=tty1 root=LABEL=rootfs rootfstype=ext4 fsck.repair=yes rootwait net.ifnames=0 snd_bcm2835.enable_headphones=1 quiet$([ "$READONLY" = 1 ] && echo ' ro')" > "$FWDIR/cmdline.txt"
 for f in kernel8.img initramfs8 start4.elf fixup4.dat bcm2711-rpi-4-b.dtb overlays/vc4-kms-v3d.dtbo; do
     [ -s "$FWDIR/$f" ] || { echo "missing /boot/firmware/$f"; ls -la "$FWDIR"; exit 1; }
 done
 
-install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
-install -m 644 "$KIT/files/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
+if [ "$READONLY" != 1 ]; then   # a read-only image keeps its root as built: mpf-persist makes the data partition in the free space instead
+    install -m 755 "$KIT/files/resizerootfs.sh" "$R/usr/local/bin/resizerootfs.sh"
+    install -m 644 "$KIT/files/resizerootfs.service" "$R/etc/systemd/system/resizerootfs.service"
+fi
 
 in_chroot "sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen >/dev/null && update-locale LANG=en_US.UTF-8"
 
@@ -194,7 +203,8 @@ chmod 600 "$WPA"
 # Wi-Fi power saving (brcmfmac enables it) made the latency 170 ms and more to the gateway: off for good
 mkdir -p "$R/etc/systemd/system/wpa_supplicant@wlan0.service.d"
 printf '[Service]\nExecStartPost=-/usr/sbin/iw dev wlan0 set power_save off\n' > "$R/etc/systemd/system/wpa_supplicant@wlan0.service.d/power-save-off.conf"
-in_chroot "systemctl enable resizerootfs.service systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
+[ "$READONLY" != 1 ] && in_chroot "systemctl enable resizerootfs.service >/dev/null 2>&1"
+in_chroot "systemctl enable systemd-timesyncd ssh systemd-networkd systemd-resolved wpa_supplicant@wlan0.service >/dev/null 2>&1"
 in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 
 # Wi-Fi / SSH setup shared with the other images (common/netconfig): text file on the boot partition read at
@@ -202,16 +212,31 @@ in_chroot "systemctl disable wpa_supplicant.service >/dev/null 2>&1 || true"
 in_chroot "apt-get install -y -qq python3 hostapd dnsmasq-base"
 in_chroot "systemctl disable hostapd >/dev/null 2>&1 || true; systemctl mask hostapd >/dev/null 2>&1 || true"
 NC="$REPO_ROOT/common/netconfig"
-install -m 755 "$NC/mpf_netconfig.py" "$R/usr/local/bin/mpf_netconfig.py"
+install -m 755 "$NC"/mpf_*.py "$R/usr/local/bin/"
 install -m 644 "$NC"/mpf-netconfig-*.service "$NC/mpf-game.service" "$R/etc/systemd/system/"
 install -m 644 "$NC/mpf-network.txt.template" "$FWDIR/mpf-network.txt"
+CAB="$KIT/../../cabinet"   # platforms/raspberrypi/cabinet: the measured Pi 4 settings (platforms/raspberrypi.md)
 printf 'MPF_NETCONFIG_FILE=/boot/firmware/mpf-network.txt\nMPF_USER=pi\nMPF_WLAN=wlan0\nMPF_GOZEN_SO=/home/pi/MPF-Godot/addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so\n' > "$R/etc/default/mpf-netconfig"
-# Game bundle uploaded from the web page (Tron-Legacy-MPF docs/bundle.md): GODOT / TRON_VENV point at what the base system provides
+# ALSA reports 0 output latency while it holds 58-93 ms: the video clock subtracts it. GOZEN_HWDEC=1 (hardware decoder
+# with zero-copy) is NOT set: it needs the fixed bcm2835-codec module, which the image does not carry yet.
+printf 'GOZEN_AUDIO_LATENCY=0.087\n' >> "$R/etc/default/mpf-netconfig"
+# Game bundle uploaded from the web page (common/games/README.md): GODOT / MPF_GAME_VENV point at what the base system provides.
+# The official Godot 4.6.3 crashes with --render-thread separate on GLES (fixes/godot/gles-separate-render-thread-crash.md,
+# patch in build/godot/): without a patched build the launcher keeps --render-thread safe.
 mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"
-printf 'MPF_GAME_ARGS=-- --rendering-driver opengl3\n' > "$R/etc/default/mpf-game"
-in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service >/dev/null 2>&1"
+printf 'MPF_GAME_ARGS=-- --rendering-driver opengl3 --max-fps 30 --audio-output-latency 60\nDISPLAY=:0\n' > "$R/etc/default/mpf-game"
+# game sound on the 3.5 mm jack, plain hw through plug (dmix stalls on snd_bcm2835)
+install -m 644 "$CAB/asound.conf" "$R/etc/asound.conf"
+in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service mpf-netconfig-inbox.service >/dev/null 2>&1"
 
-in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
+in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty,dialout -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
+if [ "$READONLY" = 1 ]; then
+    . "$REPO_ROOT/common/readonly/install-readonly.sh"
+    # ~/.cache and Xorg's log folder are rewritten at every session: user-owned RAM disks (a read-only root would end the X login at once)
+    mpf_readonly_install "$R" pi /boot/firmware "" "/home/pi/.cache:128m /home/pi/.local/share/xorg:8m"
+    # the game starts at power-on (the page's "start at power-on" switch toggles this link in a short writable window)
+    in_chroot "systemctl enable mpf-game.service >/dev/null 2>&1"
+fi
 
 ##############################################################################
 log "3/6 Optional feature groups: ${EXTRAS:-none}"
@@ -226,17 +251,14 @@ if [ -n "$EXTRAS" ]; then
         in_chroot "apt-get install -y -qq xserver-xorg-core xserver-xorg-input-libinput xinit x11-xserver-utils xauth openbox xterm libpam-systemd \
             mesa-vulkan-drivers libgl1-mesa-dri libegl1 libvulkan1 libxcursor1 libxinerama1 libxrandr2 libxi6 libxext6 libxrender1 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3"
         printf 'allowed_users=console\nneeds_root_rights=auto\n' > "$R/etc/X11/Xwrapper.config"
-        cat > "$R/home/pi/.xinitrc" <<'XRC'
-#!/bin/sh
-# Edit to taste. Extend the desktop across all connected outputs (HDMI-1 + HDMI-2), left to right:
-prev=""
-for out in $(xrandr | awk '/ connected/ {print $1}'); do
-    if [ -z "$prev" ]; then xrandr --output "$out" --auto --primary; else xrandr --output "$out" --auto --right-of "$prev"; fi
-    prev="$out"
-done
-exec openbox-session
-XRC
-        chmod 755 "$R/home/pi/.xinitrc"
+        # one screen, the game's (HDMI-2 at 1920x1080, else HDMI-1): a second X output costs a copy per frame
+        install -m 755 "$CAB/xinitrc" "$R/home/pi/.xinitrc"
+        # read-only production mode: the X server's log in RAM (a user session's Xorg writes ~/.local/share/xorg/Xorg.0.log and
+        # stops at once when it cannot: the login would end and restart every 2 s). xinit exists only now, so it is written here
+        if [ "$READONLY" = 1 ]; then
+            printf '#!/bin/sh\n\nexec /usr/bin/X -nolisten tcp -logfile /tmp/Xorg.0.log "$@"\n' > "$R/etc/X11/xinit/xserverrc"
+            chmod 755 "$R/etc/X11/xinit/xserverrc"
+        fi
     fi
     if has mpf; then
         # The repository's own Linux installer, run as the cabinet user in the chroot (Python 3.11 via uv, MPF,
@@ -249,6 +271,10 @@ XRC
             tar -C "$REPO_ROOT" --exclude=.git --exclude=.cache --exclude=.venv --exclude=toolchain \
                 --exclude='platforms/*/image/build/work' -cf - . | tar -C "$R/home/pi/MPF-Godot" -xf -
         fi
+        # dmd_bridge for a ZeDMD (unmodified libzedmd ed69d49, libgpiod, libserum): where the setup page looks for it
+        (cd "$KIT/files" && sha256sum -c dmd_bridge-aarch64-libzedmd-ed69d49.tar.gz.sha256)
+        mkdir -p "$R/home/pi/MPF-Godot/native/bin"
+        tar -xzf "$KIT/files/dmd_bridge-aarch64-libzedmd-ed69d49.tar.gz" -C "$R/home/pi/MPF-Godot/native/bin"
         in_chroot "chown -R pi:pi /home/pi"
         in_chroot "apt-get install -y -qq git build-essential cmake pkg-config"
         # sudo cannot work in the chroot (qemu-user binfmt without the C flag ignores setuid), so the installer
@@ -257,11 +283,18 @@ XRC
         in_chroot "cd /home/pi/MPF-Godot && bash install/install_linux.sh --yes --no-setup --xvfb"
         rm -rf "$R/root/.local" "$R/root/.cache"   # root's copy of uv / Python 3.11, pi gets its own
         in_chroot "su - pi -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
+        # Base system a game bundle needs (Tron-Legacy-MPF docs/bundle.md "Install on a base system"): a venv with MPF,
+        # ffmpeg with libtheora (installed above), and Godot from the toolchain. /etc/default/mpf-game names them.
+        in_chroot "apt-get install -y -qq python3-venv python3-dev"
+        in_chroot "python3 -m venv /opt/tron-venv && /opt/tron-venv/bin/pip install -q mpf==0.80.1 pillow fonttools psutil && chown -R pi:pi /opt/tron-venv"
+        GODOT_BIN="$(in_chroot "ls /home/pi/MPF-Godot/toolchain/godot/Godot_v*arm64 2>/dev/null | head -1" | tail -1)"
+        printf 'MPF_GAME_VENV=/opt/tron-venv\n' >> "$R/etc/default/mpf-game"
+        [ -n "$GODOT_BIN" ] && printf 'GODOT=%s\n' "$GODOT_BIN" >> "$R/etc/default/mpf-game"
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
         printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin pi --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
         cat >> "$R/home/pi/.profile" <<'PROF'
 # Start X on the first console (automatic login); remove this to get a plain shell
-if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then exec startx; fi
+if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then exec startx -- -nocursor; fi
 PROF
     fi
     in_chroot "chown -R pi:pi /home/pi"
