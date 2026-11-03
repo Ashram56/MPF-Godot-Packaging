@@ -131,6 +131,35 @@ class Platform(Base):
         self.assertEqual(state, "done", msg)
         return os.path.join(C.GAMES, "demo@1.0")
 
+    def test_screens_card_owns_the_monitor_settings(self):
+        import mpf_screens as SC
+        schema = dict(SCHEMA, options=SCHEMA["options"] + [
+            {"id": "pup.dmd.screen", "group": "d", "label": "DMD monitor", "type": "integer", "min": 0, "max": 7, "default": 0,
+             "target": {"ini": "game/pup.local.cfg", "section": "dmd", "key": "screen"}}])
+        game = self.game({"screens": [{"id": "dmd", "label": "DMD", "setting": "pup.dmd.screen"}]},
+                         {"settings.json": json.dumps(schema).encode()})
+        b = G.read_bundle(game)
+        self.assertEqual(G.screens_state(game), [{"id": "dmd", "label": "DMD", "index": 0}])
+        G.screen_set(game, "dmd", "1")
+        self.assertEqual(G.screens_state(game)[0]["index"], 1)
+        self.assertNotIn("pup.dmd.screen", [o["id"] for o in G.settings_schema(game)["options"]])     # not in the generic form
+        G.settings_save(game, {"o.dmd.mode": "classic"})                                                # saving it does not reset the screen
+        self.assertEqual(G.screens_state(game)[0]["index"], 1)
+        with self.assertRaises(ValueError):
+            G.screen_set(game, "nope", 1)
+        with self.assertRaises(ValueError):
+            G.screen_set(game, "dmd", 9)
+        self.assertEqual(K.problems(b, game), [])
+        self.assertIn("integer setting", " ".join(K.problems(dict(b, screens=[{"id": "x", "label": "X", "setting": "dmd.mode"}]), game)))
+        self.assertIn("`screens` must be", " ".join(K.problems(dict(b, screens=["x"]))))
+
+    def test_parse_xrandr(self):
+        import mpf_screens as SC
+        text = ("Screen 0: minimum 8 x 8, current 3840 x 1080\nHDMI-1 connected 1920x1080+1920+0 (normal left) 527mm x 296mm\n   1920x1080 60.00*+\n"
+                "DP-1 connected primary 1920x1080+0+0 (normal left) 527mm x 296mm\nVGA-1 disconnected (normal left)\n")
+        got = SC.parse_xrandr(text)
+        self.assertEqual([(s["name"], s["primary"], s["x"]) for s in got], [("DP-1", True, 0), ("HDMI-1", False, 1920)])
+
     def test_missing_declared_file_is_refused(self):
         state, msg = self.install(extra=V2, files={k: v for k, v in FILES.items() if k != "game/config/hw_proc.yaml"})
         self.assertEqual(state, "error")

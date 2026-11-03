@@ -14,6 +14,8 @@ A format 2 `bundle.json` holds no command and names no script to run: no `run`, 
   `MPF_PUP_PACK` and its own `pup.manifest` (a list of the pack's files and how to show them, never a file of the pack);
 - add-ons (DMD only): folders of the bundle listed in `addons`, each switched on by a setting, passed in `MPF_ADDONS`; the setting
   `dmd.look` is the look chosen on the page's DMD card (`"setting": "dmd.look", "when": "hd"`);
+- `screens`: [{"id", "label", "setting"}], the game's windows; `setting` is the integer option holding the window's monitor index. The page's
+  "Screens" card sets it (mpf_screens.py) and the generic settings form no longer shows it;
 - `profiles.<board>.dmd_looks`: the looks of `dmd.looks` this board may use (a Pi 4: `["classic"]`).
 """
 import configparser
@@ -67,6 +69,10 @@ def problems(b, root=None):
             if reserved_arg(a):
                 bad.append(f"`profiles.{board}.godot_args` uses `{a}`: that name belongs to the platform's DMD output ({', '.join(RESERVED_ARGS)})")
     bad += dmd_problems(b)
+    scr = b.get("screens")
+    if scr is not None:
+        if not isinstance(scr, list) or not all(isinstance(w, dict) and w.get("id") and w.get("setting") for w in scr):
+            bad.append("`screens` must be a list of {id, label, setting}: the windows of the game and the integer setting that holds each one's monitor")
     if not b.get("game_dir"):
         bad.append("`game_dir` is missing: the folder with project.godot and MPF's config/")
     for a in b.get("addons") or []:
@@ -80,6 +86,10 @@ def problems(b, root=None):
                 if a and reserved_arg(a):
                     bad.append(f"setting `{o.get('id')}` passes `{a}`: that name belongs to the platform's DMD output "
                                f"({', '.join(RESERVED_ARGS)}); give the game's own option another name")
+            ids = {o.get("id"): o for o in schema(root, b).get("options", [])} if (b.get("settings") or {}).get("schema") else {}
+            for w in (b.get("screens") or []) if isinstance(b.get("screens"), list) else []:
+                if isinstance(w, dict) and w.get("setting") and (w["setting"] not in ids or ids[w["setting"]].get("type") != "integer"):
+                    bad.append(f"`screens`: `{w['setting']}` is not an integer setting of the schema")
         except ValueError as e:
             bad.append(str(e))
     return bad
