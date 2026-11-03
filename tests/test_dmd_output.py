@@ -131,6 +131,15 @@ class DmdOutput(Base):
         with self.assertRaises(ValueError):
             D.set_output(look="fancy")
 
+    def test_board_limits_the_looks_and_an_addon_follows_the_look(self):
+        import mpf_contract as K
+        b = {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"]}, "look": "hd"}, "profiles": {"rpi4": {"dmd_looks": ["classic"]}}}
+        s = D.load()
+        self.assertEqual(D.effective_look(s, b, "lcd", "rpi4"), "classic")
+        self.assertEqual(D.effective_look(s, b, "lcd", "x86"), "hd")
+        self.assertEqual(K.problems(dict(b, game_dir="game")), [])
+        self.assertEqual(list(D.allowed_looks(b, "rpi4")), ["classic"])
+
     def test_preview_image(self):
         self.addCleanup(setattr, D, "PREVIEW_PNG", D.PREVIEW_PNG)
         D.PREVIEW_PNG = os.path.join(self.t.name, "p.png")

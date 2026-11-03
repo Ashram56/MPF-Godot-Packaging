@@ -252,10 +252,21 @@ def bundle_looks(bundle):
     return out
 
 
-def effective_look(s, bundle, out):
+def allowed_looks(bundle, board_name=None):
+    """bundle_looks narrowed to the board's limit (`profiles.<board>.dmd_looks`, e.g. a Pi 4: ["classic"])."""
+    looks = bundle_looks(bundle)
+    try:
+        import mpf_contract as K
+        allowed = (K.profile(bundle, board_name) or {}).get("dmd_looks")
+    except Exception:
+        allowed = None
+    return {k: v for k, v in looks.items() if k in allowed} if isinstance(allowed, list) else looks
+
+
+def effective_look(s, bundle, out, board_name=None):
     """The look that runs: only an LCD shows more than the exact 128x32 classic dots (PIN2DMD, ZeDMD with or without Serum, the page's
     preview of those). On an LCD: the setting if the bundle offers it, else its `dmd.looks` default (`dmd.look`), else its first look."""
-    looks = bundle_looks(bundle)
+    looks = allowed_looks(bundle, board_name)
     if not looks:
         return ""
     if out != "lcd":
@@ -265,7 +276,7 @@ def effective_look(s, bundle, out):
 
 
 def look_args(s, bundle, out):
-    return bundle_looks(bundle).get(effective_look(s, bundle, out), [])
+    return allowed_looks(bundle).get(effective_look(s, bundle, out), [])
 
 
 def plan(game_id, bundle, detected=None):

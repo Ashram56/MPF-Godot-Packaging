@@ -12,7 +12,9 @@ A format 2 `bundle.json` holds no command and names no script to run: no `run`, 
 - board profiles: `profiles.<board>` = {"limits": {option: [allowed values]}, "defaults": {option: value}}, the board is detected here;
 - PuP Pack: the author's zip, unpacked as it is into the library and linked at `<game>/.platform/pup`; the game reads it from
   `MPF_PUP_PACK` and its own `pup.manifest` (a list of the pack's files and how to show them, never a file of the pack);
-- add-ons (DMD only): folders of the bundle listed in `addons`, each switched on by a setting, passed in `MPF_ADDONS`.
+- add-ons (DMD only): folders of the bundle listed in `addons`, each switched on by a setting, passed in `MPF_ADDONS`; the setting
+  `dmd.look` is the look chosen on the page's DMD card (`"setting": "dmd.look", "when": "hd"`);
+- `profiles.<board>.dmd_looks`: the looks of `dmd.looks` this board may use (a Pi 4: `["classic"]`).
 """
 import configparser
 import json
@@ -58,8 +60,8 @@ def problems(b, root=None):
     if "env" in (b.get("requires") or {}):
         bad.append("`requires.env` is not allowed: the platform's variables have fixed names (MPF_GAME_VENV, GODOT, MPF_*)")
     for board, p in (b.get("profiles") or {}).items():
-        if not isinstance(p, dict) or set(p) - {"limits", "defaults", "godot_args"}:
-            bad.append(f"`profiles.{board}` may only hold limits, defaults and godot_args (data, no command)")
+        if not isinstance(p, dict) or set(p) - {"limits", "defaults", "godot_args", "dmd_looks"}:
+            bad.append(f"`profiles.{board}` may only hold limits, defaults, godot_args and dmd_looks (data, no command)")
     for board, p in (b.get("profiles") or {}).items():
         for a in (p.get("godot_args") or []) if isinstance(p, dict) else []:
             if reserved_arg(a):
@@ -295,6 +297,8 @@ def plan(game, b, board_name=None):
     if b.get("pup") and os.path.isfile(os.path.join(pup, "triggers.pup")):
         env["MPF_PUP_PACK"] = os.path.realpath(pup)
     on = []
+    import mpf_dmd as D          # the DMD look the page chose is the value of the setting "dmd.look" (an add-on can depend on it)
+    values = dict(values, **{"dmd.look": D.effective_look(D.load(), b, D.resolve(), board_name)})
     for a in b.get("addons") or []:
         want = a.get("when", True)
         if not a.get("setting") or values.get(a["setting"]) == want:

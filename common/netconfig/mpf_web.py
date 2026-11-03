@@ -127,7 +127,7 @@ def dmd_state():
         if g["id"] not in best or g["active"] or (not best[g["id"]]["active"] and g["mtime"] > best[g["id"]]["mtime"]):
             best[g["id"]] = g
     act = next((g for g in best.values() if g["active"]), None) or next(iter(best.values()), None)
-    looks = DMD.bundle_looks(act["bundle"]) if act else {}
+    looks = DMD.allowed_looks(act["bundle"]) if act else {}
     return {"output": s["output"], "look": s["look"], "looks": list(looks),
             "lookNow": DMD.effective_look(s, act["bundle"], "lcd") if act else "", "game": act["name"] if act else "",
             "live": s["output"] in ("auto", "lcd", "web"), "color": s["color"], "bridge": bool(DMD.bridge_dir()), "library": DMD.library(),
