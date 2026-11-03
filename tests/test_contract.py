@@ -50,6 +50,18 @@ class Contract(unittest.TestCase):
             self.assertIn(word, bad)
         self.assertEqual(K.problems(v2), [])
 
+    def test_dmd_looks_and_reserved_names(self):
+        v2 = {k: v for k, v in V2.items() if v is not None}
+        ok = dict(v2, dmd={"looks": {"classic": ["--dmd=classic"], "hd": ["--dmd=hd", "--dmd-feed=hd"]}, "look": "hd"})
+        self.assertEqual(K.problems(ok), [])
+        for dmd, word in (({"looks": {"fancy": []}}, "fancy"), ({"looks": {"hd": "x"}}, "list of strings"),
+                          ({"looks": {"hd": ["--dmd-size=1x1"]}}, "--dmd-size"), ({"looks": {"hd": ["--zedmd"]}}, "--zedmd"),
+                          ({"looks": {"hd": []}, "look": "classic"}, "default"), ({"looks": []}, "object")):
+            self.assertIn(word, " ".join(K.problems(dict(v2, dmd=dmd))), dmd)
+        bad = dict(v2, profiles={"rpi4": {"godot_args": ["--dmd-preview=/x"]}})
+        self.assertIn("--dmd-preview", " ".join(K.problems(bad)))
+        self.assertTrue(K.reserved_arg("--dmd-size=1024x256") and not K.reserved_arg("--dmd-window=1024x256"))
+
     def test_builder_accepts_facts_and_refuses_commands(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
         from mpf_godot import bundle
