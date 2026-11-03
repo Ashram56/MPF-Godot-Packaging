@@ -727,7 +727,9 @@ def assign_pup(folder, name):
         raise JobError("this pack is not in the library")
     dirs = sorted(pup_dirs(b))
     lib = os.path.join(C.PUPS, "installed", _pup_key(name, b))
-    if not os.path.isdir(lib) or not os.listdir(lib):
+    # the library folder of a pack is per (pack, game id): it can already hold the copy a game of another bundle format made, which has
+    # not the folders this bundle links (format 1: pup_pack/<rom>, format 2: .platform/pup). Only a copy that has them is reused.
+    if any(not os.path.isdir(os.path.join(lib, _pup_store_name(d))) for d in dirs):
         if b["pup"].get("extract_only") or K.is_v2(b):
             job_set(state="running", msg="Unpacking the PuP Pack (a few minutes)")
             os.makedirs(lib, exist_ok=True)
@@ -751,6 +753,9 @@ def assign_pup(folder, name):
             _drop(os.path.join(game, d))
             os.makedirs(os.path.dirname(os.path.join(game, d)), exist_ok=True)
             os.symlink(stored, os.path.join(game, d))
+    unlinked = [d for d in dirs if not os.path.islink(os.path.join(game, d))]
+    if unlinked:         # never answer "assigned" when the game got no link
+        raise JobError("the pack was unpacked but not linked into the game: " + ", ".join(unlinked))
     sh("chown", "-R", f"{pwd.getpwnam(C.USER).pw_uid}:{pwd.getpwnam(C.USER).pw_gid}", lib)
     if options_tool(game):
         tool(game, "set", "pup.enabled", "true")
