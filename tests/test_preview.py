@@ -60,3 +60,15 @@ def test_audio_prepare_uses_tee(tmp_path, monkeypatch):
     pv.save(True, False)
     AU.prepare()
     assert "mpf_multi" not in (tmp_path / "run" / "override.conf").read_text()
+
+
+def test_preview_windows_skip_disabled_and_merge_same_monitor(tmp_path, monkeypatch):
+    load(tmp_path, monkeypatch)
+    import mpf_web
+    wins = [{"id": "backglass", "label": "Backglass", "index": 0, "enabled": True},
+            {"id": "dmd", "label": "DMD", "index": 0, "enabled": True},
+            {"id": "topper", "label": "Topper", "index": 0, "enabled": False},
+            {"id": "extra", "label": "Extra", "index": 0, "enabled": True},
+            {"id": "side", "label": "Side", "index": 1, "enabled": True}]
+    monkeypatch.setattr(mpf_web.G, "screens_state", lambda path: wins)
+    assert mpf_web.preview_windows({"path": "x"}) == [("backglass", "Backglass + Extra", 0), ("side", "Side", 1)]

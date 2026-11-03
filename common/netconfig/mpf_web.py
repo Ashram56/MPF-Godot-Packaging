@@ -139,9 +139,17 @@ def dmd_state():
 
 
 def preview_windows(game=None):
-    """[(id, label, screen index)] to capture: the windows the bundle declares (its `screens`, but not the DMD, drawn from the DMD's pictures);
+    """[(id, label, screen index)] to capture: the windows the bundle declares (its `screens`, but not the DMD, drawn from the DMD's pictures, nor a window its `enabled` setting turns off; windows on the same monitor make one picture);
     a game that declares none gets every connected screen, so the backglass and the topper show anyway."""
-    wins = [(w["id"], w["label"], w["index"]) for w in (G.screens_state(game["path"]) if game else []) if w["id"] != "dmd"]
+    wins = []
+    for w in (G.screens_state(game["path"]) if game else []):
+        if w["id"] == "dmd" or not w.get("enabled", True):
+            continue
+        same = next((x for x in wins if x[2] == w["index"]), None)      # windows on one monitor are one picture
+        if same:
+            wins[wins.index(same)] = (same[0], same[1] + " + " + w["label"], same[2])
+        else:
+            wins.append((w["id"], w["label"], w["index"]))
     if wins:
         return wins
     return [(f"screen{x['index']}", f"{x['name']} {x['width']}x{x['height']}", x["index"]) for x in detected_screens()]
