@@ -348,6 +348,12 @@ def prepare():
         os.makedirs(ALSA_RUN, exist_ok=True)
         path = os.path.join(ALSA_RUN, "alsa.conf")
         entry, over = alsa_text(pcm)
+        try:
+            import mpf_preview as PV
+            if PV.want_tee():       # the page's sound preview: the output is copied to the snd-aloop loopback
+                over = PV.tee_conf(pcm) + over.split("}\n", 1)[1]
+        except Exception as e:      # never stops the game's sound
+            print(f"audio: preview tee: {e}", file=sys.stderr)
         for name, text in (("override.conf", over), ("alsa.conf", entry)):
             with open(os.path.join(ALSA_RUN, name), "w") as f:
                 f.write(text)
