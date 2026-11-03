@@ -524,7 +524,7 @@ header{display:flex;align-items:center;gap:14px;padding:18px clamp(14px,4vw,40px
 .logo svg{width:24px;height:24px;stroke:#fff}
 h1{font-size:20px;margin:0;letter-spacing:.3px;white-space:nowrap}a{color:var(--accent)}input[type=file]{padding:6px}input[type=file]::file-selector-button{font:inherit;margin-right:10px;border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:8px;padding:5px 10px;cursor:pointer}header small{color:var(--dim);display:block;font-size:12.5px}
 .sp{flex:1}.lang{width:auto;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font:inherit}
-main{max-width:980px;margin:0 auto;padding:6px clamp(14px,4vw,40px) 60px;display:grid;gap:22px}
+main{max-width:980px;transition:max-width .2s;margin:0 auto;padding:6px clamp(14px,4vw,40px) 60px;display:grid;gap:22px}
 h2{font-size:13px;letter-spacing:1.6px;text-transform:uppercase;color:var(--dim);margin:6px 2px 10px;display:flex;align-items:center;gap:8px}
 h2 svg{width:16px;height:16px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:14px}
@@ -571,6 +571,7 @@ dialog.wide{max-width:min(980px,96vw)}.sws{display:grid;grid-template-columns:re
 .sw.on{background:var(--ok);border-color:var(--ok);color:#04210f;font-weight:600}.sw small{display:block;opacity:.7;font-size:11px}
 #monCard.fsx{position:fixed;inset:0;z-index:60;border-radius:0;overflow:auto;background:var(--bg);padding:10px}#monCard.fsx .pfw img{max-width:none}#monCard.fsx #monPf{overflow:hidden}
 #monCard.fsx #scList,#monCard.fsx #monLogBox,#monCard.fsx h2,#monCard.fsx .muted[data-t=monHint]{display:none}
+main.wide{max-width:min(1800px,98vw)}
 .pfw{position:relative;display:inline-block;line-height:0}.pfw img{height:calc(var(--z,1)*min(80vh,860px));max-width:100%;width:auto;display:block;border-radius:10px}
 .sp{position:absolute;transform:translate(-50%,-50%);aspect-ratio:1;min-width:12px;touch-action:none;user-select:none;-webkit-user-select:none;border-radius:50%;border:1.5px solid rgba(255,255,255,.6);background:rgba(0,0,0,.4);color:#fff;display:grid;place-items:center;font:bold 10px/1 sans-serif;transition:background .08s}
 .sp.switch{border-radius:3px;cursor:pointer}.sp.switch.on{background:#3ddc97;border-color:#fff;box-shadow:0 0 8px #3ddc97}
@@ -813,7 +814,7 @@ $('#otaCheck').onclick=async()=>{const b=$('#otaCheck');b.disabled=true;$('#otaL
 $('#otaList').onclick=async e=>{const b=e.target.closest('button[data-k]');if(!b)return;b.disabled=true;await post('/api/ota/install',{key:b.dataset.k});poll()};
 async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);packs(S);dmdRender(S);otaFill(S.ota)}catch(e){}}
 const TABS=['games','install','config','monitor'];let TAB=(location.hash||'').slice(1);if(!TABS.includes(TAB))TAB='games';
-function showTab(){dmdLive();if(TAB==='monitor')monStart();else monStop();document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('hide',e.dataset.tab!==TAB));document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.go===TAB))}
+function showTab(){dmdLive();document.querySelector('main').classList.toggle('wide',TAB==='monitor');if(TAB==='monitor')monStart();else monStop();document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('hide',e.dataset.tab!==TAB));document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.go===TAB))}
 $('#tabs').onclick=e=>{const b=e.target.closest('button[data-go]');if(!b)return;TAB=b.dataset.go;history.replaceState(null,'','#'+TAB);showTab();if(TAB==='config'){savedList();audLoad()}};
 async function savedList(){try{const l=await (await fetch('/api/logs/saved')).json();$('#savedLogs').innerHTML=l.map(n=>`<a class="net" href="/api/logs/saved/${encodeURIComponent(n)}" download>${ico('disk')}<b class="grow">${esc(n)}</b></a>`).join('')}catch(e){}}
 $('#saveLogBtn').onclick=async()=>{const b=$('#saveLogBtn');b.disabled=true;await post('/api/logs/save',{});b.disabled=false;savedList()};
