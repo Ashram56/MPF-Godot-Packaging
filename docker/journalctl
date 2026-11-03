@@ -1,0 +1,5 @@
+#!/bin/bash
+# A stand-in for journalctl: the last lines of the game's log (-n N), whatever the unit.
+n=100; while [ $# -gt 0 ]; do [ "$1" = -n ] && n=$2; shift; done
+tail -n "$n" /var/log/mpf-game/service.log 2>/dev/null
+exit 0

@@ -1,0 +1,6 @@
+#!/bin/sh
+# What mpf-game.service does (Restart=always, RestartSec=10), for docker/systemctl. Runs in its own process group.
+while :; do
+    python3 /usr/local/bin/mpf_netconfig.py game
+    sleep 10
+done

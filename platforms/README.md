@@ -17,6 +17,7 @@ installer step by step, its options and every lesson learned (numbered "Findings
 | [godot-performance.md](godot-performance.md) | any slow target | GMC + Godot stalls, node pooling, a display drawn from data |
 | [video-playback.md](video-playback.md) | all | GDE GoZen and native video: switching, the Windows build, checking the decoder |
 | [local.md](local.md) | `python -m mpf_godot local` | a cabinet's game bundle installed and played on a Windows, macOS or Linux desktop (ZeDMD through libzedmd, Serum), same code as the image |
+| [../docker/README.md](../docker/README.md) | `docker compose up` | the whole platform (setup page on 8080, the game in a browser on 6080, software decoding, DMD web preview) in a container, to test a bundle on any PC or Mac without a cabinet |
 | [dmd_devices.md](dmd_devices.md) | `addons/dmd_out/`, `examples/dmd_devices/` | PIN2DMD and ZeDMD RGB LED DMDs, any OS (feeder: Linux, macOS) |
 | [pup-remote-topper.md](pup-remote-topper.md) | `mpf_godot/pup_remote/` | PuP screens on a Raspberry Pi (a topper): server for the game, agent and installer for the Pi |
 | [limits.md](limits.md) | none | what each platform cannot run, and how the settings page, the installer and each start enforce it |
