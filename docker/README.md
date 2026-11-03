@@ -58,9 +58,13 @@ docker run --rm -p 127.0.0.1:8080:8080 -p 127.0.0.1:6080:6080 --shm-size 1g -v m
 | `systemctl`, `journalctl` | stand-ins for the two commands the page's code calls |
 | `../docker-compose.yml` | ports, volume, options |
 
-## Checked
+## Checked (2026-11-03, cloud sandbox, Linux x86_64)
 
-The stand-in `systemctl` (start, stop, status, autostart), the page behind its password with the container's environment, and the
-shell scripts' syntax, on Linux x86_64. **Not checked**: the full image build and a game running in it (the cloud session that wrote
-this could not reach the package servers and Docker Hub); first thing to do on a PC: `docker compose up --build`, install a bundle, look at
-port 6080.
+- The image builds (about 10 minutes), the setup page answers on 8080 behind its password, noVNC on 6080.
+- Godot 4.6.3 draws on Mesa lavapipe ("Vulkan 1.3, Forward Mobile, llvmpipe"), GMC listens, MPF reaches attract mode.
+- A format 2 bundle made with `common/games/make_bundle.py` from `examples/minimal` was installed through the inbox, started and stopped
+  with the stand-in `systemctl`; the game runs as the `mpf` user.
+- `tests/test_docker.py`.
+
+**Not checked**: a real game bundle (Tron, Transformers), the DMD `web` preview with a Serum file, the frame rate on a PC, Docker
+Desktop on Windows and macOS (Apple silicon builds for arm64).

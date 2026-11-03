@@ -12,6 +12,8 @@ if [ ! -e $DATA/state/.container-init ]; then
     [ "${MPF_AUTOSTART:-1}" = 0 ] || touch $DATA/state/game.enabled
 fi
 
+# software Vulkan (Mesa lavapipe); the file is named after the CPU (lvp_icd.x86_64.json, lvp_icd.aarch64.json)
+export VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
 pids=()
 Xvfb :0 -screen 0 "${MPF_SCREEN:-1280x720x24}" -ac -nolisten tcp +extension GLX >/var/log/Xvfb.log 2>&1 & pids+=($!)
 for _ in $(seq 50); do [ -S /tmp/.X11-unix/X0 ] && break; sleep 0.2; done

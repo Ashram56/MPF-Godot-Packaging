@@ -13,7 +13,7 @@ RUN set -e; out=/opt/dmd_bridge; mkdir -p $out/lib /tmp/z /tmp/s \
  && bash /src/native/dmd_bridge/build.sh /tmp/z /tmp/z >/dev/null \
  && cp /tmp/z/dmd_bridge $out/ && cp -a /tmp/z/lib/. $out/lib/ \
  && bash /src/native/serum/build_libserum.sh /tmp/s >/dev/null \
- && cp /tmp/s/libserum*.so* $out/ 2>/dev/null || true; ls -R $out | head -30
+ && cp /tmp/s/libserum*.so* $out/; ls -R $out | head -30
 
 # ---- the platform
 FROM ${PYTHON_IMAGE}
@@ -45,7 +45,7 @@ PY
 ENV MPF_USER=mpf MPF_PLATFORM_DIR=/opt/MPF-Godot MPF_DMD_BRIDGE_DIR=/opt/dmd_bridge MPF_BOARD=x86 \
     MPF_NETCONFIG_FILE=/data/mpf-network.txt MPF_GAMES_DIR=/data/games MPF_STATE_DIR=/data/state MPF_UPLOAD_DIR=/data/uploads \
     MPF_PUP_DIR=/data/pups MPF_INBOX_DIR=/data/inbox MPF_SERUM_DIR=/data/serum MPF_GOZEN_NEEDS="" \
-    VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json LIBGL_ALWAYS_SOFTWARE=1 MPF_SCREEN=1280x720x24
+    LIBGL_ALWAYS_SOFTWARE=1 MPF_SCREEN=1280x720x24
 VOLUME /data
 EXPOSE 8080 6080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s CMD curl -fs -o /dev/null -m 4 http://127.0.0.1:8080/ || exit 1
