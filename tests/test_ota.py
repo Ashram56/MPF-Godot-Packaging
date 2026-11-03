@@ -117,6 +117,11 @@ class Ota(TG.Base):
         self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])
         self.assertTrue(O.list_remote()[0]["installed"])
         self.assertFalse(O.list_remote()[0]["changed"])
+        G.delete_game("demo@1.0")                                                  # removed on the machine: offered again, not "done"
+        self.assertFalse(O.list_remote()[0]["installed"])
+        G.JOB_LOCK.acquire()
+        G.run_job(O.install_item, O.list_remote()[0])
+        self.assertTrue(O.list_remote()[0]["installed"])
         self.put_bundle(extra={"description": "now bigger"}, files={"x": b"1" * 100})              # replaced on the server
         self.assertTrue(O.list_remote()[0]["changed"])
 
