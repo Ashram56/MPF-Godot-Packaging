@@ -72,3 +72,15 @@ def test_stage_refuses_other_api(tmp_path, monkeypatch):
         assert False
     except G.JobError as e:
         assert "new image" in str(e)
+
+
+def test_config_never_keeps_a_package_name_as_branch(tmp_path, monkeypatch):
+    import mpf_common as C
+    import mpf_webupdate as WU
+    monkeypatch.setattr(C, "STATE_DIR", str(tmp_path))
+    WU.save("webdav", "", "mpf-web-x-1.tar.xz")
+    assert WU.load()["branch"] == "main"
+    json.dump({"source": "webdav", "repo": "a/b", "branch": "mpf-web-y.tar.xz"}, open(WU.conf_path(), "w"))
+    assert WU.load()["branch"] == "main"
+    WU.save("github", "", "claude/x")
+    assert WU.load()["branch"] == "claude/x"
