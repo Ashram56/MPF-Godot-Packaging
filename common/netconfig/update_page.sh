@@ -10,6 +10,7 @@ ls "$HERE"/mpf_web.py >/dev/null
 RO=0
 if command -v mpf-mode >/dev/null 2>&1 && mount | grep -q ' / .*[(,]ro[,)]'; then RO=1; mpf-mode maintenance --stay; fi
 for f in "$HERE"/mpf_*.py; do install -m 0755 "$f" /usr/local/bin/; done
+install -m 0644 "$HERE"/mpf-netconfig-web.service /etc/systemd/system/ && systemctl daemon-reload   # runs mpf_launch.py (web package, else this copy)
 [ "$RO" = 1 ] && mpf-mode production || true
 systemctl restart mpf-netconfig-web.service
 sleep 2
