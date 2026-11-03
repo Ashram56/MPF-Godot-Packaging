@@ -20,6 +20,7 @@ Linux (or WSL) with git and python3; standard library only.
 """
 import argparse
 import base64
+import concurrent.futures
 import datetime
 import glob
 import hashlib
@@ -362,21 +363,25 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch):
         doc = json.load(open(fj))
         gbase = root + urllib.parse.quote(folder) + "/"
         mkcol(gbase + "objects/")
-        made, sent, kept = set(), 0, 0
-        for f in doc["files"]:
+        for pre in sorted({f["sha256"][:2] for f in doc["files"]}):
+            mkcol(gbase + f"objects/{pre}/")
+
+        def one(f):
+            """1 when the object was uploaded, 0 when the server had it. One HEAD + PUT per object over a WebDAV with a latency of tens of
+            milliseconds took hours for a game of 50,000 files when done one after the other: they go 24 at a time."""
             sha = f["sha256"]
             target = gbase + f"objects/{sha[:2]}/{sha}.xz"
-            if sha[:2] not in made:
-                mkcol(gbase + f"objects/{sha[:2]}/")
-                made.add(sha[:2])
-            if req("HEAD", target) == 200:
-                kept += 1
-                continue
-            with open(os.path.join(out, "objects", sha[:2], sha + ".xz"), "rb") as fh:
-                code = req("PUT", target, fh.read())
-            if code not in (200, 201, 204):
-                die(f"upload of object {sha[:12]} failed: HTTP {code}")
-            sent += 1
+            for _ in range(3):
+                if req("HEAD", target) == 200:
+                    return 0
+                with open(os.path.join(out, "objects", sha[:2], sha + ".xz"), "rb") as fh:
+                    if req("PUT", target, fh.read()) in (200, 201, 204):
+                        return 1
+            die(f"upload of object {sha[:12]} failed")
+        with concurrent.futures.ThreadPoolExecutor(24) as ex:
+            res = list({f["sha256"]: f for f in doc["files"]}.values())
+            res = list(ex.map(one, res))
+        sent, kept = sum(res), len(res) - sum(res)
         d = gbase
         for part in (branch, str(meta["version"])):
             d += urllib.parse.quote(part) + "/"
