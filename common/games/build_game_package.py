@@ -20,6 +20,7 @@ Linux (or WSL) with git and python3; standard library only.
 """
 import argparse
 import base64
+import concurrent.futures
 import datetime
 import glob
 import hashlib
@@ -307,7 +308,7 @@ def start_check(archive, repo, meta):
     say("checked: the start script's imports are all in the archive" + (" and run.check passed" if BC.check_command(meta) else ""))
 
 
-def publish(url, archive, folder, meta=None, digest="", branch="main", delta=True):
+def publish(url, archive, folder, meta=None, digest="", branch="main", delta=True, jobs=100):
     user, pw = os.environ.get("WEBDAV_USER", ""), os.environ.get("WEBDAV_PASS", "")
     if not user or not pw:
         die("--publish needs WEBDAV_USER and WEBDAV_PASS in the environment")
@@ -343,12 +344,12 @@ def publish(url, archive, folder, meta=None, digest="", branch="main", delta=Tru
     rel = base[len(url.rstrip("/") + "/"):] + urllib.parse.quote(os.path.basename(archive))
     extra = {"branch": branch}
     if delta and meta:
-        extra.update(publish_delta(req, mkcol, url.rstrip("/") + "/", folder, archive, meta, branch))
+        extra.update(publish_delta(req, mkcol, url.rstrip("/") + "/", folder, archive, meta, branch, jobs))
     if meta:
         write_manifest(req, url.rstrip("/") + "/", rel, archive, meta, digest, extra)
 
 
-def publish_delta(req, mkcol, root, folder, archive, meta, branch):
+def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100):
     """files.json of this build and the objects the server does not have yet (mpf_delta.py: the page's delta install reads them)."""
     import mpf_delta as D
     tmp = tempfile.mkdtemp(prefix="delta-")
@@ -362,21 +363,25 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch):
         doc = json.load(open(fj))
         gbase = root + urllib.parse.quote(folder) + "/"
         mkcol(gbase + "objects/")
-        made, sent, kept = set(), 0, 0
-        for f in doc["files"]:
+        for pre in sorted({f["sha256"][:2] for f in doc["files"]}):
+            mkcol(gbase + f"objects/{pre}/")
+
+        def one(f):
+            """1 when the object was uploaded, 0 when the server had it. One HEAD + PUT per object over a WebDAV with a latency of tens of
+            milliseconds took hours for a game of 50,000 files when done one after the other: they go 100 at a time."""
             sha = f["sha256"]
             target = gbase + f"objects/{sha[:2]}/{sha}.xz"
-            if sha[:2] not in made:
-                mkcol(gbase + f"objects/{sha[:2]}/")
-                made.add(sha[:2])
-            if req("HEAD", target) == 200:
-                kept += 1
-                continue
-            with open(os.path.join(out, "objects", sha[:2], sha + ".xz"), "rb") as fh:
-                code = req("PUT", target, fh.read())
-            if code not in (200, 201, 204):
-                die(f"upload of object {sha[:12]} failed: HTTP {code}")
-            sent += 1
+            for _ in range(3):
+                if req("HEAD", target) == 200:
+                    return 0
+                with open(os.path.join(out, "objects", sha[:2], sha + ".xz"), "rb") as fh:
+                    if req("PUT", target, fh.read()) in (200, 201, 204):
+                        return 1
+            die(f"upload of object {sha[:12]} failed")
+        with concurrent.futures.ThreadPoolExecutor(max(1, jobs)) as ex:
+            res = list({f["sha256"]: f for f in doc["files"]}.values())
+            res = list(ex.map(one, res))
+        sent, kept = sum(res), len(res) - sum(res)
         d = gbase
         for part in (branch, str(meta["version"])):
             d += urllib.parse.quote(part) + "/"
@@ -429,6 +434,8 @@ def main():
     ap.add_argument("--publish", metavar="WEBDAV_URL")
     ap.add_argument("--branch", default="", help="the branch of the game this build comes from (default: main). A branch other than main is published under "
                     "<game>/<branch>/<version>/ and installs next to the other branches (<id>@<version>+<branch>)")
+    ap.add_argument("--upload-jobs", type=int, default=100, metavar="N",
+                    help="how many delta objects are uploaded at once (default 100: measured 27/s with 24, 51/s with 48, 92/s with 100 on the owner's Synology, no errors; the server's and the network's limits decide how far it helps)")
     ap.add_argument("--no-delta", action="store_true", help="publish the archive only (no files.json and objects for delta installs)")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
     ap.add_argument("--install-deps", action="store_true", help="install a missing git / venv with apt (Debian, Ubuntu, Raspberry Pi OS; needs root or sudo)")
@@ -510,7 +517,7 @@ def main():
     say(f"\n{archive}\n  {os.path.getsize(archive) >> 20} MB, sha256 {digest}")
     if a.publish:
         publish(a.publish, archive, recipe.get("publish_folder", meta.get("id", recipe["id"])), meta, digest,
-                branch=a.branch or "main", delta=not a.no_delta)
+                branch=a.branch or "main", delta=not a.no_delta, jobs=a.upload_jobs)
     say(f"\nPut it on a machine (common/games/README.md):\n"
         f"  - the setup page, Install tab: drop {os.path.basename(archive)} (and its .sha256)\n"
         f"  - before flashing: python3 common/games/inject_image.py IMAGE --bundle {archive}\n"
