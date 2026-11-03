@@ -152,7 +152,7 @@ def preview_state():
     act = next((g for g in G.installed_games() if g["active"]), None)
     scr = detected_screens() if s["enabled"] else []
     wins = preview_windows(act) if s["enabled"] else []
-    return dict(s, tools=PV.tools(), loopback=PV.loopback_present(), soundOutput=AU.effective() is not None,
+    return dict(s, tools=PV.tools(), loopback=PV.loopback_present(), pulse=PV.pulse(), soundOutput=AU.effective() is not None,
                 windows=[{"id": i, "label": l, "ok": PV.grab_geometry(scr, n) is not None} for i, l, n in wins])
 
 
@@ -269,8 +269,8 @@ class Handler(BaseHTTPRequestHandler):
         if not PV.load()["enabled"]:
             return self._send(404, "preview is off", "text/plain")
         if what == "sound":
-            cmd, ctype, env = PV.arecord_cmd(), "audio/wav", None
-            if not (PV.load()["sound"] and PV.tools()["arecord"] and PV.loopback_present()):
+            cmd, ctype, env = PV.sound_cmd(), "audio/wav", None
+            if not (PV.load()["sound"] and (PV.pulse() or (PV.tools()["arecord"] and PV.loopback_present()))):
                 return self._send(404, "no sound capture", "text/plain")
         else:
             act = next((g for g in G.installed_games() if g["active"]), None)
@@ -944,7 +944,7 @@ function dmdLive(){clearInterval(dmdT);dmdT=null;const on=dmdWeb&&TAB==='monitor
 let prevSig='';function prevStreams(on){const p=window._prev||{windows:[]};const box=$('#monPrevWins');const sig=p.windows.map(w=>w.id+(w.ok?1:0)).join();
  if(sig!==prevSig){prevSig=sig;box.innerHTML=p.windows.map(w=>`<figure style="margin:0 0 10px"><figcaption class="muted">${esc(w.label)}</figcaption>${w.ok?`<img data-pw="${esc(w.id)}" alt="" style="width:100%;border-radius:8px;background:#000;display:block">`:`<p class="muted">${t('prevNoCap')}</p>`}</figure>`).join('')}
  box.querySelectorAll('img[data-pw]').forEach(i=>{if(on){if(!i.getAttribute('src'))i.src='/api/preview/'+encodeURIComponent(i.dataset.pw)+'?t='+Date.now()}else i.removeAttribute('src')});
- const row=$('#monSndRow'),can=!!(p.sound&&p.tools&&p.tools.arecord&&p.loopback&&p.soundOutput);row.classList.toggle('hide',!can);if(!on||!can)prevSound(false);else prevSound(null)}
+ const row=$('#monSndRow'),can=!!(p.sound&&(p.pulse||(p.tools&&p.tools.arecord&&p.loopback&&p.soundOutput)));row.classList.toggle('hide',!can);if(!on||!can)prevSound(false);else prevSound(null)}
 function prevSound(v){const a=$('#monAudio'),b=$('#monSnd');if(v===null){b.textContent=a.getAttribute('src')?t('prevMute'):t('prevListen');return}if(v&&!a.getAttribute('src')){a.src='/api/preview/sound?t='+Date.now();a.play().catch(()=>{})}if(!v&&a.getAttribute('src')){a.pause();a.removeAttribute('src');a.load()}b.textContent=v?t('prevMute'):t('prevListen')}
 document.addEventListener('click',e=>{if(e.target.id==='monSnd')prevSound(!$('#monAudio').getAttribute('src'))});
 async function dmdImage(msgs){const r=await fetch('/api/dmd/image');if(r.status!==200){msgs.forEach(m=>m.textContent=t('dmdLiveNone'));return}
@@ -969,7 +969,7 @@ function dmdRender(s){window._scr=s.screens;scrRender(s);const d=s.dmd;if(!d)ret
  $('#serumLib').innerHTML=d.library.length?d.library.map(x=>`<div class="net"><b class="grow">${esc(x.rom)}</b><span class="muted">${esc(x.file)} · ${(x.size/1048576).toFixed(1)} MB</span><button data-sdelete="${esc(x.rom)}" title="${t('del')}">${ico('trash')}</button></div>`).join(''):`<p class="muted">${t('serumNone')}</p>`;
  $('#serumGames').innerHTML=d.games.length&&d.library.length?`<table class="mx"><thead><tr><th></th><th>${t('serumDefault')}</th><th>${t('serumOff')}</th>${d.library.map(x=>`<th>${esc(x.rom)}</th>`).join('')}</tr></thead><tbody>${d.games.map(g=>`<tr><th>${esc(g.name)}${g.pick===''&&g.used?`<br><span class="muted">${esc(g.used)}</span>`:''}</th><td><input type="radio" name="sg-${esc(g.id)}" data-sgame="${esc(g.id)}" value=""${g.pick===''?' checked':''}></td><td><input type="radio" name="sg-${esc(g.id)}" data-sgame="${esc(g.id)}" value="none"${g.pick==='none'?' checked':''}></td>${d.library.map(x=>`<td><input type="radio" name="sg-${esc(g.id)}" data-sgame="${esc(g.id)}" value="${esc(x.rom)}"${g.pick===x.rom?' checked':''}></td>`).join('')}</tr>`).join('')}</tbody></table>`:''}
 function prevRender(p){if(!p||$('#prevForm').contains(document.activeElement))return;$('#prevOn').checked=p.enabled;$('#prevSound').checked=p.sound;
- const m=[];if(!p.tools.ffmpeg)m.push(t('prevNoFfmpeg'));if(p.sound&&!p.soundOutput)m.push(t('prevNoOut'));if(p.sound&&!p.tools.arecord)m.push(t('prevNoArecord'));$('#prevNote').textContent=m.join(' ')}
+ const m=[];if(!p.tools.ffmpeg)m.push(t('prevNoFfmpeg'));if(p.sound&&!p.pulse&&!p.soundOutput)m.push(t('prevNoOut'));if(p.sound&&!p.pulse&&!p.tools.arecord)m.push(t('prevNoArecord'));$('#prevNote').textContent=m.join(' ')}
 $('#prevForm').onsubmit=e=>{e.preventDefault();post('/api/preview',{enabled:$('#prevOn').checked?'1':'0',sound:$('#prevSound').checked?'1':'0'})};
 $('#dmdForm').onsubmit=e=>{e.preventDefault();post('/api/dmd',Object.fromEntries(new FormData(e.target)))};
 document.addEventListener('change',e=>{const sg=e.target.dataset&&e.target.dataset.sgame;if(sg!==undefined&&(e.target.tagName==='SELECT'||e.target.tagName==='INPUT'))post('/api/dmd/serum',{game:sg,rom:e.target.value})});

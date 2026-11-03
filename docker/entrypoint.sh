@@ -14,7 +14,11 @@ fi
 
 # software Vulkan (Mesa lavapipe); the file is named after the CPU (lvp_icd.x86_64.json, lvp_icd.aarch64.json)
 export VK_ICD_FILENAMES=$(ls /usr/share/vulkan/icd.d/lvp_icd*.json | head -1)
-pids=()
+# sound: a PulseAudio null sink (no sound card in a container); the game plays into it and the page's cabinet preview records its monitor
+export PULSE_SERVER=unix:/tmp/pulse.sock MPF_PULSE_SINK=mpf
+HOME=/run/pulse-home XDG_RUNTIME_DIR=/run/pulse-home runuser -u mpfpulse -- pulseaudio -n --exit-idle-time=-1 --daemonize=no --load="module-native-protocol-unix socket=/tmp/pulse.sock auth-anonymous=1" \
+    --load="module-null-sink sink_name=mpf" >/var/log/pulseaudio.log 2>&1 & pulse_pid=$!
+pids=($pulse_pid)
 Xvfb :0 -screen 0 "${MPF_SCREEN:-1280x720x24}" -ac -nolisten tcp +extension GLX >/var/log/Xvfb.log 2>&1 & pids+=($!)
 for _ in $(seq 50); do [ -S /tmp/.X11-unix/X0 ] && break; sleep 0.2; done
 x11vnc -display :0 -forever -shared -nopw -localhost -rfbport 5900 -quiet -noxdamage >/var/log/x11vnc.log 2>&1 & pids+=($!)

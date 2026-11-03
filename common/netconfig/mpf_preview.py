@@ -59,8 +59,13 @@ def loopback_present(proc="/proc/asound/cards"):
         return False
 
 
+def pulse():
+    """True where the game plays into a PulseAudio null sink (the Docker image: no sound card, no snd-aloop): MPF_PULSE_SINK names it."""
+    return bool(os.environ.get("MPF_PULSE_SINK") and shutil.which("ffmpeg"))
+
+
 def tools():
-    return {"ffmpeg": bool(shutil.which("ffmpeg")), "arecord": bool(shutil.which("arecord"))}
+    return {"ffmpeg": bool(shutil.which("ffmpeg")), "arecord": bool(shutil.which("arecord")), "parec": bool(shutil.which("parec"))}
 
 
 def grab_geometry(screens, index):
@@ -77,6 +82,14 @@ def ffmpeg_cmd(geom, display=":0", fps=FPS, width=WIDTH):
     w, h, x, y = geom
     return ["ffmpeg", "-loglevel", "error", "-f", "x11grab", "-framerate", str(fps), "-video_size", f"{w}x{h}", "-i", f"{display}+{x},{y}",
             "-vf", f"scale={width}:-2", "-q:v", "7", "-f", "mpjpeg", "-boundary_tag", BOUNDARY, "-"]
+
+
+def sound_cmd(rate=RATE):
+    """The sound capture: the sink's monitor with ffmpeg in a container, the loopback's other side with arecord elsewhere."""
+    if pulse():
+        # ffmpeg, not parec: parec's wav writer needs a seekable file ("Failed to open audio file" on a pipe); ffmpeg streams a wav
+        return ["ffmpeg", "-loglevel", "error", "-f", "pulse", "-i", os.environ["MPF_PULSE_SINK"] + ".monitor", "-ac", "2", "-ar", str(rate), "-f", "wav", "-"]
+    return arecord_cmd(rate)
 
 
 def arecord_cmd(rate=RATE):
@@ -97,7 +110,7 @@ def tee_conf(pcm):
 def want_tee():
     """True when the game's sound is to be copied to the loopback (option on, module loaded or loadable)."""
     s = load()
-    if not (s["enabled"] and s["sound"]):
+    if not (s["enabled"] and s["sound"]) or pulse():
         return False
     if not loopback_present():
         C.run("modprobe", "snd-aloop")
