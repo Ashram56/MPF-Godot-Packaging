@@ -413,6 +413,26 @@ class PupLibrary(Base):
         self.assertTrue(os.path.exists(os.path.join(game, "pup_media/p/m.json")))
         self.assertTrue(G.pup_installed(game))
 
+    def test_a_library_folder_made_for_another_bundle_format_is_not_taken_for_this_one(self):
+        """The folder of a pack in the library is per (pack, game id). One that holds the copy of an older bundle (other folders) made the
+        assignment unpack nothing and link nothing, yet the page answered 'assigned' (mini PC, 2026-11-03)."""
+        import zipfile
+        pup = {"pack_dir": "pup_pack/p", "extract_only": True}
+        self.install(extra={"pup": pup})
+        p = os.path.join(C.UPLOADS, "pup.zip")
+        with zipfile.ZipFile(p, "w") as z:
+            z.writestr("P/triggers.pup", "t")
+            z.writestr("P/a.mp4", "video")
+        name = G.pup_store(p, "author.zip")
+        old = os.path.join(C.PUPS, "installed", f"author@demo", "old_layout__dir")
+        os.makedirs(old)
+        open(os.path.join(old, "x"), "w").write("old")
+        G.assign_pup("demo@1.0", name)
+        game = os.path.join(C.GAMES, "demo@1.0")
+        self.assertTrue(os.path.islink(os.path.join(game, "pup_pack/p")))
+        self.assertEqual(open(os.path.join(game, "pup_pack/p/a.mp4")).read(), "video")
+        self.assertEqual(G.pup_assigned(game), name)
+
     def test_assign_needs_a_pack_and_pack_support(self):
         self.install(extra=self.PACK)
         with self.assertRaises(G.JobError):
