@@ -148,8 +148,10 @@ class BuildTest(unittest.TestCase):
         first = doc["items"][0]
         self.assertTrue(first["file"].startswith("fake/") and first["file"].endswith(".tar.xz"))
         self.assertEqual(len(first["sha256"]), 64)
-        got = sorted(os.listdir(os.path.join(Put.root, "games", "fake")))
+        got = sorted(n for n in os.listdir(os.path.join(Put.root, "games", "fake")) if n not in ("objects", "main"))   # + the delta folders
         self.assertEqual(len(got), 4)
+        self.assertTrue(os.path.isfile(os.path.join(Put.root, "games", "fake", "main", "2.1", "files.json")))
+        self.assertTrue(first.get("delta", "").endswith("/files.json") and first["objects"] == "fake/objects/")
         self.assertTrue(got[1].endswith(".tar.xz.sha256") or got[0].endswith(".tar.xz.sha256"))
 
     def test_dry_run_changes_nothing(self):

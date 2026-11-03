@@ -307,7 +307,7 @@ def start_check(archive, repo, meta):
     say("checked: the start script's imports are all in the archive" + (" and run.check passed" if BC.check_command(meta) else ""))
 
 
-def publish(url, archive, folder, meta=None, digest=""):
+def publish(url, archive, folder, meta=None, digest="", branch="main", delta=True):
     user, pw = os.environ.get("WEBDAV_USER", ""), os.environ.get("WEBDAV_PASS", "")
     if not user or not pw:
         die("--publish needs WEBDAV_USER and WEBDAV_PASS in the environment")
@@ -324,10 +324,15 @@ def publish(url, archive, folder, meta=None, digest=""):
         except urllib.error.HTTPError as e:
             return (e.code, b"") if want_body else e.code
 
-    if folder:
-        code = req("MKCOL", base)
+    def mkcol(target):
+        code = req("MKCOL", target)
         if code not in (200, 201, 301, 405):    # 405: the folder exists
-            die(f"cannot create {base}: HTTP {code}")
+            die(f"cannot create {target}: HTTP {code}")
+
+    mkcol(base)
+    if branch != "main":                         # builds of one version on several branches must not overwrite each other's archive
+        base += urllib.parse.quote(branch) + "/"
+        mkcol(base)
     for path in (archive, archive + ".sha256"):
         name = urllib.parse.quote(os.path.basename(path))
         with open(path, "rb") as f:
@@ -335,12 +340,57 @@ def publish(url, archive, folder, meta=None, digest=""):
         if code not in (200, 201, 204):
             die(f"upload of {name} failed: HTTP {code}")
         say(f"uploaded {base}{name}")
+    rel = base[len(url.rstrip("/") + "/"):] + urllib.parse.quote(os.path.basename(archive))
+    extra = {"branch": branch}
+    if delta and meta:
+        extra.update(publish_delta(req, mkcol, url.rstrip("/") + "/", folder, archive, meta, branch))
     if meta:
-        write_manifest(req, url.rstrip("/") + "/", (folder + "/" if folder else "") + urllib.parse.quote(os.path.basename(archive)),
-                       archive, meta, digest)
+        write_manifest(req, url.rstrip("/") + "/", rel, archive, meta, digest, extra)
 
 
-def write_manifest(req, root, rel, archive, meta, digest):
+def publish_delta(req, mkcol, root, folder, archive, meta, branch):
+    """files.json of this build and the objects the server does not have yet (mpf_delta.py: the page's delta install reads them)."""
+    import mpf_delta as D
+    tmp = tempfile.mkdtemp(prefix="delta-")
+    try:
+        with tarfile.open(archive) as t:
+            t.extractall(os.path.join(tmp, "x"), filter="tar") if sys.version_info >= (3, 12) else t.extractall(os.path.join(tmp, "x"))
+        top = os.path.join(tmp, "x", os.listdir(os.path.join(tmp, "x"))[0])
+        out = os.path.join(tmp, "out")
+        os.makedirs(out)
+        fj, _ = D.export(top, out, branch)
+        doc = json.load(open(fj))
+        gbase = root + urllib.parse.quote(folder) + "/"
+        mkcol(gbase + "objects/")
+        made, sent, kept = set(), 0, 0
+        for f in doc["files"]:
+            sha = f["sha256"]
+            target = gbase + f"objects/{sha[:2]}/{sha}.xz"
+            if sha[:2] not in made:
+                mkcol(gbase + f"objects/{sha[:2]}/")
+                made.add(sha[:2])
+            if req("HEAD", target) == 200:
+                kept += 1
+                continue
+            with open(os.path.join(out, "objects", sha[:2], sha + ".xz"), "rb") as fh:
+                code = req("PUT", target, fh.read())
+            if code not in (200, 201, 204):
+                die(f"upload of object {sha[:12]} failed: HTTP {code}")
+            sent += 1
+        d = gbase
+        for part in (branch, str(meta["version"])):
+            d += urllib.parse.quote(part) + "/"
+            mkcol(d)
+        code = req("PUT", d + "files.json", open(fj, "rb").read())
+        if code not in (200, 201, 204):
+            die(f"upload of files.json failed: HTTP {code}")
+        say(f"delta: {sent} objects uploaded, {kept} already on the server; {d}files.json")
+        return {"delta": f"{folder}/{branch}/{meta['version']}/files.json", "objects": f"{folder}/objects/"}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def write_manifest(req, root, rel, archive, meta, digest, extra=None):
     """`mpf-games.json` at the root of the updates folder: what the page's Updates card reads to offer only the updates that fit the
     installed games. An entry per (game id, version, architecture); publishing the same one again replaces it."""
     code, body = req("GET", root + MANIFEST, want_body=True)
@@ -352,7 +402,9 @@ def write_manifest(req, root, rel, archive, meta, digest):
     entry = {"id": meta["id"], "name": meta.get("name", meta["id"]), "version": str(meta["version"]), "arch": arch,
              "file": urllib.parse.unquote(rel), "size": os.path.getsize(archive), "sha256": digest,
              "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
-    items = [i for i in doc.get("items", []) if (i.get("id"), i.get("version"), i.get("arch")) != (entry["id"], entry["version"], arch)]
+    entry.update(extra or {})
+    key = lambda i: (i.get("id"), i.get("version"), i.get("arch"), i.get("branch") or "main")      # noqa: E731
+    items = [i for i in doc.get("items", []) if key(i) != key(entry)]
     items.append(entry)
     out = json.dumps({"format": 1, "items": sorted(items, key=lambda i: (i["id"], i["published"]))}, indent=1).encode()
     code = req("PUT", root + MANIFEST, out)
@@ -375,6 +427,9 @@ def main():
     ap.add_argument("--pup-zip", metavar="ZIP", help="the game's PuP Pack zip (a path or URL): the game's builder makes the media derived from it "
                     "(clips, letters, HD DMD art) here, offline, and ships them in the bundle; the machine that runs the game makes nothing")
     ap.add_argument("--publish", metavar="WEBDAV_URL")
+    ap.add_argument("--branch", default="", help="the branch of the game this build comes from (default: main). A branch other than main is published under "
+                    "<game>/<branch>/<version>/ and installs next to the other branches (<id>@<version>+<branch>)")
+    ap.add_argument("--no-delta", action="store_true", help="publish the archive only (no files.json and objects for delta installs)")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
     ap.add_argument("--install-deps", action="store_true", help="install a missing git / venv with apt (Debian, Ubuntu, Raspberry Pi OS; needs root or sudo)")
     ap.add_argument("--allow-branch", action="store_true", help="build from a commit that is not the merged default branch (a test package)")
@@ -454,7 +509,8 @@ def main():
     start_check(archive, repo, meta)
     say(f"\n{archive}\n  {os.path.getsize(archive) >> 20} MB, sha256 {digest}")
     if a.publish:
-        publish(a.publish, archive, recipe.get("publish_folder", meta.get("id", recipe["id"])), meta, digest)
+        publish(a.publish, archive, recipe.get("publish_folder", meta.get("id", recipe["id"])), meta, digest,
+                branch=a.branch or "main", delta=not a.no_delta)
     say(f"\nPut it on a machine (common/games/README.md):\n"
         f"  - the setup page, Install tab: drop {os.path.basename(archive)} (and its .sha256)\n"
         f"  - before flashing: python3 common/games/inject_image.py IMAGE --bundle {archive}\n"
