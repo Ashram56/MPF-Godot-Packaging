@@ -83,7 +83,8 @@ class TestProtocol(unittest.TestCase):
             body = b"".join(w for w in fake.writes[1:] if w[10] != z.BRIGHTNESS)
             self.assertEqual(z.FRAME + z.CTRL + bytes((z.ZONES_RGB888,)), body[:11])
             self.assertIn(z.control(z.RENDER), body)
-            self.assertTrue(all(len(w) == 64 for w in fake.writes))
+            self.assertEqual(512, len(fake.writes[0]))                 # eight handshakes fill a Pico 2's block
+            self.assertTrue(all(len(w) == 64 for w in fake.writes[1:]))
             dev.update(rgb())
             self.wait(fake, 40)
             time.sleep(0.2)

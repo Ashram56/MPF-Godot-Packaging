@@ -1,4 +1,10 @@
 """Switch monitor and saved logs (common/netconfig/mpf_monitor.py), against a fake BCP server."""
+import sys as _sys
+import unittest as _unittest
+
+if not _sys.platform.startswith("linux"):
+    raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
+
 import json
 import os
 import socket
