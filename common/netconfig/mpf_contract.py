@@ -95,7 +95,7 @@ def board():
                        ("NVIDIA", "jetson")):
         if word in model:
             return name
-    return "x86" if platform.machine() in ("x86_64", "amd64") else "arm64"
+    return "x86" if platform.machine().lower() in ("x86_64", "amd64") else "arm64"
 
 
 def profile(b, board_name=None):
