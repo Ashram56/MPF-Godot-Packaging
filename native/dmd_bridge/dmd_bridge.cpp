@@ -12,10 +12,21 @@
 //   --probe: open the ZeDMD, say what it is, exit 0 (2: none found)
 //   --rgb-out FILE: write each RGB888 picture to FILE as well, and do not need a ZeDMD (tests)
 // "--shades" is accepted and ignored (the add-on dmd_out adds it). Messages on stderr.
+// Linux and macOS read stdin with poll(); Windows (mingw-w64 build, native/dmd_bridge/build_windows.sh) reads it on a thread, as
+// an anonymous pipe cannot be polled there, and loads libserum with LoadLibrary.
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <windows.h>
+
+#include <condition_variable>
+#include <mutex>
+#else
 #include <dlfcn.h>
 #include <poll.h>
 #include <signal.h>
 #include <unistd.h>
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -110,17 +121,27 @@ static int colorize(const uint8_t* shades, uint8_t* rgb, const uint8_t* held)
   return (int)(r & 0xffff);
 }
 
+#ifdef _WIN32
+static void* lib_open(const char* path) { return (void*)LoadLibraryA(path); }
+static void* lib_sym(void* h, const char* name) { return (void*)GetProcAddress((HMODULE)h, name); }
+static std::string lib_error() { return "LoadLibrary failed, error " + std::to_string(GetLastError()); }
+#else
+static void* lib_open(const char* path) { return dlopen(path, RTLD_NOW | RTLD_LOCAL); }
+static void* lib_sym(void* h, const char* name) { return dlsym(h, name); }
+static std::string lib_error() { return dlerror(); }
+#endif
+
 static bool load_serum(const char* lib, const char* dir, const char* rom)
 {
-  void* h = dlopen(lib, RTLD_NOW | RTLD_LOCAL);
+  void* h = lib_open(lib);
   if (!h)
   {
-    fprintf(stderr, "serum: %s\n", dlerror());
+    fprintf(stderr, "serum: %s: %s\n", lib, lib_error().c_str());
     return false;
   }
-  serum_load = (decltype(serum_load))dlsym(h, "Serum_Load");
-  serum_colorize = (decltype(serum_colorize))dlsym(h, "Serum_Colorize");
-  serum_rotate = (decltype(serum_rotate))dlsym(h, "Serum_Rotate");
+  serum_load = (decltype(serum_load))lib_sym(h, "Serum_Load");
+  serum_colorize = (decltype(serum_colorize))lib_sym(h, "Serum_Colorize");
+  serum_rotate = (decltype(serum_rotate))lib_sym(h, "Serum_Rotate");
   if (!serum_load || !serum_colorize || !serum_rotate)
   {
     fprintf(stderr, "serum: %s is not libserum\n", lib);
@@ -136,9 +157,48 @@ static bool load_serum(const char* lib, const char* dir, const char* rom)
   return true;
 }
 
+#ifdef _WIN32
+// stdin on a thread: the newest whole frame is kept, the main loop waits for it with a timeout (libserum's rotations)
+static std::mutex in_mutex;
+static std::condition_variable in_cv;
+static std::vector<uint8_t> in_frame;
+static bool in_new = false, in_eof = false;
+
+static void stdin_reader(size_t fsize)
+{
+  std::vector<uint8_t> buf(fsize * 8);
+  size_t have = 0;
+  for (;;)
+  {
+    const int n = _read(0, buf.data() + have, (unsigned)(buf.size() - have));
+    std::lock_guard<std::mutex> lock(in_mutex);
+    if (n <= 0)
+    {
+      in_eof = true;
+      in_cv.notify_one();
+      return;
+    }
+    have += n;
+    const size_t whole = have / fsize * fsize;
+    if (whole)
+    {
+      in_frame.assign(buf.begin() + (whole - fsize), buf.begin() + whole);
+      memmove(buf.data(), buf.data() + whole, have - whole);
+      have -= whole;
+      in_new = true;
+      in_cv.notify_one();
+    }
+  }
+}
+#endif
+
 int main(int argc, char** argv)
 {
+#ifdef _WIN32
+  _setmode(0, _O_BINARY);
+#else
   signal(SIGPIPE, SIG_IGN);
+#endif
   int brightness = -1;
   unsigned color = 0xff730d;
   std::string lib, rom, altcolor, device, wifi, rgbOut;
@@ -218,6 +278,40 @@ int main(int argc, char** argv)
       }
     }
   };
+#ifdef _WIN32
+  std::thread(stdin_reader, fsize).detach();
+  for (;;)
+  {
+    bool got = false, eof = false;
+    {
+      std::unique_lock<std::mutex> lock(in_mutex);
+      in_cv.wait_for(lock, std::chrono::milliseconds(rotateMs > 0 ? rotateMs : 3000), [] { return in_new || in_eof; });
+      if (in_new)
+      {
+        last = in_frame;
+        in_new = false;
+        got = true;
+      }
+      eof = in_eof;
+    }
+    if (!got && !eof)
+    {
+      if (rotateMs > 0 && serum)     // a colour rotation step: same frame, new colours
+      {
+        rotateMs = (int)(serum_rotate() & 0xffff);
+        if (serum_picture(rgb.data())) show();
+      }
+      continue;
+    }
+    if (got)
+    {
+      rotateMs = colorize(last.data(), rgb.data(), held.data());
+      show();
+    }
+    if (eof) break;
+  }
+  (void)in; (void)have;
+#else
   for (;;)
   {
     pollfd p = {0, POLLIN, 0};
@@ -256,6 +350,7 @@ int main(int argc, char** argv)
     }
     if (eof) break;
   }
+#endif
   delete zedmd;
   return 0;
 }

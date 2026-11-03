@@ -14,6 +14,7 @@ installer step by step, its options and every lesson learned (numbered "Findings
 | [frame-rate-method.md](frame-rate-method.md) | any board | the checks, the V4L2 decoder, measuring and cross-building before promising a frame rate (Raspberry Pi 4 as the example) |
 | [godot-performance.md](godot-performance.md) | any slow target | GMC + Godot stalls, node pooling, a display drawn from data |
 | [video-playback.md](video-playback.md) | all | GDE GoZen and native video: switching, the Windows build, checking the decoder |
+| [local.md](local.md) | `python -m mpf_godot local` | a cabinet's game bundle installed and played on a Windows, macOS or Linux desktop (ZeDMD through libzedmd, Serum), same code as the image |
 | [dmd_devices.md](dmd_devices.md) | `addons/dmd_out/`, `examples/dmd_devices/` | PIN2DMD and ZeDMD RGB LED DMDs, any OS (feeder: Linux, macOS) |
 | [pup-remote-topper.md](pup-remote-topper.md) | `mpf_godot/pup_remote/` | PuP screens on a Raspberry Pi (a topper): server for the game, agent and installer for the Pi |
 | [limits.md](limits.md) | none | what each platform cannot run, and how the settings page, the installer and each start enforce it |

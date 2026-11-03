@@ -11,7 +11,6 @@ import hashlib
 import json
 import os
 import platform
-import pwd
 import re
 import shlex
 import shutil
@@ -19,6 +18,11 @@ import subprocess
 import sys
 import threading
 import time
+
+try:
+    import pwd
+except ImportError:        # Windows: the local platform (mpf_godot/local.py) uses the portable helpers only
+    pwd = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mpf_audio as AU  # noqa: E402
