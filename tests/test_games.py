@@ -307,6 +307,24 @@ class StartCheck(Base):
         self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])
 
 
+class OwnGame(Base):
+    def test_a_game_not_owned_by_the_game_user_is_handed_over_before_it_starts(self):
+        import types
+        game = os.path.join(C.GAMES, "own@1")
+        os.makedirs(os.path.join(game, "game"))
+        calls = []
+        real = G.sh
+        G.sh = lambda *c, **k: calls.append(c)
+        try:
+            me = os.stat(game).st_uid
+            G.own_game(game, types.SimpleNamespace(pw_uid=me, pw_gid=0))              # already the game user's: nothing to do
+            self.assertEqual(calls, [])
+            G.own_game(game, types.SimpleNamespace(pw_uid=me + 1, pw_gid=5))          # owned by someone else: chown -R
+            self.assertEqual(calls, [("chown", "-R", f"{me + 1}:5", game)])
+        finally:
+            G.sh = real
+
+
 class PupLibrary(Base):
     PACK = {"pup": {"pack_dir": "pup_pack/p", "media_dir": "pup_media/p",
                     "install": "sh -c 'mkdir -p pup_pack/p pup_media/p && echo v > pup_pack/p/a.mp4 && echo m > pup_media/p/a.webm'"}}

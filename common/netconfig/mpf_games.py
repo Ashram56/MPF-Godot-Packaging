@@ -1045,6 +1045,7 @@ def game_exec():
         else:
             sys.exit("no X session after 180 s")      # the service restarts and waits again
         time.sleep(3)           # let the window manager settle
+    own_game(game, pw)
     volatile_game_dirs(game)
     xdg = ram_xdg_env()
     audio = AU.prepare()          # the sound output chosen on the page (root: it writes in /run)
@@ -1068,6 +1069,19 @@ def game_exec():
         child["PYTHONPATH"] = root + (os.pathsep + child["PYTHONPATH"] if child.get("PYTHONPATH") else "")
         child.update({str(k): str(v) for k, v in ((b.get("launch") or {}).get("env") or {}).items()})
     os.execve(argv[0] if os.path.isabs(argv[0]) else (shutil.which(argv[0]) or argv[0]), argv, child)
+
+
+def own_game(game, pw):
+    """The game runs as the game user (MPF writes its data and logs in its folder): a bundle that reached the machine owned by root
+    (an install by older page code, a copy by hand) is handed over before it starts, instead of failing with 'Permission denied' in
+    a restart loop. The folder and its first level are looked at (cheap); one that is not the game user's has the whole tree chowned."""
+    try:
+        names = [game] + [e.path for e in os.scandir(game) if not e.is_symlink()]
+        if all(os.lstat(n).st_uid == pw.pw_uid for n in names):
+            return
+        sh("chown", "-R", f"{pw.pw_uid}:{pw.pw_gid}", game)
+    except (OSError, JobError) as e:
+        print(f"cannot hand {game} to {C.USER}: {e}", file=sys.stderr)
 
 
 def game_start():
