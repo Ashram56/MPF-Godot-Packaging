@@ -4,7 +4,7 @@ After=network.target mpf-netconfig-apply.service
 
 [Service]
 EnvironmentFile=-/etc/default/mpf-netconfig
-ExecStart=/usr/local/bin/mpf_netconfig.py web
+ExecStart=/usr/local/bin/mpf_launch.py web
 Restart=on-failure
 
 [Install]

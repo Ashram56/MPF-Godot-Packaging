@@ -28,6 +28,7 @@ import mpf_monitor as MON  # noqa: E402
 import mpf_preview as PV  # noqa: E402
 import mpf_audio as AU  # noqa: E402
 import mpf_ota as O  # noqa: E402
+import mpf_webupdate as WU  # noqa: E402
 from mpf_common import run  # noqa: E402
 
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
@@ -207,6 +208,7 @@ def state():
         "mode": {"mode": mode[0], "stay": mode[1]} if mode else None,
         "job": G.job_state(),
         "ota": O.public(),
+        "webupdate": WU.status(),
         "inbox": sorted(n for n in (os.listdir(C.INBOX) if os.path.isdir(C.INBOX) else []) if n.endswith((".tar.xz", ".zip"))),
     }
 
@@ -377,6 +379,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(state())
         if p == "/api/audio":
             return self._json(AU.state())
+        if p == "/api/webupdate/branches":
+            try:
+                return self._json(WU.branches())
+            except ValueError as e:
+                return self._json({"ok": False, "msg": str(e)}, 400)
+        if p == "/api/webupdate/list":
+            try:
+                return self._json(WU.list_webdav())
+            except ValueError as e:
+                return self._json({"ok": False, "msg": str(e)}, 400)
         if p == "/api/ota/list":
             try:
                 return self._json(O.list_remote())
@@ -467,6 +479,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ota/config":
             O.save(form.get("url", ""), form.get("user", ""), form.get("password", ""), form.get("folder", ""))
             return "Update server saved."
+        if path == "/api/webupdate/config":
+            WU.save(form.get("source", "github"), form.get("repo", ""), form.get("branch", ""))
+            return "Saved."
+        if path == "/api/webupdate/install":
+            if not G.JOB_LOCK.acquire(blocking=False):
+                raise ValueError("an install is already running")
+            G.job_set(state="running", msg="Starting", log="")
+            threading.Thread(target=G.run_job, args=(WU.install, form.get("source", "github"), form.get("branch", ""), form.get("repo", ""),
+                                                     form.get("name", "")), daemon=True).start()
+            return "Updating the page"
+        if path == "/api/webupdate/rollback":
+            WU.rollback()
+            return "Going back to the previous page version; it restarts in a few seconds."
         if path == "/api/ota/install":
             # the item comes from the server's own listing, never from the browser's address: the saved password must not be
             # sent to an address the page was handed
@@ -476,7 +501,7 @@ class Handler(BaseHTTPRequestHandler):
             if not G.JOB_LOCK.acquire(blocking=False):
                 raise ValueError("an install is already running")
             G.job_set(state="running", msg="Starting the download", log="")
-            threading.Thread(target=G.run_job, args=(O.install_item, item), daemon=True).start()
+            threading.Thread(target=G.run_job, args=(O.install_item, item, "delta" if form.get("mode") == "delta" else "full"), daemon=True).start()
             return "Installing " + item["name"]
         if path in ("/api/pup/assign", "/api/pup/unassign", "/api/pup/delete"):
             if not G.JOB_LOCK.acquire(blocking=False):
@@ -596,7 +621,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve():
-    ThreadingHTTPServer(("", C.PORT), Handler).serve_forever()
+    srv = ThreadingHTTPServer(("", C.PORT), Handler)      # bound: the package in use works
+    WU.confirm_later()
+    srv.serve_forever()
 
 
 PAGE = r"""<!doctype html>
@@ -713,6 +740,13 @@ main.wide{max-width:min(1800px,98vw)}
 <div class="nets" id="serumLib"></div><div class="nets" id="serumGames"></div>
  <div class="drop mt" id="dropSerum"><svg><use href="#i-up"/></svg><b data-t="dropSerum"></b><span data-t="dropSerumHint"></span></div><input type="file" id="fSerum" class="hide" accept=".cROMc,.cRZ,.cROM"></div></section>
 
+<section data-tab="install"><h2><svg stroke="currentColor"><use href="#i-redo"/></svg><span data-t="wu"></span></h2><div class="card">
+ <div class="net" id="wuState"></div>
+ <form class="form mt" id="wuForm"><div class="two"><label><span data-t="wuSource"></span><select name="source" id="wuSource"><option value="github">GitHub</option><option value="webdav">WebDAV</option></select></label>
+ <label><span data-t="wuRepo"></span><input name="repo" id="wuRepo" autocomplete="off"></label></div>
+ <div class="row"><button type="button" class="pri" id="wuList"><span data-t="wuCheck"></span></button><button type="button" id="wuBack"><span data-t="wuBack"></span></button><span class="muted" data-t="wuHint"></span></div></form>
+ <div class="row mt hide" id="wuFilter"><input id="wuQ" placeholder="" data-ph="wuFilter" autocomplete="off" class="grow"><label class="row"><input type="checkbox" id="wuOld"> <span data-t="wuOld"></span></label></div>
+ <div class="nets mt" id="wuRows"></div></div></section>
 <section data-tab="install"><h2><svg stroke="currentColor"><use href="#i-redo"/></svg><span data-t="ota"></span></h2><div class="card">
  <form class="form" id="otaForm"><div class="two"><label><span data-t="otaUrl"></span><input name="url" id="otaUrl" placeholder="https://server.example" autocomplete="off"></label>
  <label><span data-t="otaFolder"></span><input name="folder" id="otaFolder" placeholder="MPF Games" autocomplete="off"></label></div><div class="two">
@@ -783,7 +817,7 @@ game:"Game",storage:"Storage",free:"free",uptime:"Up",online:"Online",offline:"O
 mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"The system is read-only: the flash is not worn. Games, settings, scores, Wi-Fi and SSH keys are stored on the data partition and can be changed.",
 maintTxt:"The system is writable (for updates of the operating system). Go back to production when you are done.",toMaint:"Maintenance until reboot",toMaintStay:"Maintenance, also after reboots",toProd:"Back to production",
 degraded:"No data partition: settings and scores are kept in RAM and are lost at power-off.",inbox:"Waiting in the inbox (installed at the next boot): ",inboxHelp:"Files copied to the inbox folder are installed at boot.",
-uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none",ota:"Updates (WebDAV)",otaUrl:"Server address",otaUser:"User",otaPw:"Password",otaPwKept:"unchanged",otaSave:"Save",otaCheck:"Check for updates",otaInstall:"Install",otaDone:"Installed",otaChanged:"Changed on the server",otaNone:"Nothing found in this folder",otaGame:"Game",otaPack:"PuP Pack",otaHint:"The address is the server only; the folder (default MPF Games) holds bundles (.tar.xz, with a .sha256), in sub-folders per game if you like, and PuP Pack .zip files (they go to the library)."},
+uploading:"Uploading",installing:"Installing",done:"Done",error:"Error",hostPrefix:"Address",signal:"signal",openNet:"open",selectGame:"Pick a game",saved:"Saved",close:"Close",cancel:"Cancel",saveSettings:"Save settings",none:"none",ota:"Updates (WebDAV)",otaUrl:"Server address",otaUser:"User",otaPw:"Password",otaPwKept:"unchanged",otaSave:"Save",otaCheck:"Check for updates",otaInstall:"Install",otaDone:"Installed",otaChanged:"Changed on the server",otaNone:"Nothing found in this folder",otaGame:"Game",otaPack:"PuP Pack",branch:"branch",otaDelta:"Update (delta)",wu:"Page updates",wuSource:"Source",wuRepo:"Repository",wuInstalled:"Installed version",wuNewer:"newer commits",wuUpdate:"Update",wuFilter:"Filter (name, PR, title)",wuOld:"Show merged and closed",wuCheck:"Check",wuInstall:"Install",wuBack:"Go back",wuRunning:"In use",wuImage:"the image's own copy",wuPending:"waiting for the first successful start",wuHint:"Updates only the setup page and its tools (not Godot, drivers or the kernel). If the new version does not start, the previous one comes back by itself.",wuNoPrev:"Nothing to go back to",wuOk:"Updating: the page restarts, reload it in a few seconds.",wuConfirm:"Install this version of the page?",wuRo:"The data partition is not writable",otaHint:"The address is the server only; the folder (default MPF Games) holds bundles (.tar.xz, with a .sha256), in sub-folders per game if you like, and PuP Pack .zip files (they go to the library)."},
 fr:{dmdTitle:"Affichage DMD",scrTitle:"Écrans",scrGame:"Fenêtres de {g} : choisis l'écran de chacune.",scrMain:"principal",scrNone:"Aucun écran détecté (les numéros restent valables).",scrDmdOff:"Le DMD est sur un {o} : la fenêtre DMD du jeu n'est pas affichée sur un écran.",scrHint:"Mode normal : le backglass seul sur l'écran principal, le DMD LCD sur un second écran (ou dans la fenêtre du backglass, voir les réglages du jeu), le DMD sur un ZeDMD (libzedmd) ou un PIN2DMD (monochrome natif) quand il est choisi plus haut. Les écrans sont numérotés de gauche à droite. Appliqué au prochain démarrage du jeu.",dmdLook:"Aspect (LCD)",dmdLookAuto:"Celui par défaut du jeu",dmdLook_classic:"Classique 128x32 (les points de la ROM)",dmdLook_hd:"HD (police vectorielle)",dmdLook_advanced:"HD avancé (animations en plus)",dmdLookFixed:"Un ZeDMD ou un PIN2DMD affiche toujours les points exacts du 128x32 classique (un ZeDMD avec colorisation Serum aussi).",dmdLookNone:"Ce jeu n'a qu'un seul aspect.",dmdLookNow:"Aspect de {g} : {l}.",dmdSize:"Taille de l'aperçu",dmdWeb:"Cette page web (aperçu en direct)",dmdLiveNone:"Pas d'image DMD : démarre le jeu. Un jeu qui n'en publie pas (pas de `dmd.looks` dans son bundle) montre son DMD dans les captures d'écran.",dmdOut:"Affichage du DMD",dmdAuto:"Automatique (selon la détection)",dmdLcd:"DMD LCD (écran)",dmdColor:"Couleur",dmdHint:"Une seule sortie à la fois. Automatique choisit un PIN2DMD ou un ZeDMD s'il est branché, sinon l'écran. Un ZeDMD affiche le DMD 128x32 du jeu dans cette couleur, ou en couleur avec une colorisation Serum. Appliqué au prochain démarrage du jeu.",dmdNoBridge:"Ce système n'a pas dmd_bridge : un ZeDMD est inutilisable.",serumTitle:"Colorisations Serum",serumNone:"Aucune colorisation envoyée.",serumDefault:"Défaut (celle qui porte le nom de la ROM du jeu)",serumOff:"Sans couleur",dropSerum:"Colorisation Serum",dropSerumHint:"Déposez trn_174h.cROMc (ou .cRZ) ici ou cliquez",tabGames:"Jeux",tabInstall:"Installation et mises à jour",tabConfig:"Configuration",diag:"Diagnostic",saveLog:"Enregistrer le jeu (log)",saveLogHint:"Écrit la sortie du jeu, l'état de la machine et les derniers changements de switches dans un fichier sur la partition de données (les logs en cours sont en RAM), à fournir pour le débogage.",savedLogs:"Logs enregistrés",monitor:"Moniteur de switches",monFilter:"Filtrer…",monToggle:"Un clic inverse le switch",monTap:"Un clic fait une impulsion",monHint:"Vue en direct par la connexion BCP de MPF (le jeu doit être démarré). Appui court = le switch se ferme puis s'ouvre, appui long = il reste fermé tant que vous maintenez, clic droit = bascule. Ctrl + molette = zoom.",monLog:"Derniers changements",monNone:"Aucun switch",monZoom:"Zoom",monSize:"Taille",monViewPf:"Plateau",monViewList:"Liste",monOn:"actif",monOff:"inactif",monConn:"Connecté",monDisc:"Non connecté",games:"Jeux",add:"Ajouter un jeu ou un PuP Pack",dropGame:"Bundle du jeu",dropGameHint:"Déposez un .tar.xz ici ou cliquez",dropPup:"PuP Pack",dropPupHint:"Déposez le .zip du pack ici ou cliquez",
 goGame:"Envoyer et installer",goPup:"Ajouter à la bibliothèque",packs:"PuP Packs",assign:"Pack de chaque jeu",assignHint:"Un pack est ajouté une fois à la bibliothèque, puis affecté à un jeu ici. Le changer ne demande pas de nouvel envoi (le jeu garde un lien vers le pack).",noPack:"Aucun pack",ownPack:"installé avec le jeu",packNone:"Aucun pack dans la bibliothèque.",scDl:"Télécharger (replay_scenario.py le rejoue dans MPF en simulation)",scRec:"Enregistrer un scénario",scStop:"Arrêter et enregistrer",scRecording:"Enregistrement de vos clics",scNone:"Aucun scénario enregistré pour ce jeu.",scEmpty:"Rien n'a été enregistré.",scName:"Nom du scénario",scConfirmDel:"Supprimer ce scénario ?",loose:"à la racine",looseHint:"Pas dans un sous-dossier : webdav_tidy.py le range",del:"Supprimer",noZip:"pas de zip",unpacked:"décompressé",usedBy:"utilisé par",inUse:"Utilisé : le retirer du jeu d'abord",confirmDelPack:"Retirer ce pack de la bibliothèque ?",otaFolder:"Dossier sur le serveur",otaUpdates:"met à jour",otaNew:"nouveau jeu",builtOn:"construite le",installedOn:"installée le",latestV:"dernière version",olderV:"ancienne version",keepOld:"Garder les anciennes versions de ce jeu",sha:"Son fichier .sha256 (facultatif)",packFor:"Installer le pack pour",network:"Réseau",system:"Système",scan:"Rechercher",ssid:"Nom du réseau",psk:"Mot de passe",country:"Code pays",connect:"Enregistrer et connecter",
 sshKey:"Clé publique SSH",sshPw:"Connexion SSH par mot de passe",unchanged:"inchangé",save:"Enregistrer",logs:"Sortie du jeu",active:"Actif",activate:"Activer au démarrage",start:"Démarrer",stop:"Arrêter",restart:"Redémarrer",settings:"Réglages",delete:"Supprimer",
@@ -792,7 +826,7 @@ game:"Jeu",storage:"Stockage",free:"libres",uptime:"Démarré depuis",online:"En
 mode:"Mode",production:"Production",maintenance:"Maintenance",prodTxt:"Le système est en lecture seule : la flash ne s'use pas. Jeux, réglages, scores, Wi-Fi et clés SSH sont sur la partition de données et restent modifiables.",
 maintTxt:"Le système est modifiable (mises à jour du système). Revenez en production quand vous avez fini.",toMaint:"Maintenance jusqu'au redémarrage",toMaintStay:"Maintenance, même après redémarrage",toProd:"Retour en production",
 degraded:"Pas de partition de données : réglages et scores sont en RAM et perdus à l'extinction.",inbox:"En attente dans la boîte d'arrivée (installés au prochain démarrage) : ",inboxHelp:"Les fichiers copiés dans le dossier inbox sont installés au démarrage.",
-uploading:"Envoi",installing:"Installation",done:"Terminé",error:"Erreur",hostPrefix:"Adresse",signal:"signal",openNet:"ouvert",selectGame:"Choisir un jeu",saved:"Enregistré",close:"Fermer",cancel:"Annuler",saveSettings:"Enregistrer les réglages",none:"aucun",ota:"Mises à jour (WebDAV)",otaUrl:"Adresse du serveur",otaUser:"Utilisateur",otaPw:"Mot de passe",otaPwKept:"inchangé",otaSave:"Enregistrer",otaCheck:"Chercher les mises à jour",otaInstall:"Installer",otaDone:"Installé",otaChanged:"Modifié sur le serveur",otaNone:"Rien dans ce dossier",otaGame:"Jeu",otaPack:"PuP Pack",otaHint:"L'adresse est celle du serveur seul ; le dossier (MPF Games par défaut) contient les bundles (.tar.xz, avec un .sha256), éventuellement un sous-dossier par jeu, et les PuP Packs .zip (ils vont dans la bibliothèque)."}};
+uploading:"Envoi",installing:"Installation",done:"Terminé",error:"Erreur",hostPrefix:"Adresse",signal:"signal",openNet:"ouvert",selectGame:"Choisir un jeu",saved:"Enregistré",close:"Fermer",cancel:"Annuler",saveSettings:"Enregistrer les réglages",none:"aucun",ota:"Mises à jour (WebDAV)",otaUrl:"Adresse du serveur",otaUser:"Utilisateur",otaPw:"Mot de passe",otaPwKept:"inchangé",otaSave:"Enregistrer",otaCheck:"Chercher les mises à jour",otaInstall:"Installer",otaDone:"Installé",otaChanged:"Modifié sur le serveur",otaNone:"Rien dans ce dossier",otaGame:"Jeu",otaPack:"PuP Pack",branch:"branche",otaDelta:"Mettre à jour (delta)",wu:"Mises à jour de la page",wuSource:"Source",wuRepo:"Dépôt",wuInstalled:"Version installée",wuNewer:"commits plus récents",wuUpdate:"Mise à jour",wuFilter:"Filtrer (nom, PR, titre)",wuOld:"Afficher fusionnées et fermées",wuCheck:"Chercher",wuInstall:"Installer",wuBack:"Revenir en arrière",wuRunning:"En service",wuImage:"la copie de l'image",wuPending:"en attente du premier démarrage réussi",wuHint:"Met à jour seulement la page de réglages et ses outils (pas Godot, les pilotes ni le noyau). Si la nouvelle version ne démarre pas, la précédente revient toute seule.",wuNoPrev:"Rien à restaurer",wuOk:"Mise à jour : la page redémarre, rechargez-la dans quelques secondes.",wuConfirm:"Installer cette version de la page ?",wuRo:"La partition de données n'est pas inscriptible",otaHint:"L'adresse est celle du serveur seul ; le dossier (MPF Games par défaut) contient les bundles (.tar.xz, avec un .sha256), éventuellement un sous-dossier par jeu, et les PuP Packs .zip (ils vont dans la bibliothèque)."}};
 let L=(localStorage.getItem('mpfLang')||navigator.language||'en').slice(0,2);if(!T[L])L='en';
 const t=k=>(T[L]&&T[L][k])||T.en[k]||k, $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ico=(n,c='')=>`<svg class="${c}" stroke="currentColor"><use href="#i-${n}"/></svg>`;
@@ -864,7 +898,7 @@ async function upload(kind,f,extra){
 function setJob(msg,pct,cls,badge){$('#jobBox').classList.remove('hide');$('#jobMsg').textContent=msg;const b=$('#jobBar');b.className='bar mt '+(cls||'');b.firstElementChild.style.width=(pct==null?100:pct)+'%'}
 function renderJob(j){if(!j||j.state==='idle')return;const bd=$('#jobBadge');bd.className='badge '+(j.state==='done'?'ok':j.state==='error'?'bad':'acc');bd.textContent=t(j.state==='running'?'installing':j.state==='uploading'?'uploading':j.state);
  setJob(j.msg,j.state==='running'?null:100,j.state==='running'?'run':'');const l=$('#jobLog');if(j.log){l.textContent=j.log;l.classList.remove('hide')}}
-let pt;async function poll(){clearTimeout(pt);try{const j=await (await fetch('/job')).json();renderJob(j);if(j.state==='running'||j.state==='uploading')pt=setTimeout(poll,2000);else if(j.state==='done'){refresh()}}catch(e){pt=setTimeout(poll,3000)}}
+let pt;async function poll(){clearTimeout(pt);try{const j=await (await fetch('/job')).json();renderJob(j);if(j.state==='running'||j.state==='uploading')pt=setTimeout(poll,2000);else if(j.state==='done'){refresh()}else if(j.state==='error'&&window._lastErr!==j.msg){window._lastErr=j.msg;toast(j.msg,true)}}catch(e){pt=setTimeout(poll,3000)}}
 // choosing or dropping a file only selects it: the hash file can still be added, and nothing is sent until the button
 $('#fGame')._go=f=>{$('#goGame').disabled=false};$('#fPup')._go=f=>{$('#goPup').disabled=false};
 pick($('#dropGame'),$('#fGame'));pick($('#dropPup'),$('#fPup'));
@@ -934,9 +968,22 @@ $('#otaForm').addEventListener('input',()=>{otaDirty=true});
 $('#otaForm').onsubmit=async e=>{e.preventDefault();const r=await post('/api/ota/config',Object.fromEntries(new FormData(e.target)));if(r&&r.ok)otaDirty=false};
 $('#otaCheck').onclick=async()=>{const b=$('#otaCheck');b.disabled=true;$('#otaList').innerHTML='<span class="muted">…</span>';
  try{const r=await fetch('/api/ota/list');const j=await r.json();if(!r.ok){toast(j.msg||'?',true);$('#otaList').innerHTML='';b.disabled=false;return}
- $('#otaList').innerHTML=j.map(i=>`<div class="net"><b class="grow">${esc(i.version?i.label+' '+i.version:(i.group?i.group+' / ':'')+i.name)}</b>${i.kind==='game'&&!(i.version&&i.installed&&!i.update)?`<span class="badge">${i.for?t('otaUpdates')+' '+esc(i.for):t('otaNew')}</span>`:''}<span class="muted">${i.kind==='game'?t('otaGame'):t('otaPack')} · ${fmtB(i.size)}${i.mtime&&fmtD(i.mtime)?' · '+fmtD(i.mtime):''}</span>${i.loose?`<span class="badge" title="${t('looseHint')}">${t('loose')}</span>`:''}${i.changed?`<span class="badge">${t('otaChanged')}</span>`:i.installed?`<span class="badge">${t('otaDone')}</span>`:''}${i.compatible?`<button data-k="${esc(i.key)}">${t('otaInstall')}</button>`:''}</div>`).join('')||'<span class="muted">'+t('otaNone')+'</span>'}catch(e){toast('?',true)}b.disabled=false};
-$('#otaList').onclick=async e=>{const b=e.target.closest('button[data-k]');if(!b)return;b.disabled=true;await post('/api/ota/install',{key:b.dataset.k});poll()};
-async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);packs(S);dmdRender(S);otaFill(S.ota)}catch(e){}}
+ $('#otaList').innerHTML=j.map(i=>`<div class="net"><b class="grow">${esc(i.version?i.label+' '+i.version:(i.group?i.group+' / ':'')+i.name)}</b>${i.kind==='game'&&!(i.version&&i.installed&&!i.update)?`<span class="badge">${i.for?t('otaUpdates')+' '+esc(i.for):t('otaNew')}</span>`:''}<span class="muted">${i.kind==='game'?t('otaGame'):t('otaPack')} · ${fmtB(i.size)}${i.mtime&&fmtD(i.mtime)?' · '+fmtD(i.mtime):''}</span>${i.loose?`<span class="badge" title="${t('looseHint')}">${t('loose')}</span>`:''}${i.changed?`<span class="badge">${t('otaChanged')}</span>`:i.installed?`<span class="badge">${t('otaDone')}</span>`:''}${i.branch?`<span class="badge">${t('branch')} ${esc(i.branch)}</span>`:''}${i.compatible&&i.delta?`<button class="pri" data-k="${esc(i.key)}" data-mode="delta">${t('otaDelta')}</button>`:''}${i.compatible?`<button data-k="${esc(i.key)}">${t('otaInstall')}</button>`:''}</div>`).join('')||'<span class="muted">'+t('otaNone')+'</span>'}catch(e){toast('?',true)}b.disabled=false};
+$('#otaList').onclick=async e=>{const b=e.target.closest('button[data-k]');if(!b)return;b.disabled=true;await post('/api/ota/install',{key:b.dataset.k,mode:b.dataset.mode||'full'});poll()};
+function wuInfo(m){if(!m)return t('wuImage');return esc(m.branch||m.id)+(m.pr?' · PR #'+m.pr:'')+(m.sha?' · '+esc(m.sha):'')+(m.description?' · '+esc(m.description):'')+(m.built?' · '+t('builtOn')+' '+esc(fmtD(m.built)||m.built):'')}
+function wuFill(w){if(!w)return;const o=window._wu;if(o&&o!==w&&o._upd!==undefined&&o.current&&w.current&&o.current.sha===w.current.sha)w._upd=o._upd;window._wu=w;$('#wuState').innerHTML=`<b class="grow">${t('wuInstalled')}</b><span class="muted">${wuInfo(w.current)}</span>${w.pending?'<span class="badge">'+t('wuPending')+'</span>':''}${w._upd?'<span class="badge">'+t('wuNewer')+'</span>':''}`;const f=$('#wuForm');if(!f.contains(document.activeElement)&&!f.dataset.d){$('#wuSource').value=w.config.source;$('#wuRepo').value=w.config.repo}$('#wuBack').disabled=!w.has_previous}
+$('#wuForm').addEventListener('input',()=>{$('#wuForm').dataset.d=1});
+function wuDraw(){const j=window._wuList||[],src=$('#wuSource').value,q=$('#wuQ').value.trim().toLowerCase(),old=$('#wuOld').checked,cur=(window._wu&&window._wu.current)||{};
+ const rows=j.filter(x=>{if(src==='github'&&!old&&x.name!=='main'&&x.state&&x.state!=='open'&&!(cur.branch&&cur.branch===x.name))return false;const hay=(x.name+' '+(x.branch||'')+' '+(x.title||'')+' '+(x.pr?'#'+x.pr:'')+' '+(x.sha||'')).toLowerCase();return !q||hay.includes(q)});
+ $('#wuRows').innerHTML=rows.map(x=>{const v=x.name,same=(cur.branch||'')===(x.branch||x.name),here=cur.sha&&x.sha&&cur.sha===x.sha&&same,upd=src==='github'&&same&&cur.sha&&x.sha&&cur.sha!==x.sha;
+   const title=src==='github'?(x.pr?`<span class="badge">PR #${x.pr}${x.state?' '+esc(x.state):''}</span>`:'')+(x.title?' '+esc(x.title):''):(x.pr?`<span class="badge">PR #${x.pr}</span> `:'')+esc(x.title||'');
+   return `<div class="net"><div class="grow"><b>${esc(src==='github'?x.name:(x.branch||x.name))}</b> <span class="muted">${esc(x.sha||'')}${x.date&&fmtD(x.date)?' · '+fmtD(x.date):''}${src==='webdav'&&x.size?' · '+fmtB(x.size):''}${src==='webdav'&&x.mtime&&fmtD(x.mtime)?' · '+fmtD(x.mtime):''}</span><div class="muted">${title||'—'}</div></div>${here?'<span class="badge">'+t('wuInstalled')+'</span>':upd?`<span class="badge">${t('wuNewer')}</span><button class="pri" data-wu="${esc(v)}">${t('wuUpdate')}</button>`:`<button data-wu="${esc(v)}">${t('wuInstall')}</button>`}</div>`}).join('')||'<span class="muted">'+t('otaNone')+'</span>'}
+$('#wuQ').oninput=$('#wuOld').onchange=wuDraw;
+$('#wuList').onclick=async()=>{const b=$('#wuList');b.disabled=true;const src=$('#wuSource').value;$('#wuRows').innerHTML='<span class="muted">…</span>';await post('/api/webupdate/config',{source:src,repo:$('#wuRepo').value,branch:(window._wu&&window._wu.config.branch)||'main'});
+ try{const r=await fetch(src==='github'?'/api/webupdate/branches':'/api/webupdate/list');const j=await r.json();if(!r.ok){toast(j.msg||'?',true);$('#wuRows').innerHTML=''}else{window._wuList=j;{const c=(window._wu&&window._wu.current)||{},m=src==='github'&&c.branch&&j.find(x=>x.name===c.branch);window._wu._upd=!!(m&&c.sha&&m.sha&&m.sha!==c.sha);wuFill(window._wu)}$('#wuFilter').classList.remove('hide');$('#wuOld').parentNode.classList.toggle('hide',src!=='github');wuDraw()}}catch(e){toast('?',true)}b.disabled=false};
+$('#wuRows').onclick=async e=>{const b=e.target.closest('button[data-wu]');if(!b)return;const src=$('#wuSource').value,v=b.dataset.wu;if(!confirm(t('wuConfirm')+'\n'+v))return;b.disabled=true;const r=await post('/api/webupdate/install',src==='github'?{source:src,repo:$('#wuRepo').value,branch:v}:{source:src,name:v});if(r&&r.ok)poll()};
+$('#wuBack').onclick=async()=>{if(confirm(t('wuBack')+' ?'))await post('/api/webupdate/rollback',{})};
+async function refresh(){try{S=await (await fetch('/api/state')).json();render(S);packs(S);dmdRender(S);otaFill(S.ota);wuFill(S.webupdate)}catch(e){}}
 const TABS=['games','install','config','monitor'];let TAB=(location.hash||'').slice(1);if(!TABS.includes(TAB))TAB='games';
 function showTab(){dmdLive();document.querySelector('main').classList.toggle('wide',TAB==='monitor');if(TAB==='monitor')monStart();else monStop();document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('hide',e.dataset.tab!==TAB));document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.go===TAB))}
 $('#tabs').onclick=e=>{const b=e.target.closest('button[data-go]');if(!b)return;TAB=b.dataset.go;history.replaceState(null,'','#'+TAB);showTab();if(TAB==='config'){savedList();audLoad()}};
