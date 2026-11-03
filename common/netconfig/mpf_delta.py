@@ -25,6 +25,7 @@ import mpf_games as G
 
 WORKERS = 8
 MAX_OUT = 4 << 20
+SMALL = 1 << 20
 
 
 def sha_file(path):
@@ -115,20 +116,47 @@ def install(item, fetch, keep_old=True):
     for d in doc.get("dirs", []):
         os.makedirs(os.path.join(root, _safe(d)), exist_ok=True)
     idx = local_index()
-    reused, remote = 0, []
+    reused, remote, cands = 0, [], []
     for f in files:
         dest = os.path.join(root, _safe(f["path"]))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         src = idx.get(f["sha256"])
-        if src:
+        if src and os.path.getsize(src) == f["size"]:
+            cands.append((f, dest, src))
+        else:
+            remote.append((f, dest))
+    # A file an installed game lists in its SHA256SUMS may have changed since (Godot rewrites .godot/ caches at run time): it is
+    # hashed again before it is reused, and downloaded when it differs.
+    G.job_set(msg=f"Delta: checking {len(cands)} local files")
+    done = [0]
+
+    def check(c):
+        f, dest, src = c
+        ok = sha_file(src) == f["sha256"]
+        done[0] += 1
+        if done[0] % 500 == 0:
+            G.job_set(msg=f"Delta: checked {done[0]}/{len(cands)} local files")
+        return ok
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        verdicts = list(pool.map(check, cands))
+    stale = 0
+    for (f, dest, src), ok in zip(cands, verdicts):
+        if not ok:
+            remote.append((f, dest))
+            stale += 1
+            continue
+        # a small file or a Godot cache is copied: the game rewrites it in place, which must not change the other version too
+        if f["size"] < SMALL or f["path"].startswith(".godot/") or "/.godot/" in f["path"]:
+            shutil.copy2(src, dest)
+        else:
             try:
                 os.link(src, dest)
             except OSError:
                 shutil.copy2(src, dest)
-            os.chmod(dest, f.get("mode", 0o644))
-            reused += 1
-        else:
-            remote.append((f, dest))
+        os.chmod(dest, f.get("mode", 0o644))
+        reused += 1
+    if stale:
+        G.job_log(f"delta: {stale} local files changed since their install, downloaded again")
     total = sum(f["size"] for f, _ in remote)
     G.job_set(msg=f"Delta: {reused} files already here, {len(remote)} to download ({total >> 20} MB)")
     state = {"files": 0, "bytes": 0, "t": 0.0, "stop": False}

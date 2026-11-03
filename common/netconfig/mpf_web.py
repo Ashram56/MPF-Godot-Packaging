@@ -837,7 +837,7 @@ async function upload(kind,f,extra){
 function setJob(msg,pct,cls,badge){$('#jobBox').classList.remove('hide');$('#jobMsg').textContent=msg;const b=$('#jobBar');b.className='bar mt '+(cls||'');b.firstElementChild.style.width=(pct==null?100:pct)+'%'}
 function renderJob(j){if(!j||j.state==='idle')return;const bd=$('#jobBadge');bd.className='badge '+(j.state==='done'?'ok':j.state==='error'?'bad':'acc');bd.textContent=t(j.state==='running'?'installing':j.state==='uploading'?'uploading':j.state);
  setJob(j.msg,j.state==='running'?null:100,j.state==='running'?'run':'');const l=$('#jobLog');if(j.log){l.textContent=j.log;l.classList.remove('hide')}}
-let pt;async function poll(){clearTimeout(pt);try{const j=await (await fetch('/job')).json();renderJob(j);if(j.state==='running'||j.state==='uploading')pt=setTimeout(poll,2000);else if(j.state==='done'){refresh()}}catch(e){pt=setTimeout(poll,3000)}}
+let pt;async function poll(){clearTimeout(pt);try{const j=await (await fetch('/job')).json();renderJob(j);if(j.state==='running'||j.state==='uploading')pt=setTimeout(poll,2000);else if(j.state==='done'){refresh()}else if(j.state==='error'&&window._lastErr!==j.msg){window._lastErr=j.msg;toast(j.msg,true)}}catch(e){pt=setTimeout(poll,3000)}}
 // choosing or dropping a file only selects it: the hash file can still be added, and nothing is sent until the button
 $('#fGame')._go=f=>{$('#goGame').disabled=false};$('#fPup')._go=f=>{$('#goPup').disabled=false};
 pick($('#dropGame'),$('#fGame'));pick($('#dropPup'),$('#fPup'));
