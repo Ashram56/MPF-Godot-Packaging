@@ -200,7 +200,8 @@ def _arg(v):
 
 
 def apply_ini(game, writes):
-    """Write the `ini` settings into the game's files (configparser; the other keys of a file stay as they are)."""
+    """Write the `ini` settings into the game's files (configparser; the other keys of a file stay as they are). Values are JSON
+    (`true`, `2.0`, `"auto"`), the way Godot's ConfigFile and the games' own parsers read them: a bare `auto` is not a value to Godot."""
     for rel, keys in writes.items():
         path = os.path.join(game, rel)
         cp = configparser.ConfigParser(interpolation=None)
@@ -209,7 +210,7 @@ def apply_ini(game, writes):
         for (sec, key), v in keys.items():
             if not cp.has_section(sec):
                 cp.add_section(sec)
-            cp.set(sec, key, v)
+            cp.set(sec, key, json.dumps(v))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             cp.write(f)
@@ -229,7 +230,7 @@ def plan(game, b, board_name=None):
         if "godot_arg" in t:
             godot.append(f"{t['godot_arg']}={_arg(v)}")
         elif "ini" in t:
-            ini.setdefault(t["ini"], {})[(t.get("section", "main"), t["key"])] = _arg(v)
+            ini.setdefault(t["ini"], {})[(t.get("section", "main"), t["key"])] = v
         elif t.get("hardware"):
             hw = str(v)
     if hw is None and hw_sets:

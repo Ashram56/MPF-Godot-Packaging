@@ -194,5 +194,18 @@ class Platform(Base):
         self.assertEqual(G.settings_values(os.path.join(C.GAMES, "demo@1.1")), {"machine.hw": "proc"})
 
 
+
+
+class IniValues(unittest.TestCase):
+    def test_values_are_written_as_json_for_godot(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        K.apply_ini(d, {"game/p.cfg": {("pup", "hide_cursor"): "auto", ("pup", "column_scale"): 2.0, ("pup", "ost"): True,
+                                       ("pup", "pack_dir"): "pup_pack/x y"}})
+        text = open(os.path.join(d, "game/p.cfg")).read()
+        for line in ('hide_cursor = "auto"', "column_scale = 2.0", "ost = true", 'pack_dir = "pup_pack/x y"'):
+            self.assertIn(line, text)
+
+
 if __name__ == "__main__":
     unittest.main()
