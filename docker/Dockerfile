@@ -22,7 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Godot's official build and GoZen (FFmpeg, software decoding) load.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git ca-certificates curl unzip xz-utils procps iproute2 openssl \
-        xvfb xauth x11vnc novnc websockify ffmpeg alsa-utils \
+        xvfb xauth x11vnc novnc websockify ffmpeg alsa-utils pulseaudio pulseaudio-utils \
         mesa-vulkan-drivers libvulkan1 libgl1 libegl1 libxcursor1 libxinerama1 libxi6 libxrandr2 libxkbcommon0 libxkbcommon-x11-0 \
         libfontconfig1 libdbus-1-3 libudev1 libasound2 libpulse0 libusb-1.0-0 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
