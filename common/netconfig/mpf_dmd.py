@@ -248,6 +248,8 @@ def plan(game_id, bundle, detected=None):
         return [], []
     d = bridge_dir()
     if not d:
+        print(f"dmd: the output is {out} but dmd_bridge was not found (MPF_DMD_BRIDGE_DIR, native/bin/<arch>/dmd_bridge): the game shows "
+              "its DMD on the screen instead", file=sys.stderr)
         return [], []           # no bridge on this system: the screen DMD
     user = ["--zedmd-shades", "--zedmd-feed=" + os.path.join(d, BRIDGE)]
     if out == "web":
