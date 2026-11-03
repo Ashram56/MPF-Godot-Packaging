@@ -308,7 +308,7 @@ def start_check(archive, repo, meta):
     say("checked: the start script's imports are all in the archive" + (" and run.check passed" if BC.check_command(meta) else ""))
 
 
-def publish(url, archive, folder, meta=None, digest="", branch="main", delta=True):
+def publish(url, archive, folder, meta=None, digest="", branch="main", delta=True, jobs=24):
     user, pw = os.environ.get("WEBDAV_USER", ""), os.environ.get("WEBDAV_PASS", "")
     if not user or not pw:
         die("--publish needs WEBDAV_USER and WEBDAV_PASS in the environment")
@@ -344,12 +344,12 @@ def publish(url, archive, folder, meta=None, digest="", branch="main", delta=Tru
     rel = base[len(url.rstrip("/") + "/"):] + urllib.parse.quote(os.path.basename(archive))
     extra = {"branch": branch}
     if delta and meta:
-        extra.update(publish_delta(req, mkcol, url.rstrip("/") + "/", folder, archive, meta, branch))
+        extra.update(publish_delta(req, mkcol, url.rstrip("/") + "/", folder, archive, meta, branch, jobs))
     if meta:
         write_manifest(req, url.rstrip("/") + "/", rel, archive, meta, digest, extra)
 
 
-def publish_delta(req, mkcol, root, folder, archive, meta, branch):
+def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=24):
     """files.json of this build and the objects the server does not have yet (mpf_delta.py: the page's delta install reads them)."""
     import mpf_delta as D
     tmp = tempfile.mkdtemp(prefix="delta-")
@@ -378,7 +378,7 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch):
                     if req("PUT", target, fh.read()) in (200, 201, 204):
                         return 1
             die(f"upload of object {sha[:12]} failed")
-        with concurrent.futures.ThreadPoolExecutor(24) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max(1, jobs)) as ex:
             res = list({f["sha256"]: f for f in doc["files"]}.values())
             res = list(ex.map(one, res))
         sent, kept = sum(res), len(res) - sum(res)
@@ -434,6 +434,8 @@ def main():
     ap.add_argument("--publish", metavar="WEBDAV_URL")
     ap.add_argument("--branch", default="", help="the branch of the game this build comes from (default: main). A branch other than main is published under "
                     "<game>/<branch>/<version>/ and installs next to the other branches (<id>@<version>+<branch>)")
+    ap.add_argument("--upload-jobs", type=int, default=24, metavar="N",
+                    help="how many delta objects are uploaded at once (default 24, a guess: the server's and the network's limits decide how far it helps)")
     ap.add_argument("--no-delta", action="store_true", help="publish the archive only (no files.json and objects for delta installs)")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
     ap.add_argument("--install-deps", action="store_true", help="install a missing git / venv with apt (Debian, Ubuntu, Raspberry Pi OS; needs root or sudo)")
@@ -515,7 +517,7 @@ def main():
     say(f"\n{archive}\n  {os.path.getsize(archive) >> 20} MB, sha256 {digest}")
     if a.publish:
         publish(a.publish, archive, recipe.get("publish_folder", meta.get("id", recipe["id"])), meta, digest,
-                branch=a.branch or "main", delta=not a.no_delta)
+                branch=a.branch or "main", delta=not a.no_delta, jobs=a.upload_jobs)
     say(f"\nPut it on a machine (common/games/README.md):\n"
         f"  - the setup page, Install tab: drop {os.path.basename(archive)} (and its .sha256)\n"
         f"  - before flashing: python3 common/games/inject_image.py IMAGE --bundle {archive}\n"
