@@ -277,6 +277,10 @@ if [ -n "$EXTRAS" ]; then
         in_chroot "cd /home/mpf/MPF-Godot && bash install/install_linux.sh --yes --no-setup --xvfb"
         rm -rf "$R/root/.local" "$R/root/.cache"   # root's copy of uv / Python 3.11, mpf gets its own
         in_chroot "su - mpf -c 'cd ~/MPF-Godot && MPF_GODOT_DIR=~/MPF-Godot bash install/install_linux.sh --yes'"
+        # dmd_bridge, the platform's ZeDMD + Serum output (libzedmd and libserum, both PPUC's, unmodified): ~/MPF-Godot/native/bin/dmd_bridge,
+        # where common/netconfig/mpf_dmd.py finds it. A game composes no argument for it.
+        in_chroot "apt-get install -y -qq autoconf automake libtool"
+        in_chroot "su - mpf -c 'cd ~/MPF-Godot && bash native/dmd_bridge/build_all.sh'"
         proxy_out
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
         printf '[Unit]\nStartLimitIntervalSec=0\n\n[Service]\nRestartSec=2\nExecStart=\nExecStart=-/sbin/agetty --autologin mpf --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
