@@ -24,6 +24,7 @@ import mpf_games as G
 
 
 WORKERS = 8
+MAX_OUT = 4 << 20
 
 
 def sha_file(path):
@@ -152,10 +153,14 @@ def install(item, fetch, keep_old=True):
                     chunk = r.read(1 << 20)
                     if not chunk:
                         break
-                    data = dec.decompress(chunk)
-                    h.update(data)
-                    out.write(data)
-                    progress(len(data))
+                    data = dec.decompress(chunk, MAX_OUT)       # a megabyte of zeros is a few bytes of xz: never expand it all at once
+                    while True:
+                        h.update(data)
+                        out.write(data)
+                        progress(len(data))
+                        if dec.needs_input or dec.eof:
+                            break
+                        data = dec.decompress(b"", MAX_OUT)
         except lzma.LZMAError:
             raise G.JobError(f"{f['path']}: the download is damaged, try again")
         if h.hexdigest() != f["sha256"] or not dec.eof:
