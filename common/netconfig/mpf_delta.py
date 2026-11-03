@@ -15,9 +15,17 @@ import json
 import lzma
 import os
 import shutil
+import threading
+import time
+import concurrent.futures
 
 import mpf_common as C
 import mpf_games as G
+
+
+WORKERS = 8
+MAX_OUT = 4 << 20
+SMALL = 1 << 20
 
 
 def sha_file(path):
@@ -108,38 +116,97 @@ def install(item, fetch, keep_old=True):
     for d in doc.get("dirs", []):
         os.makedirs(os.path.join(root, _safe(d)), exist_ok=True)
     idx = local_index()
-    reused = got = fetched = 0
-    todo = len(files)
-    for n, f in enumerate(files, 1):
+    reused, remote, cands = 0, [], []
+    for f in files:
         dest = os.path.join(root, _safe(f["path"]))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         src = idx.get(f["sha256"])
-        if src:
+        if src and os.path.getsize(src) == f["size"]:
+            cands.append((f, dest, src))
+        else:
+            remote.append((f, dest))
+    # A file an installed game lists in its SHA256SUMS may have changed since (Godot rewrites .godot/ caches at run time): it is
+    # hashed again before it is reused, and downloaded when it differs.
+    G.job_set(msg=f"Delta: checking {len(cands)} local files")
+    done = [0]
+
+    def check(c):
+        f, dest, src = c
+        ok = sha_file(src) == f["sha256"]
+        done[0] += 1
+        if done[0] % 500 == 0:
+            G.job_set(msg=f"Delta: checked {done[0]}/{len(cands)} local files")
+        return ok
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        verdicts = list(pool.map(check, cands))
+    stale = 0
+    for (f, dest, src), ok in zip(cands, verdicts):
+        if not ok:
+            remote.append((f, dest))
+            stale += 1
+            continue
+        # a small file or a Godot cache is copied: the game rewrites it in place, which must not change the other version too
+        if f["size"] < SMALL or f["path"].startswith(".godot/") or "/.godot/" in f["path"]:
+            shutil.copy2(src, dest)
+        else:
             try:
                 os.link(src, dest)
             except OSError:
                 shutil.copy2(src, dest)
-            reused += 1
-        else:
-            h, dec = hashlib.sha256(), lzma.LZMADecompressor()
-            try:
-                with fetch(item["objects"] + f"{f['sha256'][:2]}/{f['sha256']}.xz") as r, open(dest, "wb") as out:
+        os.chmod(dest, f.get("mode", 0o644))
+        reused += 1
+    if stale:
+        G.job_log(f"delta: {stale} local files changed since their install, downloaded again")
+    total = sum(f["size"] for f, _ in remote)
+    G.job_set(msg=f"Delta: {reused} files already here, {len(remote)} to download ({total >> 20} MB)")
+    state = {"files": 0, "bytes": 0, "t": 0.0, "stop": False}
+    lock = threading.Lock()
+
+    def progress(done_bytes, done_file=False):
+        with lock:
+            state["bytes"] += done_bytes
+            state["files"] += 1 if done_file else 0
+            if time.time() - state["t"] >= 1.0:
+                state["t"] = time.time()
+                G.job_set(msg=f"Delta: {state['files']}/{len(remote)} files, {state['bytes'] >> 20} of {total >> 20} MB downloaded ({reused} kept)")
+
+    def get(job):
+        f, dest = job
+        h, dec = hashlib.sha256(), lzma.LZMADecompressor()
+        try:
+            with fetch(item["objects"] + f"{f['sha256'][:2]}/{f['sha256']}.xz") as r, open(dest, "wb") as out:
+                while True:
+                    if state["stop"]:
+                        return
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    data = dec.decompress(chunk, MAX_OUT)       # a megabyte of zeros is a few bytes of xz: never expand it all at once
                     while True:
-                        chunk = r.read(1 << 20)
-                        if not chunk:
-                            break
-                        fetched += len(chunk)
-                        data = dec.decompress(chunk)
                         h.update(data)
                         out.write(data)
-            except lzma.LZMAError:
-                raise G.JobError(f"{f['path']}: the download is damaged, try again")
-            if h.hexdigest() != f["sha256"] or not dec.eof:
-                raise G.JobError(f"{f['path']}: checksum mismatch, try again")
-            got += 1
+                        progress(len(data))
+                        if dec.needs_input or dec.eof:
+                            break
+                        data = dec.decompress(b"", MAX_OUT)
+        except lzma.LZMAError:
+            raise G.JobError(f"{f['path']}: the download is damaged, try again")
+        if h.hexdigest() != f["sha256"] or not dec.eof:
+            raise G.JobError(f"{f['path']}: checksum mismatch, try again")
         os.chmod(dest, f.get("mode", 0o644))
-        if n % 20 == 0 or n == todo:
-            G.job_set(msg=f"Delta: {n}/{todo} files ({reused} kept, {got} downloaded, {fetched >> 20} MB)")
+        progress(0, True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as pool:     # one connection per file: many small ones are slow one by one
+        futures = [pool.submit(get, j) for j in remote]
+        try:
+            for fu in concurrent.futures.as_completed(futures):
+                fu.result()
+        except BaseException:
+            state["stop"] = True
+            for fu in futures:
+                fu.cancel()
+            raise
+    got, fetched = len(remote), state["bytes"]
     for l in doc.get("links", []):
         dest = os.path.join(root, _safe(l["path"]))
         os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -149,4 +216,5 @@ def install(item, fetch, keep_old=True):
             raise G.JobError(f"unsafe link in files.json: {l['path']}")
         os.symlink(l["target"], dest)
     G.job_log(f"delta: {reused} files already here, {got} downloaded ({fetched >> 20} MB)")
+    G.job_set(msg="Checking the game (trial start)")
     G.install_staged(stage, None, keep_old, str(item.get("branch") or doc.get("branch") or ""))

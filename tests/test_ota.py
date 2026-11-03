@@ -148,15 +148,20 @@ class Ota(TG.Base):
         G.run_job(O.install_item, items[("1.0", "main")], "delta")
         self.assertEqual(G.JOB["state"], "done", G.JOB["msg"] + G.JOB["log"])
         self.assertEqual([g["folder"] for g in G.installed_games()], ["demo@1.0"])
+        # a file the game rewrote since its install (Godot caches): the stale SHA256SUMS must not make the delta reuse it
+        inst = G.installed_games()[0]["path"]
+        open(os.path.join(inst, "media", "a.bin"), "wb").write(b"rewritten at run time")
         Dav.gets.clear()
         G.JOB_LOCK.acquire()
         G.run_job(O.install_item, items[("1.1", "dev")], "delta")
         self.assertEqual(G.JOB["state"], "done", G.JOB["msg"] + G.JOB["log"])
         self.assertEqual(sorted(g["folder"] for g in G.installed_games()), ["demo@1.0", "demo@1.1+dev"])
         objects = [p for p in Dav.gets if "/objects/" in p]
-        self.assertLessEqual(len(objects), 3, objects)          # code.py, SHA256SUMS and bundle.json changed; the two media files came from 1.0
-        self.assertFalse(any(p for p in objects if hashlib.sha256(b"A" * 5000).hexdigest() in p))
+        self.assertLessEqual(len(objects), 4, objects)          # code.py, SHA256SUMS, bundle.json changed and a.bin was rewritten locally; b.bin came from 1.0
+        self.assertTrue(any(hashlib.sha256(b"A" * 5000).hexdigest() in p for p in objects))     # a.bin was changed locally: fetched again
+        self.assertFalse(any(hashlib.sha256(b"B" * 5000).hexdigest() in p for p in objects))
         game = [g for g in G.installed_games() if g["folder"] == "demo@1.1+dev"][0]
+        self.assertEqual(open(os.path.join(game["path"], "media", "a.bin"), "rb").read(), b"A" * 5000)
         self.assertEqual(open(os.path.join(game["path"], "code.py"), "rb").read(), b"v2 changed")
         self.assertEqual(game["bundle"]["branch"], "dev")
         self.assertEqual({(i["version"], i["branch"]): i["installed"] for i in O.list_remote()}, {("1.0", "main"): True, ("1.1", "dev"): True})

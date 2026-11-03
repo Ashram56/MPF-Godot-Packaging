@@ -47,10 +47,28 @@ class JobError(Exception):
 
 
 def job_set(**kw):
+    prev = (JOB.get("state"), JOB.get("msg"))
     JOB.update(kw)
+    if (JOB.get("state"), JOB.get("msg")) != prev and JOB.get("msg"):
+        job_trace(f"{JOB.get('state')}: {JOB.get('msg')}")
     try:                    # the page may run in another process than an install started at boot (the inbox)
         with open(C.JOB_FILE, "w") as f:
             json.dump(JOB, f)
+    except OSError:
+        pass
+
+
+def job_trace(line):
+    """Every step of an install in the journal (stdout) and in `job.log` of the state folder (kept at 200 KB), so that a job the page
+    lost (the page restarted, the browser closed) can still be followed."""
+    print("job: " + line, flush=True)
+    try:
+        path = os.path.join(C.STATE_DIR, "job.log")
+        if os.path.exists(path) and os.path.getsize(path) > 200_000:
+            os.replace(path, path + ".1")
+        os.makedirs(C.STATE_DIR, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + line + "\n")
     except OSError:
         pass
 
