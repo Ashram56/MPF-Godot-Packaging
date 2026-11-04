@@ -139,7 +139,7 @@ class Platform(Base):
         game = self.game({"screens": [{"id": "dmd", "label": "DMD", "setting": "pup.dmd.screen"}]},
                          {"settings.json": json.dumps(schema).encode()})
         b = G.read_bundle(game)
-        self.assertEqual(G.screens_state(game), [{"id": "dmd", "label": "DMD", "index": 0}])
+        self.assertEqual(G.screens_state(game), [{"id": "dmd", "label": "DMD", "index": 0, "enabled": True}])
         G.screen_set(game, "dmd", "1")
         self.assertEqual(G.screens_state(game)[0]["index"], 1)
         self.assertNotIn("pup.dmd.screen", [o["id"] for o in G.settings_schema(game)["options"]])     # not in the generic form
