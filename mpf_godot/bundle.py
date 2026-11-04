@@ -1,7 +1,12 @@
 """Build a game bundle: the game as it runs (generated MPF config, media, sounds, fonts, Godot import already
 made), with no binary. platforms/game-bundles.md says why; the game describes itself in a small JSON spec.
 
-    python -m mpf_godot bundle SPEC.json --target all --out DIR [--version X.Y.Z] [--label LABEL] [--no-archive]
+    python -m mpf_godot bundle SPEC.json --target all --out DIR [--version X.Y.Z] [--label LABEL] [--no-archive] [--fast]
+
+--fast (the test loop, platforms/game-bundles.md "Fast rebuild"): the staged tree is kept in OUT/cache/<id>-<target>/ between
+builds and only synced (changed files copied, removed ones deleted), so Godot reimports only the media that changed and the
+hashes of unchanged files are reused; the archive is written with xz -0 (media are already compressed). A first --fast build
+costs the same as a normal one; the next ones take seconds plus the import of what changed.
 
 SPEC.json (paths relative to the spec's folder, the game's repository root):
   id, name                     bundle id (the archive and its top folder) and display name
@@ -44,6 +49,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -121,25 +127,90 @@ def copy_path(root, rel, dst_root):
     return n
 
 
-def stage_tree(root, spec, stage):
-    n = 0
+def walk_files(root, rel):
+    """The files of `rel` (a file or a folder) relative to root, minus skipped names."""
+    src = os.path.join(root, rel)
+    if not os.path.exists(src):
+        return []
+    if not os.path.isdir(src):
+        return [] if skip(rel) else [rel.replace(os.sep, "/")]
+    out = []
+    for base, dirs, names in os.walk(src):
+        dirs[:] = [d for d in dirs if d not in SKIP_NAMES]
+        out += [os.path.relpath(os.path.join(base, n), root).replace(os.sep, "/") for n in names]
+    return [f for f in out if not skip(f)]
+
+
+def source_files(root, spec):
+    """Every file the bundle takes from the game's repository (relative paths, sorted): the git-tracked folders minus
+    git_exclude, plus `copy`. Stops when a non-optional `copy` entry is missing."""
     game = spec.get("game_dir", "game")
     exclude = tuple(spec.get("git_exclude", [game + "/addons/"]))
+    files = set()
     for folder in spec.get("git_tracked", [game]):
         for p in git(root, "ls-files", "-z", folder).split("\0"):
-            if p and not p.startswith(exclude):
-                n += copy_path(root, p, stage)
+            if p and not p.startswith(exclude) and os.path.isfile(os.path.join(root, p)) and not skip(p):
+                files.add(p)
     missing = [rel for rel in spec.get("copy", []) if rel not in spec.get("optional", []) and not os.path.exists(os.path.join(root, rel))]
     if missing:
         raise SystemExit("the game's package is incomplete: the spec lists files that are not there (generated files the game "
                          "must produce before packing; `optional` lists the ones that may be absent): " + ", ".join(missing))
     for rel in spec.get("copy", []):
-        n += copy_path(root, rel, stage)
+        files.update(walk_files(root, rel))
+    return sorted(files)
+
+
+def stage_tree(root, spec, stage):
+    n = 0
+    for f in source_files(root, spec):
+        n += copy_path(root, f, stage)
     return n
 
 
-def forbidden(spec, stage):
-    found = [rel for rel in spec.get("never", []) if os.path.exists(os.path.join(stage, rel))]
+def generated(rel, game_rel):
+    """Files the build itself makes in the staged tree: the Godot import, bundle.json, SHA256SUMS."""
+    godot = (game_rel.rstrip("/") + "/.godot/").lstrip("./") if game_rel not in ("", ".") else ".godot/"
+    return rel.startswith(godot) or rel.endswith(".import") or rel in ("bundle.json", "SHA256SUMS")
+
+
+def sync_tree(root, spec, stage):
+    """--fast: make the kept staged tree equal to the source list, copying only what changed (size or mtime) and deleting
+    what left (with its .import). Returns (copied, removed, total)."""
+    files = source_files(root, spec)
+    want = set(files)
+    game_rel = spec.get("game_dir", "game")
+    copied = removed = 0
+    for f in files:
+        src, dst = os.path.join(root, f), os.path.join(stage, f)
+        s = os.stat(src)
+        try:
+            d = os.stat(dst)
+            if d.st_size == s.st_size and int(d.st_mtime) == int(s.st_mtime):
+                continue
+        except OSError:
+            pass
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+        copied += 1
+    for base, _, names in os.walk(stage, topdown=False):
+        for name in names:
+            rel = os.path.relpath(os.path.join(base, name), stage).replace(os.sep, "/")
+            if rel in want:
+                continue
+            if generated(rel, game_rel) and not (rel.endswith(".import") and not os.path.exists(os.path.join(stage, rel[:-7]))):
+                continue
+            os.remove(os.path.join(base, name))
+            removed += 1
+        if base != stage and not os.listdir(base):
+            os.rmdir(base)
+    return copied, removed, len(files)
+
+
+def forbidden(spec, stage, kept=False):
+    """Cabinet data in the staged tree. kept (--fast): the tree holds the previous build's Godot import, not cabinet data."""
+    game_rel = spec.get("game_dir", "game")
+    found = [rel for rel in spec.get("never", []) if os.path.exists(os.path.join(stage, rel))
+             and not (kept and generated(rel.rstrip("/") + "/", game_rel))]
     pats = spec.get("never_names", [])
     for base, _, files in os.walk(stage):
         for name in files:
@@ -156,7 +227,8 @@ def seed_imports(root, spec, stage):
         top = os.path.join(stage, s["dir"])
         for base, _, files in os.walk(top):
             for name in sorted(files):
-                if name.endswith(".png") and not name.startswith(tuple(s.get("skip_prefixes", ()))):
+                if name.endswith(".png") and not name.startswith(tuple(s.get("skip_prefixes", ()))) \
+                        and not os.path.exists(os.path.join(base, name + ".import")):   # kept by --fast: Godot filled it in
                     with open(os.path.join(base, name + ".import"), "w", encoding="utf-8", newline="\n") as f:
                         f.write(template)
                     n += 1
@@ -201,12 +273,16 @@ def set_texture_formats(project, formats):
     text = re.sub(r"^textures/vram_compression/import_\w+=.*\n", "", text, flags=re.M)
     if "[rendering]\n" not in text:
         raise SystemExit("no [rendering] section in " + project)
+    new = text.replace("[rendering]\n", "[rendering]\n\n" + "\n".join(lines) + "\n", 1)
+    with open(project, encoding="utf-8") as f:
+        if f.read() == new:
+            return
     with open(project, "w", encoding="utf-8") as f:
-        f.write(text.replace("[rendering]\n", "[rendering]\n\n" + "\n".join(lines) + "\n", 1))
+        f.write(new)
 
 
-def godot_import(game, godot):
-    for _ in range(2):          # the first pass can report add-on icon errors; the second is clean
+def godot_import(game, godot, passes=2):
+    for _ in range(passes):     # the first pass can report add-on icon errors; the second is clean
         subprocess.run([godot, "--headless", "--path", game, "--import"], stdout=subprocess.DEVNULL,
                        stderr=subprocess.DEVNULL, timeout=1800)
     if not os.path.isdir(os.path.join(game, ".godot", "imported")):
@@ -263,14 +339,32 @@ def sha256(path):
     return h.hexdigest()
 
 
-def write_sums(stage):
-    lines = []
+def write_sums(stage, cache=None):
+    """SHA256SUMS of the staged tree. cache (--fast): a JSON file of {path: [size, mtime_ns, sha256]}; a file whose size and
+    mtime did not change keeps its hash."""
+    old = {}
+    if cache and os.path.isfile(cache):
+        try:
+            with open(cache, encoding="utf-8") as f:
+                old = json.load(f)
+        except ValueError:
+            old = {}
+    new, lines = {}, []
     for base, dirs, files in os.walk(stage):
         dirs.sort()
         for name in files:
             rel = os.path.relpath(os.path.join(base, name), stage).replace(os.sep, "/")
-            if rel != "SHA256SUMS":
-                lines.append("{}  {}\n".format(sha256(os.path.join(base, name)), rel))
+            if rel == "SHA256SUMS":
+                continue
+            st = os.stat(os.path.join(base, name))
+            hit = old.get(rel)
+            digest = hit[2] if hit and hit[0] == st.st_size and hit[1] == st.st_mtime_ns and rel != "bundle.json" \
+                else sha256(os.path.join(base, name))
+            new[rel] = [st.st_size, st.st_mtime_ns, digest]
+            lines.append("{}  {}\n".format(digest, rel))
+    if cache:
+        with open(cache, "w", encoding="utf-8") as f:
+            json.dump(new, f)
     lines.sort(key=lambda l: l.split("  ", 1)[1])
     with open(os.path.join(stage, "SHA256SUMS"), "w", encoding="utf-8") as f:
         f.writelines(lines)
@@ -334,6 +428,11 @@ def main(argv=None):
     p.add_argument("--label", help="what the build holds, like serum-zedmd or hd-colour (default: the spec's `label`)")
     p.add_argument("--out", default="dist")
     p.add_argument("--no-archive", action="store_true")
+    p.add_argument("--fast", action="store_true",
+                   help="test loop: keep the staged tree and Godot import in OUT/cache/ and only sync what changed; xz -0 archive")
+    p.add_argument("--import-cache", metavar="URL",
+                   help="WebDAV folder that keeps Godot's import per medium (WEBDAV_PASS, WEBDAV_USER=claude in the environment): "
+                        "fetched before the import, so Godot only imports the media nobody imported before; new ones are sent after")
     args = p.parse_args(argv)
     spec_path = os.path.abspath(args.spec)
     root = os.path.abspath(args.root) if args.root else os.path.dirname(spec_path)
@@ -351,14 +450,25 @@ def main(argv=None):
         say("   WARNING: no --label: the archive name says nothing about what the build holds")
     formats = FORMATS[args.target]
     out = os.path.abspath(args.out)
-    parent = os.path.join(out, "stage")
-    stage = os.path.join(parent, spec["id"])
-    if os.path.isdir(parent):
-        fsutil.remove_dir(parent)
-    os.makedirs(stage)
-    say("== staging ({}, textures {})".format(args.target, formats))
-    say("   {} files".format(stage_tree(root, spec, stage)))
-    bad = forbidden(spec, stage)
+    t0 = time.time()
+    if args.fast:
+        parent = os.path.join(out, "cache", "{}-{}".format(spec["id"], args.target))
+        stage = os.path.join(parent, spec["id"])
+        warm = os.path.isdir(os.path.join(stage, game_rel, ".godot", "imported"))
+        os.makedirs(stage, exist_ok=True)
+        say("== staging, fast ({}, textures {}, {} cache {})".format(args.target, formats, "warm" if warm else "cold", parent))
+        copied, removed, total = sync_tree(root, spec, stage)
+        say("   {} files: {} copied, {} removed ({:.0f} s)".format(total, copied, removed, time.time() - t0))
+    else:
+        parent = os.path.join(out, "stage")
+        stage = os.path.join(parent, spec["id"])
+        warm = False
+        if os.path.isdir(parent):
+            fsutil.remove_dir(parent)
+        os.makedirs(stage)
+        say("== staging ({}, textures {})".format(args.target, formats))
+        say("   {} files".format(stage_tree(root, spec, stage)))
+    bad = forbidden(spec, stage, kept=args.fast)
     if bad:
         raise SystemExit("cabinet data in the bundle: " + ", ".join(bad))
     game = os.path.join(stage, game_rel)
@@ -366,7 +476,25 @@ def main(argv=None):
     if spec.get("force_vram"):
         say("   {} .import files set to VRAM compression".format(force_vram(stage, spec["force_vram"])))
     set_texture_formats(os.path.join(game, "project.godot"), formats)
-    godot_import(game, tc.godot_path())
+    cache = None
+    if args.import_cache:
+        from mpf_godot import import_cache as ic
+        cache = ic.ImportCache(args.import_cache, tc.GODOT_VERSION, formats, os.path.join(game, "project.godot"))
+        t1 = time.time()
+        try:
+            hits, misses = cache.restore(stage, game_rel)
+            say("   import cache: {} media found, {} to import ({:.0f} s)".format(hits, misses, time.time() - t1))
+        except OSError as e:
+            say("   WARNING: import cache unreachable ({}): Godot imports everything".format(e))
+            cache = None
+    t1 = time.time()
+    godot_import(game, tc.godot_path(), passes=1 if warm or (cache and cache.hits) else 2)   # also with no miss: Godot rebuilds its caches (32 s)
+    say("   Godot import {:.0f} s".format(time.time() - t1))
+    if cache is not None:
+        try:
+            say("   import cache: {} objects uploaded".format(cache.store(stage, game_rel)))
+        except OSError as e:
+            say("   WARNING: import cache not updated: {}".format(e))
     if not count_compressed(game):
         say("   WARNING: no VRAM-compressed texture was imported: the bundle has no S3TC/ETC2 variants. Textures need "
             "compress/mode=2 in their .import files (spec keys import_seed for untracked ones, force_vram for tracked ones)")
@@ -386,15 +514,19 @@ def main(argv=None):
             raise SystemExit("the bundle breaks the format 2 contract:\n  - " + "\n  - ".join(bad))
     with open(os.path.join(stage, "bundle.json"), "w", encoding="utf-8") as f:
         json.dump(m, f, indent=2)
-    say("== SHA256SUMS: {} files".format(write_sums(stage)))
+    say("== SHA256SUMS: {} files".format(write_sums(stage, os.path.join(parent, "sums.json") if args.fast else None)))
     if args.no_archive:
         say("== " + stage)
         return 0
     archive = os.path.join(out, "{}-{}-linux-{}.tar.xz".format(spec["id"], version, args.target))
-    subprocess.run(["tar", "-C", parent, "-cJf", archive, spec["id"]], check=True, env=dict(os.environ, XZ_OPT="-T0 -6"))
+    t1 = time.time()
+    subprocess.run(["tar", "-C", parent, "-cJf", archive, spec["id"]], check=True,
+                   env=dict(os.environ, XZ_OPT="-T0 -0" if args.fast else "-T0 -6"))
     with open(archive + ".sha256", "w") as f:
         f.write("{}  {}\n".format(sha256(archive), os.path.basename(archive)))
-    fsutil.remove_dir(parent)
+    if not args.fast:
+        fsutil.remove_dir(parent)
+    say("   archive {:.0f} s, {:.0f} MB; total {:.0f} s".format(time.time() - t1, os.path.getsize(archive) / 1e6, time.time() - t0))
     say("== " + archive)
     return 0
 

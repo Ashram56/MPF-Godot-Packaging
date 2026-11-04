@@ -36,10 +36,25 @@ def sha_file(path):
     return h.hexdigest()
 
 
-def export(root, out_dir, branch="main"):
+def sums_of(root):
+    """{path: sha256} read from the bundle's SHA256SUMS (the builder hashed every file already), {} without it."""
+    out = {}
+    try:
+        for line in open(os.path.join(root, "SHA256SUMS"), encoding="utf-8", errors="replace"):
+            sha, _, name = line.rstrip("\n").partition("  ")
+            if len(sha) == 64 and name:
+                out[name.lstrip("*")] = sha
+    except OSError:
+        pass
+    return out
+
+
+def export(root, out_dir, branch="main", known=()):
     """Publisher side: write `files.json` and the missing objects of the bundle folder `root` under `out_dir`.
+    `known`: sha256 of the objects the server has already (not compressed again); hashes come from SHA256SUMS when it lists the file.
     Returns (files_json_path, [object paths written])."""
     b = json.load(open(os.path.join(root, "bundle.json")))
+    sums = sums_of(root)
     files, links, dirs, written = [], [], [], []
     for dp, dn, fn in os.walk(root):
         rel = os.path.relpath(dp, root)
@@ -54,10 +69,10 @@ def export(root, out_dir, branch="main"):
             if os.path.islink(full):
                 links.append({"path": r, "target": os.readlink(full)})
                 continue
-            sha = sha_file(full)
+            sha = sums.get(r) or sha_file(full)
             files.append({"path": r, "size": os.path.getsize(full), "sha256": sha, "mode": os.stat(full).st_mode & 0o777})
             obj = os.path.join(out_dir, "objects", sha[:2], sha + ".xz")
-            if not os.path.exists(obj):
+            if sha not in known and not os.path.exists(obj):
                 os.makedirs(os.path.dirname(obj), exist_ok=True)
                 with open(full, "rb") as f, lzma.open(obj + ".tmp", "wb", preset=6) as g:
                     shutil.copyfileobj(f, g, 1 << 20)

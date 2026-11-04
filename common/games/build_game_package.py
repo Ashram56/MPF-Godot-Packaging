@@ -308,7 +308,7 @@ def start_check(archive, repo, meta):
     say("checked: the start script's imports are all in the archive" + (" and run.check passed" if BC.check_command(meta) else ""))
 
 
-def publish(url, archive, folder, meta=None, digest="", branch="main", delta=True, jobs=100):
+def publish(url, archive, folder, meta=None, digest="", branch="main", delta=True, jobs=100, staged=None, name=None):
     user, pw = os.environ.get("WEBDAV_USER", ""), os.environ.get("WEBDAV_PASS", "")
     if not user or not pw:
         die("--publish needs WEBDAV_USER and WEBDAV_PASS in the environment")
@@ -317,8 +317,8 @@ def publish(url, archive, folder, meta=None, digest="", branch="main", delta=Tru
         die("a game is published in a sub-folder named by its id, never at the root")
     base = url.rstrip("/") + "/" + folder + "/"
 
-    def req(method, target, data=None, want_body=False):
-        r = urllib.request.Request(target, data=data, method=method, headers={"Authorization": auth})
+    def req(method, target, data=None, want_body=False, headers=None):
+        r = urllib.request.Request(target, data=data, method=method, headers=dict(headers or {}, Authorization=auth))
         try:
             with urllib.request.urlopen(r, timeout=600) as resp:
                 return (resp.status, resp.read()) if want_body else resp.status
@@ -334,42 +334,85 @@ def publish(url, archive, folder, meta=None, digest="", branch="main", delta=Tru
     if branch != "main":                         # builds of one version on several branches must not overwrite each other's archive
         base += urllib.parse.quote(branch) + "/"
         mkcol(base)
-    for path in (archive, archive + ".sha256"):
+    for path in ((archive, archive + ".sha256") if archive else ()):
         name = urllib.parse.quote(os.path.basename(path))
         with open(path, "rb") as f:
             code = req("PUT", base + name, f.read())
         if code not in (200, 201, 204):
             die(f"upload of {name} failed: HTTP {code}")
         say(f"uploaded {base}{name}")
-    rel = base[len(url.rstrip("/") + "/"):] + urllib.parse.quote(os.path.basename(archive))
+    rel = base[len(url.rstrip("/") + "/"):] + urllib.parse.quote(os.path.basename(archive) if archive else name)
     extra = {"branch": branch}
     if delta and meta:
-        extra.update(publish_delta(req, mkcol, url.rstrip("/") + "/", folder, archive, meta, branch, jobs))
+        extra.update(publish_delta(req, mkcol, url.rstrip("/") + "/", folder, archive, meta, branch, jobs, staged))
     if meta:
         write_manifest(req, url.rstrip("/") + "/", rel, archive, meta, digest, extra)
 
 
-def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100):
+def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100, staged=None):
     """files.json of this build and the objects the server does not have yet (mpf_delta.py: the page's delta install reads them)."""
     import mpf_delta as D
     tmp = tempfile.mkdtemp(prefix="delta-")
     try:
-        with tarfile.open(archive) as t:
-            t.extractall(os.path.join(tmp, "x"), filter="tar") if sys.version_info >= (3, 12) else t.extractall(os.path.join(tmp, "x"))
-        top = os.path.join(tmp, "x", os.listdir(os.path.join(tmp, "x"))[0])
+        if staged:
+            top = staged                 # --delta-only: the builder's staged folder, nothing to unpack
+        else:
+            with tarfile.open(archive) as t:
+                t.extractall(os.path.join(tmp, "x"), filter="tar") if sys.version_info >= (3, 12) else t.extractall(os.path.join(tmp, "x"))
+            top = os.path.join(tmp, "x", os.listdir(os.path.join(tmp, "x"))[0])
         out = os.path.join(tmp, "out")
         os.makedirs(out)
-        fj, _ = D.export(top, out, branch)
-        doc = json.load(open(fj))
         gbase = root + urllib.parse.quote(folder) + "/"
         mkcol(gbase + "objects/")
-        for pre in sorted({f["sha256"][:2] for f in doc["files"]}):
+        # which objects the server has: asked first (HEAD, 100 at a time) so that only the missing ones are compressed
+        t0 = time.time()
+        wanted = sorted(set(D.sums_of(top).values()))
+        exists = set()                  # prefix folders the server has: MKCOL (0.4 s each, 256 of them) only for the ones that are missing
+
+        def listed(pre):
+            """The objects of one prefix folder in a single PROPFIND (one request per 2 characters instead of one HEAD per object: 45,000 HEADs
+            took 8 minutes, the server answering about 90 requests a second). None when the server does not answer a listing."""
+            for k in range(4):
+                try:
+                    code, body = req("PROPFIND", gbase + f"objects/{pre}/", want_body=True, headers={"Depth": "1"})
+                except OSError:
+                    time.sleep(min(2 ** k, 10))
+                    continue
+                if code == 404:
+                    return set()          # no such folder yet: nothing there, MKCOL before the first upload
+                if code == 207:
+                    exists.add(pre)
+                    return set(re.findall(r"([0-9a-f]{64})\.xz", body.decode("utf-8", "replace")))
+                return None
+            return None
+
+        def has(sha):
+            for k in range(6):
+                try:
+                    return req("HEAD", gbase + f"objects/{sha[:2]}/{sha}.xz") == 200
+                except OSError:
+                    time.sleep(min(2 ** k, 20))
+            return False
+        known = set()
+        with concurrent.futures.ThreadPoolExecutor(max(1, jobs)) as ex:
+            prefixes = sorted({x[:2] for x in wanted})
+            for pre, names in zip(prefixes, ex.map(listed, prefixes)):
+                if names is None:             # no listing for this folder: ask object by object
+                    names = {x for x, ok in zip(wanted, ex.map(has, [x for x in wanted if x[:2] == pre])) if ok}
+                known |= names
+            known &= set(wanted)
+        say(f"delta: {len(known)} of {len(wanted)} objects already on the server ({time.time() - t0:.0f} s)")
+        fj, _ = D.export(top, out, branch, known)
+        doc = json.load(open(fj))
+        for pre in sorted({f["sha256"][:2] for f in doc["files"] if f["sha256"] not in known} - exists):
             mkcol(gbase + f"objects/{pre}/")
 
         def one(f):
             """1 when the object was uploaded, 0 when the server had it. One HEAD + PUT per object over a WebDAV with a latency of tens of
             milliseconds took hours for a game of 50,000 files when done one after the other: they go 100 at a time."""
             sha = f["sha256"]
+            if sha in known:
+                return 0
             target = gbase + f"objects/{sha[:2]}/{sha}.xz"
             for k in range(6):
                 try:
@@ -409,7 +452,7 @@ def write_manifest(req, root, rel, archive, meta, digest, extra=None):
         doc = {}
     arch = (meta.get("target") or {}).get("arch", "all")
     entry = {"id": meta["id"], "name": meta.get("name", meta["id"]), "version": str(meta["version"]), "arch": arch,
-             "file": urllib.parse.unquote(rel), "size": os.path.getsize(archive), "sha256": digest,
+             "file": urllib.parse.unquote(rel), "size": os.path.getsize(archive) if archive else 0, "sha256": digest,
              "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     entry.update(extra or {})
     key = lambda i: (i.get("id"), i.get("version"), i.get("arch"), i.get("branch") or "main")      # noqa: E731
@@ -433,6 +476,9 @@ def main():
     ap.add_argument("--target", choices=sorted(TARGET_ARCH))
     ap.add_argument("--out", default="dist")
     ap.add_argument("--skip-setup", action="store_true")
+    ap.add_argument("--import-cache", metavar="URL", help="WebDAV folder that keeps Godot's import per medium (passed to the game's builder when it takes it)")
+    ap.add_argument("--fast", action="store_true", help="test loop: the bundler keeps its staged tree and Godot import in OUT/cache/ and only "
+                    "syncs what changed (platforms/game-bundles.md, \"Fast rebuild\"); with a folder clone and --skip-setup a rebuild is a repack")
     ap.add_argument("--pup-zip", metavar="ZIP", help="the game's PuP Pack zip (a path or URL): the game's builder makes the media derived from it "
                     "(clips, letters, HD DMD art) here, offline, and ships them in the bundle; the machine that runs the game makes nothing")
     ap.add_argument("--publish", metavar="WEBDAV_URL")
@@ -440,6 +486,8 @@ def main():
                     "<game>/<branch>/<version>/ and installs next to the other branches (<id>@<version>+<branch>)")
     ap.add_argument("--upload-jobs", type=int, default=100, metavar="N",
                     help="how many delta objects are uploaded at once (default 100: measured 27/s with 24, 51/s with 48, 92/s with 100 on the owner's Synology, no errors; the server's and the network's limits decide how far it helps)")
+    ap.add_argument("--delta-only", action="store_true", help="publish the delta from the staged folder, no .tar.xz (no xz, no archive check, no archive upload: "
+                    "about 5 of 8 minutes of a build); the page's delta install works, its full install of that version does not")
     ap.add_argument("--no-delta", action="store_true", help="publish the archive only (no files.json and objects for delta installs)")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
     ap.add_argument("--install-deps", action="store_true", help="install a missing git / venv with apt (Debian, Ubuntu, Raspberry Pi OS; needs root or sudo)")
@@ -502,14 +550,35 @@ def main():
         for opt, val in (("--target", target), ("--version", version), ("--label", a.label), ("--pup-zip", a.pup_zip)):
             if val and (a.dry_run or opt in helptext):
                 cmd += [opt, val]
+        if a.fast and (a.dry_run or "--fast" in helptext):
+            cmd.append("--fast")
+        if a.import_cache and (a.dry_run or "--import-cache" in helptext):
+            cmd += ["--import-cache", a.import_cache]
+        if a.delta_only and (a.dry_run or "--no-archive" in helptext):
+            cmd.append("--no-archive")
     elif description_of(repo):
-        cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else []) + (["--label", a.label] if a.label else [])
+        cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else []) + (["--label", a.label] if a.label else []) + (["--fast"] if a.fast else [])
     else:
         die("the repository has no scripts/package/build_bundle.py and no package description (" + ", ".join(DESCRIPTIONS) + "), and no recipe says how to build it "
             "(for your own MPF code without a build step: common/games/make_bundle.py)")
     run(cmd, repo, env, a.dry_run)
     if a.dry_run:
         say("dry run: nothing built")
+        return
+    if a.delta_only:
+        if not a.publish:
+            die("--delta-only needs --publish")
+        cands = [os.path.join(out, d) for d in os.listdir(out)] + [os.path.join(out, "stage", d) for d in
+                                                                  (os.listdir(os.path.join(out, "stage")) if os.path.isdir(os.path.join(out, "stage")) else [])]
+        staged = sorted((c for c in cands if os.path.isfile(os.path.join(c, "bundle.json")) and os.path.isfile(os.path.join(c, "SHA256SUMS"))
+                         and os.path.getmtime(os.path.join(c, "bundle.json")) >= started - 1), key=os.path.getmtime)
+        if not staged:
+            die(f"--delta-only: the game's builder left no staged folder in {out} (it must take --no-archive)")
+        with open(os.path.join(staged[-1], "bundle.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+        name = f"{meta['id']}-{meta['version']}-linux-{target}.tar.xz"      # the archive's name, as a full build would give it (-linux-all, not the arch list)
+        publish(a.publish, None, recipe.get("publish_folder", meta["id"]), meta, "", branch=a.branch or "main", jobs=a.upload_jobs,
+                staged=staged[-1], name=name)
         return
     new = sorted((p for p in os.listdir(out) if p.endswith(".tar.xz") and os.path.getmtime(os.path.join(out, p)) >= started - 1),
                  key=lambda p: os.path.getmtime(os.path.join(out, p)))

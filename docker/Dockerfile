@@ -1,7 +1,7 @@
 # The platform in a container, to test any game bundle on a PC or a Mac without a cabinet: the same setup page (port 8080) and the same
 # start code as the images, software video decoding (no GPU needed), the game's window in a browser (noVNC, port 6080).
 # docker/README.md has the commands. Build from the repository root:   docker build -f docker/Dockerfile -t mpf-godot .
-ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+ARG PYTHON_IMAGE=python:3.11-slim-trixie
 
 # ---- the DMD bridge (unmodified libzedmd and libserum, for the page's "web" DMD output and the Serum colour)
 FROM ${PYTHON_IMAGE} AS bridge
@@ -18,10 +18,11 @@ RUN set -e; out=/opt/dmd_bridge; mkdir -p $out/lib /tmp/z /tmp/s \
 # ---- the platform
 FROM ${PYTHON_IMAGE}
 ENV DEBIAN_FRONTEND=noninteractive
+# gcc: on arm64 (Mac Apple silicon) a Python dependency of MPF without a wheel is compiled by pip.
 # Xvfb + x11vnc + noVNC: the game's window in a browser (xrandr for the page's screen list, xwininfo to capture each game window alone); mesa's software Vulkan (lavapipe) for Godot's mobile renderer; the libraries ffmpeg grabs the windows for the page's cabinet preview (x11grab on Xvfb :0); alsa-utils for arecord.
 # Godot's official build and GoZen (FFmpeg, software decoding) load.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git ca-certificates curl unzip xz-utils procps iproute2 openssl \
+        git ca-certificates curl unzip xz-utils procps iproute2 openssl gcc libc6-dev \
         xvfb xauth x11-xserver-utils x11-utils x11vnc novnc websockify ffmpeg alsa-utils pulseaudio pulseaudio-utils \
         mesa-vulkan-drivers libvulkan1 libgl1 libegl1 libxcursor1 libxinerama1 libxi6 libxrandr2 libxkbcommon0 libxkbcommon-x11-0 \
         libfontconfig1 libdbus-1-3 libudev1 libasound2 libpulse0 libusb-1.0-0 libstdc++6 \
