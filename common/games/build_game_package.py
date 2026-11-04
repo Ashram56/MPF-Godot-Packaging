@@ -308,7 +308,7 @@ def start_check(archive, repo, meta):
     say("checked: the start script's imports are all in the archive" + (" and run.check passed" if BC.check_command(meta) else ""))
 
 
-def publish(url, archive, folder, meta=None, digest="", branch="main", delta=True, jobs=100):
+def publish(url, archive, folder, meta=None, digest="", branch="main", delta=True, jobs=100, staged=None, name=None):
     user, pw = os.environ.get("WEBDAV_USER", ""), os.environ.get("WEBDAV_PASS", "")
     if not user or not pw:
         die("--publish needs WEBDAV_USER and WEBDAV_PASS in the environment")
@@ -334,29 +334,32 @@ def publish(url, archive, folder, meta=None, digest="", branch="main", delta=Tru
     if branch != "main":                         # builds of one version on several branches must not overwrite each other's archive
         base += urllib.parse.quote(branch) + "/"
         mkcol(base)
-    for path in (archive, archive + ".sha256"):
+    for path in ((archive, archive + ".sha256") if archive else ()):
         name = urllib.parse.quote(os.path.basename(path))
         with open(path, "rb") as f:
             code = req("PUT", base + name, f.read())
         if code not in (200, 201, 204):
             die(f"upload of {name} failed: HTTP {code}")
         say(f"uploaded {base}{name}")
-    rel = base[len(url.rstrip("/") + "/"):] + urllib.parse.quote(os.path.basename(archive))
+    rel = base[len(url.rstrip("/") + "/"):] + urllib.parse.quote(os.path.basename(archive) if archive else name)
     extra = {"branch": branch}
     if delta and meta:
-        extra.update(publish_delta(req, mkcol, url.rstrip("/") + "/", folder, archive, meta, branch, jobs))
+        extra.update(publish_delta(req, mkcol, url.rstrip("/") + "/", folder, archive, meta, branch, jobs, staged))
     if meta:
         write_manifest(req, url.rstrip("/") + "/", rel, archive, meta, digest, extra)
 
 
-def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100):
+def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100, staged=None):
     """files.json of this build and the objects the server does not have yet (mpf_delta.py: the page's delta install reads them)."""
     import mpf_delta as D
     tmp = tempfile.mkdtemp(prefix="delta-")
     try:
-        with tarfile.open(archive) as t:
-            t.extractall(os.path.join(tmp, "x"), filter="tar") if sys.version_info >= (3, 12) else t.extractall(os.path.join(tmp, "x"))
-        top = os.path.join(tmp, "x", os.listdir(os.path.join(tmp, "x"))[0])
+        if staged:
+            top = staged                 # --delta-only: the builder's staged folder, nothing to unpack
+        else:
+            with tarfile.open(archive) as t:
+                t.extractall(os.path.join(tmp, "x"), filter="tar") if sys.version_info >= (3, 12) else t.extractall(os.path.join(tmp, "x"))
+            top = os.path.join(tmp, "x", os.listdir(os.path.join(tmp, "x"))[0])
         out = os.path.join(tmp, "out")
         os.makedirs(out)
         gbase = root + urllib.parse.quote(folder) + "/"
@@ -445,7 +448,7 @@ def write_manifest(req, root, rel, archive, meta, digest, extra=None):
         doc = {}
     arch = (meta.get("target") or {}).get("arch", "all")
     entry = {"id": meta["id"], "name": meta.get("name", meta["id"]), "version": str(meta["version"]), "arch": arch,
-             "file": urllib.parse.unquote(rel), "size": os.path.getsize(archive), "sha256": digest,
+             "file": urllib.parse.unquote(rel), "size": os.path.getsize(archive) if archive else 0, "sha256": digest,
              "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     entry.update(extra or {})
     key = lambda i: (i.get("id"), i.get("version"), i.get("arch"), i.get("branch") or "main")      # noqa: E731
@@ -479,6 +482,8 @@ def main():
                     "<game>/<branch>/<version>/ and installs next to the other branches (<id>@<version>+<branch>)")
     ap.add_argument("--upload-jobs", type=int, default=100, metavar="N",
                     help="how many delta objects are uploaded at once (default 100: measured 27/s with 24, 51/s with 48, 92/s with 100 on the owner's Synology, no errors; the server's and the network's limits decide how far it helps)")
+    ap.add_argument("--delta-only", action="store_true", help="publish the delta from the staged folder, no .tar.xz (no xz, no archive check, no archive upload: "
+                    "about 5 of 8 minutes of a build); the page's delta install works, its full install of that version does not")
     ap.add_argument("--no-delta", action="store_true", help="publish the archive only (no files.json and objects for delta installs)")
     ap.add_argument("--dry-run", action="store_true", help="print the commands, run nothing")
     ap.add_argument("--install-deps", action="store_true", help="install a missing git / venv with apt (Debian, Ubuntu, Raspberry Pi OS; needs root or sudo)")
@@ -545,6 +550,8 @@ def main():
             cmd.append("--fast")
         if a.import_cache and (a.dry_run or "--import-cache" in helptext):
             cmd += ["--import-cache", a.import_cache]
+        if a.delta_only and (a.dry_run or "--no-archive" in helptext):
+            cmd.append("--no-archive")
     elif description_of(repo):
         cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else []) + (["--label", a.label] if a.label else []) + (["--fast"] if a.fast else [])
     else:
@@ -553,6 +560,20 @@ def main():
     run(cmd, repo, env, a.dry_run)
     if a.dry_run:
         say("dry run: nothing built")
+        return
+    if a.delta_only:
+        if not a.publish:
+            die("--delta-only needs --publish")
+        staged = sorted((os.path.join(out, d) for d in os.listdir(out) if os.path.isfile(os.path.join(out, d, "bundle.json"))
+                         and os.path.isfile(os.path.join(out, d, "SHA256SUMS")) and os.path.getmtime(os.path.join(out, d, "bundle.json")) >= started - 1),
+                        key=os.path.getmtime)
+        if not staged:
+            die(f"--delta-only: the game's builder left no staged folder in {out} (it must take --no-archive)")
+        with open(os.path.join(staged[-1], "bundle.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+        name = f"{meta['id']}-{meta['version']}-linux-{(meta.get('target') or {}).get('arch', 'all')}.tar.xz"
+        publish(a.publish, None, recipe.get("publish_folder", meta["id"]), meta, "", branch=a.branch or "main", jobs=a.upload_jobs,
+                staged=staged[-1], name=name)
         return
     new = sorted((p for p in os.listdir(out) if p.endswith(".tar.xz") and os.path.getmtime(os.path.join(out, p)) >= started - 1),
                  key=lambda p: os.path.getmtime(os.path.join(out, p)))
