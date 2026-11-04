@@ -576,7 +576,7 @@ def main():
             die(f"--delta-only: the game's builder left no staged folder in {out} (it must take --no-archive)")
         with open(os.path.join(staged[-1], "bundle.json"), encoding="utf-8") as f:
             meta = json.load(f)
-        name = f"{meta['id']}-{meta['version']}-linux-{(meta.get('target') or {}).get('arch', 'all')}.tar.xz"
+        name = f"{meta['id']}-{meta['version']}-linux-{target}.tar.xz"      # the archive's name, as a full build would give it (-linux-all, not the arch list)
         publish(a.publish, None, recipe.get("publish_folder", meta["id"]), meta, "", branch=a.branch or "main", jobs=a.upload_jobs,
                 staged=staged[-1], name=name)
         return
