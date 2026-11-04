@@ -317,8 +317,8 @@ def publish(url, archive, folder, meta=None, digest="", branch="main", delta=Tru
         die("a game is published in a sub-folder named by its id, never at the root")
     base = url.rstrip("/") + "/" + folder + "/"
 
-    def req(method, target, data=None, want_body=False):
-        r = urllib.request.Request(target, data=data, method=method, headers={"Authorization": auth})
+    def req(method, target, data=None, want_body=False, headers=None):
+        r = urllib.request.Request(target, data=data, method=method, headers=dict(headers or {}, Authorization=auth))
         try:
             with urllib.request.urlopen(r, timeout=600) as resp:
                 return (resp.status, resp.read()) if want_body else resp.status
@@ -367,6 +367,18 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100):
         for pre in sorted({x[:2] for x in wanted}):
             mkcol(gbase + f"objects/{pre}/")
 
+        def listed(pre):
+            """The objects of one prefix folder in a single PROPFIND (one request per 2 characters instead of one HEAD per object: 45,000 HEADs
+            took 8 minutes, the server answering about 90 requests a second). None when the server does not answer a listing."""
+            for k in range(4):
+                try:
+                    code, body = req("PROPFIND", gbase + f"objects/{pre}/", want_body=True, headers={"Depth": "1"})
+                except OSError:
+                    time.sleep(min(2 ** k, 10))
+                    continue
+                return set(re.findall(r"([0-9a-f]{64})\.xz", body.decode("utf-8", "replace"))) if code == 207 else None
+            return None
+
         def has(sha):
             for k in range(6):
                 try:
@@ -374,8 +386,14 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100):
                 except OSError:
                     time.sleep(min(2 ** k, 20))
             return False
+        known = set()
         with concurrent.futures.ThreadPoolExecutor(max(1, jobs)) as ex:
-            known = {sha for sha, ok in zip(wanted, ex.map(has, wanted)) if ok}
+            prefixes = sorted({x[:2] for x in wanted})
+            for pre, names in zip(prefixes, ex.map(listed, prefixes)):
+                if names is None:             # no listing for this folder: ask object by object
+                    names = {x for x, ok in zip(wanted, ex.map(has, [x for x in wanted if x[:2] == pre])) if ok}
+                known |= names
+            known &= set(wanted)
         say(f"delta: {len(known)} of {len(wanted)} objects already on the server ({time.time() - t0:.0f} s)")
         fj, _ = D.export(top, out, branch, known)
         doc = json.load(open(fj))
