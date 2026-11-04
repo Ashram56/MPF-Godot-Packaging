@@ -155,6 +155,18 @@
      "type": "string"
     }
    }
+  },
+  "screens": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "required": ["id", "label", "setting"],
+    "properties": {
+     "id": {"type": "string"},
+     "label": {"type": "string"},
+     "setting": {"type": "string"}
+    }
+   }
   }
  },
  "allOf": [
