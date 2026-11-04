@@ -1,5 +1,5 @@
 #!/bin/bash
-# A stand-in for systemctl in the container (no systemd): only mpf-game.service exists, the page's start, stop, restart, status and
+# A stand-in for systemctl in the container (no systemd): only mpf-game.service exists (and a restart of mpf-netconfig-web.service, the page), the page's start, stop, restart, status and
 # autostart buttons work on it. "reboot" restarts the container (compose: restart: unless-stopped); everything else is accepted and ignored.
 PID=/run/mpf/game.pid LOG=/var/log/mpf-game/service.log FLAG=${MPF_STATE_DIR:-/data/state}/game.enabled
 args=(); for a in "$@"; do case "$a" in --*) [ "$a" = --quiet ] && Q=1 ;; *) args+=("$a");; esac; done
@@ -8,6 +8,9 @@ running() { [ -s $PID ] && kill -0 "$(cat $PID)" 2>/dev/null; }
 case "$cmd" in
     reboot|poweroff|halt) kill -TERM 1; exit 0 ;;
 esac
+if [ "$unit" = mpf-netconfig-web.service ]; then       # the page: the entrypoint starts it again (the new web package, if any)
+    case "$cmd" in restart) pkill -f 'mpf_(launch|netconfig).py web' || true; sleep 1; exit 0 ;; is-active) [ -n "${Q:-}" ] || echo active; exit 0 ;; esac
+fi
 [ "$unit" = mpf-game.service ] || exit 0
 case "$cmd" in
     start)   running || setsid -f sh -c "echo \$\$ >$PID; exec /usr/local/bin/mpf-game-run" >>$LOG 2>&1 </dev/null ;;

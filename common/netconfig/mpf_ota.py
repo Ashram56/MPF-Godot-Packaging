@@ -227,7 +227,7 @@ def _download(cfg, url, dest, label):
             got += len(chunk)
             if got - last > 8 << 20:
                 last = got
-                G.job_set(msg=f"Downloading {label}: {got >> 20} MB" + (f" of {total >> 20} MB" if total else ""))
+                G.job_set(msg=f"Downloading {label}: {got >> 20} MB" + (f" of {total >> 20} MB" if total else ""), pct=(got * 100 // total) if total else None)
     if total and got != total:
         raise G.JobError("the download was cut: try again")
 

@@ -72,3 +72,15 @@ def test_preview_windows_skip_disabled_and_merge_same_monitor(tmp_path, monkeypa
             {"id": "side", "label": "Side", "index": 1, "enabled": True}]
     monkeypatch.setattr(mpf_web.G, "screens_state", lambda path: wins)
     assert mpf_web.preview_windows({"path": "x"}) == [("backglass", "Backglass + Extra", 0), ("side", "Side", 1)]
+
+
+def test_pulse_sound_in_a_container(tmp_path, monkeypatch):
+    """The Docker image has no sound card: the sound is the null sink's monitor (ffmpeg), and no loopback copy is wanted."""
+    pv = load(tmp_path, monkeypatch)
+    monkeypatch.setattr(pv.shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.delenv("MPF_PULSE_SINK", raising=False)
+    assert not pv.pulse() and pv.sound_cmd()[0] == "arecord"
+    monkeypatch.setenv("MPF_PULSE_SINK", "mpf")
+    pv.save(True, True)
+    assert pv.pulse() and pv.sound_cmd()[0] == "ffmpeg" and "mpf.monitor" in pv.sound_cmd() and pv.sound_cmd()[-3:] == ["-f", "wav", "-"]
+    assert pv.want_tee() is False

@@ -139,12 +139,43 @@ def branches(repo=None):
                                          "date": p.get("updated_at", "")}
         if len(part) < 100:
             break
+    pushed = {}
+    try:                                     # the newest push of each branch (one call; the branch list itself has no dates)
+        with _get(f"https://api.github.com/repos/{repo}/activity?per_page=100&activity_type=push") as r:
+            for a in json.loads(r.read(1 << 23)):
+                ref = str(a.get("ref", ""))
+                if ref.startswith("refs/heads/") and a.get("timestamp", "") > pushed.get(ref[11:], ""):
+                    pushed[ref[11:]] = a["timestamp"]
+    except ValueError:
+        pass
     for b in out:
         b.update(prs.get(b["name"], {}))
-    # main first, then the most recently active (a pull request's last update), open pull requests before closed or merged ones,
-    # branches with no pull request last
-    out.sort(key=lambda b: (b["name"] != "main", b.get("state", "") != "open", "" if b.get("date") else "~", _neg(b.get("date", "")), b["name"]))
+        b["date"] = max(pushed.get(b["name"], ""), b.get("date", ""))
+    # main first, then the most recently pushed (a pull request's last update when no push is known), branches with no date last
+    out.sort(key=lambda b: (b["name"] != "main", "" if b.get("date") else "~", _neg(b.get("date", "")), b["name"]))
     return out
+
+
+_CHECK = {}
+
+
+def check():
+    """The installed web package's branch against its head on GitHub: {branch, sha, installed, newer}. Cached for 5 minutes (the API
+    allows 60 calls an hour without a token)."""
+    st = status()
+    cur = st.get("current") or {}
+    src = str(cur.get("source", ""))
+    if not cur.get("branch") or not src.startswith("github:"):
+        return {"branch": "", "newer": False}
+    repo, br = src[7:], cur["branch"]
+    key = (repo, br)
+    if key in _CHECK and time.time() - _CHECK[key][0] < 300:
+        sha = _CHECK[key][1]
+    else:
+        with _get(f"https://api.github.com/repos/{repo}/commits/{br}", {"Accept": "application/vnd.github+json"}) as r:
+            sha = json.loads(r.read(1 << 22))["sha"][:8]
+        _CHECK[key] = (time.time(), sha)
+    return {"branch": br, "repo": repo, "sha": sha, "installed": cur.get("sha", ""), "newer": bool(cur.get("sha")) and sha != cur.get("sha")}
 
 
 def _api_of(src):

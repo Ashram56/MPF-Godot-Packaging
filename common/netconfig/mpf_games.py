@@ -48,6 +48,8 @@ class JobError(Exception):
 
 def job_set(**kw):
     prev = (JOB.get("state"), JOB.get("msg"))
+    if "pct" not in kw and kw.get("state") and kw["state"] != prev[0]:
+        JOB["pct"] = None                      # a new job: no progress known until a step reports it (pct, 0-100)
     JOB.update(kw)
     JOB["at"] = int(time.time() * 1000)        # the page keeps a finished job on screen until it is dismissed (keyed by this)
     if (JOB.get("state"), JOB.get("msg")) != prev and JOB.get("msg"):
