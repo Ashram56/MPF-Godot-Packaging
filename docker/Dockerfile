@@ -1,7 +1,7 @@
 # The platform in a container, to test any game bundle on a PC or a Mac without a cabinet: the same setup page (port 8080) and the same
 # start code as the images, software video decoding (no GPU needed), the game's window in a browser (noVNC, port 6080).
 # docker/README.md has the commands. Build from the repository root:   docker build -f docker/Dockerfile -t mpf-godot .
-ARG PYTHON_IMAGE=python:3.11-slim-bookworm
+ARG PYTHON_IMAGE=python:3.11-slim-trixie
 
 # ---- the DMD bridge (unmodified libzedmd and libserum, for the page's "web" DMD output and the Serum colour)
 FROM ${PYTHON_IMAGE} AS bridge
