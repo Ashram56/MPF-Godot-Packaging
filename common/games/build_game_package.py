@@ -359,10 +359,26 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100):
         top = os.path.join(tmp, "x", os.listdir(os.path.join(tmp, "x"))[0])
         out = os.path.join(tmp, "out")
         os.makedirs(out)
-        fj, _ = D.export(top, out, branch)
-        doc = json.load(open(fj))
         gbase = root + urllib.parse.quote(folder) + "/"
         mkcol(gbase + "objects/")
+        # which objects the server has: asked first (HEAD, 100 at a time) so that only the missing ones are compressed
+        t0 = time.time()
+        wanted = sorted(set(D.sums_of(top).values()))
+        for pre in sorted({x[:2] for x in wanted}):
+            mkcol(gbase + f"objects/{pre}/")
+
+        def has(sha):
+            for k in range(6):
+                try:
+                    return req("HEAD", gbase + f"objects/{sha[:2]}/{sha}.xz") == 200
+                except OSError:
+                    time.sleep(min(2 ** k, 20))
+            return False
+        with concurrent.futures.ThreadPoolExecutor(max(1, jobs)) as ex:
+            known = {sha for sha, ok in zip(wanted, ex.map(has, wanted)) if ok}
+        say(f"delta: {len(known)} of {len(wanted)} objects already on the server ({time.time() - t0:.0f} s)")
+        fj, _ = D.export(top, out, branch, known)
+        doc = json.load(open(fj))
         for pre in sorted({f["sha256"][:2] for f in doc["files"]}):
             mkcol(gbase + f"objects/{pre}/")
 
@@ -370,6 +386,8 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100):
             """1 when the object was uploaded, 0 when the server had it. One HEAD + PUT per object over a WebDAV with a latency of tens of
             milliseconds took hours for a game of 50,000 files when done one after the other: they go 100 at a time."""
             sha = f["sha256"]
+            if sha in known:
+                return 0
             target = gbase + f"objects/{sha[:2]}/{sha}.xz"
             for k in range(6):
                 try:
@@ -433,6 +451,7 @@ def main():
     ap.add_argument("--target", choices=sorted(TARGET_ARCH))
     ap.add_argument("--out", default="dist")
     ap.add_argument("--skip-setup", action="store_true")
+    ap.add_argument("--import-cache", metavar="URL", help="WebDAV folder that keeps Godot's import per medium (passed to the game's builder when it takes it)")
     ap.add_argument("--fast", action="store_true", help="test loop: the bundler keeps its staged tree and Godot import in OUT/cache/ and only "
                     "syncs what changed (platforms/game-bundles.md, \"Fast rebuild\"); with a folder clone and --skip-setup a rebuild is a repack")
     ap.add_argument("--pup-zip", metavar="ZIP", help="the game's PuP Pack zip (a path or URL): the game's builder makes the media derived from it "
@@ -506,6 +525,8 @@ def main():
                 cmd += [opt, val]
         if a.fast and (a.dry_run or "--fast" in helptext):
             cmd.append("--fast")
+        if a.import_cache and (a.dry_run or "--import-cache" in helptext):
+            cmd += ["--import-cache", a.import_cache]
     elif description_of(repo):
         cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else []) + (["--label", a.label] if a.label else []) + (["--fast"] if a.fast else [])
     else:
