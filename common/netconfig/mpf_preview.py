@@ -4,13 +4,15 @@ the DMD (drawn by the page from mpf_dmd's pictures). Standard library only; ffmp
 Settings: STATE_DIR/preview.json {"enabled": bool, "sound": bool}. Nothing runs while the option is off or no page is open: every capture
 is a child process started by the request of a page and killed when that page closes the connection.
 
-* Picture: `ffmpeg -f x11grab` of the screen a window of the game is on (screens come from mpf_screens, the window's index from the bundle's
-  `screens`), scaled down, sent as multipart MJPEG (`<img src>` shows it).
+* Picture: `ffmpeg -f x11grab` of the window itself when the bundle gives its title (`screens[].title`, found with `xwininfo`), else of the
+  screen the window is on (screens come from mpf_screens, the window's index from the bundle's `screens`; an index beyond the connected
+  screens is the last one, as the game places it), scaled down, sent as multipart MJPEG (`<img src>` shows it).
 * Sound: the game's ALSA output is duplicated to the `snd-aloop` loopback (`tee_conf()`, used by mpf_audio.prepare() when `sound` is on and a
   sound output is chosen on the page); the page plays `arecord` of the loopback's other side as a never ending WAV.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -65,7 +67,8 @@ def pulse():
 
 
 def tools():
-    return {"ffmpeg": bool(shutil.which("ffmpeg")), "arecord": bool(shutil.which("arecord")), "parec": bool(shutil.which("parec"))}
+    return {"ffmpeg": bool(shutil.which("ffmpeg")), "arecord": bool(shutil.which("arecord")), "parec": bool(shutil.which("parec")),
+            "xwininfo": bool(shutil.which("xwininfo"))}
 
 
 def grab_geometry(screens, index):
@@ -76,6 +79,66 @@ def grab_geometry(screens, index):
     if index != 0 and not s.get("x") and not s.get("y"):
         return None
     return int(s["width"]), int(s["height"]), int(s.get("x") or 0), int(s.get("y") or 0)
+
+
+def monitor_geometry(screens, index):
+    """grab_geometry of the monitor a window is really on: a game puts a window on the last monitor when its index is beyond the
+    connected ones (Godot: clampi(screen, 0, screen_count - 1)), so the preview does too."""
+    if screens:
+        index = max(0, min(int(index), len(screens) - 1))
+    return grab_geometry(screens, index)
+
+
+WIN_RE = re.compile(r'^\s+(0x[0-9a-fA-F]+) "(.*?)":\s+\(.*?\)\s+(\d+)x(\d+)[+-]\d+[+-]\d+\s+\+(-?\d+)\+(-?\d+)\s*$')
+
+
+def parse_windows(text):
+    """[(title, width, height, x, y)] of the named windows in `xwininfo -root -tree` (x, y on the root, whatever the window manager's frames)."""
+    out = []
+    for line in (text or "").splitlines():
+        m = WIN_RE.match(line)
+        if m:
+            out.append((m[2], int(m[3]), int(m[4]), int(m[5]), int(m[6])))
+    return out
+
+
+def window_geometry(windows, title, root=None):
+    """(width, height, x, y) of the largest window whose title contains `title`, clipped to the screen `root` (w, h), or None."""
+    best = None
+    for t, w, h, x, y in windows:
+        if title and title in t and w > 1 and h > 1 and (best is None or w * h > best[0] * best[1]):
+            best = (w, h, x, y)
+    if best and root:
+        w, h, x, y = best
+        x0, y0 = max(x, 0), max(y, 0)
+        w, h = min(x + w, root[0]) - x0, min(y + h, root[1]) - y0
+        best = (w, h, x0, y0) if w > 1 and h > 1 else None
+    return best
+
+
+def find_window(title, env=None, timeout=3):
+    """The geometry of the window of the game named `title`, or None (no such window, or no xwininfo: x11-utils)."""
+    if not title or not shutil.which("xwininfo"):
+        return None
+    e = dict(os.environ, **(env or {}))
+
+    def ask(*args):
+        try:
+            r = subprocess.run(["xwininfo", *args], capture_output=True, text=True, timeout=timeout, env=e)
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        return r.stdout if r.returncode == 0 else ""
+    tree = ask("-root", "-tree")
+    size = re.search(r"Width: (\d+)\s+Height: (\d+)", ask("-root")) if tree else None
+    return window_geometry(parse_windows(tree), title, (int(size[1]), int(size[2])) if size else None)
+
+
+def capture_geometry(index, title, screens, env=None):
+    """(width, height, x, y) to grab for a window: the window itself when it has a title and xwininfo is there (None while it is not open),
+    else the monitor it is on."""
+    if title and shutil.which("xwininfo"):
+        return find_window(title, env)
+    return monitor_geometry(screens, index)
 
 
 def ffmpeg_cmd(geom, display=":0", fps=FPS, width=WIDTH):

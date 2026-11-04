@@ -19,6 +19,7 @@ docker compose up --build            # first build: 10 to 20 minutes (MPF, Godot
 | Setup page | http://localhost:8080 (any user name, password `mpf`, or `MPF_WEB_PASSWORD`) |
 | The game's window | http://localhost:6080/vnc.html?autoconnect=1&resize=scale |
 | DMD preview on the page | Configuration > DMD output > **web** (the pictures a ZeDMD would get, Serum colour included) |
+| Cabinet preview (Monitor tab) | Configuration > Cabinet preview: each window of the game (backglass, topper) on its own when the bundle names its title (`screens[].title`), else the screen it is on. The container has one screen: a window set on a screen number beyond it is on that one screen, as the game places it |
 
 1. Open the setup page, **Install** a game bundle (the share's `.tar.xz` URL, or upload the file). The page checks and installs it as on
    a cabinet; the game starts with the container once installed (`MPF_AUTOSTART=0`: with the page's Start button only).

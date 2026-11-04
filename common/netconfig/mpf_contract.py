@@ -14,7 +14,7 @@ A format 2 `bundle.json` holds no command and names no script to run: no `run`, 
   `MPF_PUP_PACK` and its own `pup.manifest` (a list of the pack's files and how to show them, never a file of the pack);
 - add-ons (DMD only): folders of the bundle listed in `addons`, each switched on by a setting, passed in `MPF_ADDONS`; the setting
   `dmd.look` is the look chosen on the page's DMD card (`"setting": "dmd.look", "when": "hd"`);
-- `screens`: [{"id", "label", "setting", "enabled"?}], the game's windows (`enabled`: a bool setting that turns the window off, e.g. a topper nobody has; the preview skips it); `setting` is the integer option holding the window's monitor index. The page's
+- `screens`: [{"id", "label", "setting", "enabled"?, "title"?}], the game's windows (`enabled`: a bool setting that turns the window off, e.g. a topper nobody has; the preview skips it; `title`: a part of the window's title, so the preview captures that window and not the whole monitor); `setting` is the integer option holding the window's monitor index. The page's
   "Screens" card sets it (mpf_screens.py) and the generic settings form no longer shows it;
 - `profiles.<board>.dmd_looks`: the looks of `dmd.looks` this board may use (a Pi 4: `["classic"]`).
 """
@@ -73,6 +73,8 @@ def problems(b, root=None):
     if scr is not None:
         if not isinstance(scr, list) or not all(isinstance(w, dict) and w.get("id") and w.get("setting") for w in scr):
             bad.append("`screens` must be a list of {id, label, setting}: the windows of the game and the integer setting that holds each one's monitor")
+        elif not all(isinstance(w.get("title", ""), str) for w in scr):
+            bad.append("`screens`: `title` (the window's title, for the preview) must be a string")
     if not b.get("game_dir"):
         bad.append("`game_dir` is missing: the folder with project.godot and MPF's config/")
     for a in b.get("addons") or []:
