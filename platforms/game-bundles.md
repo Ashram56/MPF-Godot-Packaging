@@ -110,6 +110,31 @@ setup page and `<id>@<version>` use), with `semver` and `label` beside it; the c
 `game/.godot` (the import) is packed on purpose; `requires.godot` is this platform's pinned Godot.
 5. **Check** with `xz -t`, `tar -xJOf ARCHIVE <id>/bundle.json`, and that no `libgozen` is in a universal archive.
 
+### Fast rebuild (`--fast`, the test loop)
+
+When the game's repository holds every file the bundle needs (media, sounds, fonts committed: nothing generated), making a bundle
+is a repack, and only Godot's import is real work. `--fast` makes it so:
+
+```sh
+python -m mpf_godot bundle bundle_spec.json --target all --label test --fast --out dist
+python3 common/games/build_game_package.py ~/my-game --skip-setup --allow-branch --fast --out dist   # the same through the full tool
+```
+
+- The staged tree is **kept** in `OUT/cache/<id>-<target>/` and **synced** with the repository: a file is copied only when its size or
+  mtime changed, a removed file (and its `.import`) is deleted. Nothing else is touched, so the Godot import of the previous build
+  stays valid and Godot **reimports only the media that changed** (one pass instead of two once the cache is warm).
+- `.import` files Godot filled in are kept (`import_seed` writes only the missing ones), `project.godot` is rewritten only when
+  its content changes.
+- `SHA256SUMS` reuses the hash of every file whose size and mtime did not change (`sums.json` in the cache).
+- The archive is written with `xz -0` instead of `-6`: PNG and OGG are already compressed, so the archive is barely bigger.
+- The first `--fast` build costs as much as a normal one (cold cache). Use one `OUT` folder per game; delete `OUT/cache/` to start
+  clean. A single `--target` (`arm64`, `x86_64`) prunes the other format from the kept import, so Godot reimports everything at
+  the next build: keep `--target all` for the test loop.
+- A delivered bundle is still made **without** `--fast` from the merged main branch (rule 1): the result is the same tree, packed
+  with `xz -6`.
+
+Measured on a SAM recreation (8 265 PNG, 1 603 OGG, 144 MB of media; 4-core cloud sandbox): a normal build takes about 4 min (Godot import 3 min in two passes, `xz -6` 36 s, 167 MB); a cold `--fast` build 3 min 20 s (the same import, `xz -0` 8 s, 177 MB); a warm `--fast` rebuild **16 s** (sync under 1 s, Godot import 7 s with one PNG changed and reimported, archive 8 s).
+
 A game can have its own builder (by convention `scripts/package/build_bundle.py` in its repository) that writes the spec and
 calls this one: it copies the committed `pup.manifest` and the game's add-ons from their repository (the creator wrote them once, reading the pack then), reads no pack, never generates
 art or copies a file of the pack, and it adds no runner script, settings tool or install command (format 2). A small update is a zip of the changed files plus `REMOVED.txt`, made from two bundles' `SHA256SUMS`.
