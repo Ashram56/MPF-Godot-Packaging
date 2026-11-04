@@ -103,6 +103,56 @@ class Builder(unittest.TestCase):
         self.assertEqual(m["platform_addons"], ["gde_gozen"])
         json.dumps(m)
 
+    def test_fast_sync_keeps_import_and_follows_changes(self):
+        """--fast: the kept tree follows the repository (changed, new and removed files) and keeps the build's own files."""
+        stage = os.path.join(self.root, "cache", "g")
+        os.makedirs(stage)
+        self.assertEqual((3, 0, 3), bundle.sync_tree(self.root, self.spec, stage))
+        write(os.path.join(stage, "game", ".godot", "imported", "frame.png-x.s3tc.ctex"), "ctex")   # the previous import
+        write(os.path.join(stage, "gen", "frame.png.import"), "[remap]\npath=x\n")
+        write(os.path.join(stage, "bundle.json"), "{}")
+        self.assertEqual((0, 0, 3), bundle.sync_tree(self.root, self.spec, stage))                  # nothing changed: nothing copied
+        write(os.path.join(self.root, "gen", "frame.png"), "png2")
+        write(os.path.join(self.root, "gen", "new.png"), "png")
+        self.assertEqual((2, 0, 4), bundle.sync_tree(self.root, self.spec, stage))
+        with open(os.path.join(stage, "gen", "frame.png")) as f:
+            self.assertEqual("png2", f.read())
+        os.remove(os.path.join(self.root, "gen", "frame.png"))
+        copied, removed, _ = bundle.sync_tree(self.root, self.spec, stage)
+        self.assertEqual(2, removed)                                                                 # the frame and its .import
+        self.assertFalse(os.path.exists(os.path.join(stage, "gen", "frame.png.import")))
+        self.assertTrue(os.path.isfile(os.path.join(stage, "game", ".godot", "imported", "frame.png-x.s3tc.ctex")))
+        self.assertTrue(os.path.isfile(os.path.join(stage, "bundle.json")))
+        self.assertEqual([], bundle.forbidden(dict(self.spec, never=["game/.godot"]), stage, kept=True))
+        self.assertEqual(["game/.godot"], bundle.forbidden(dict(self.spec, never=["game/.godot"]), stage))
+
+    def test_seed_keeps_filled_import(self):
+        stage = os.path.join(self.root, "stage")
+        bundle.stage_tree(self.root, self.spec, stage)
+        write(os.path.join(stage, "gen", "frame.png.import"), "filled by Godot")
+        self.assertEqual(0, bundle.seed_imports(self.root, self.spec, stage))
+
+    def test_sums_cache(self):
+        stage = os.path.join(self.root, "stage")
+        bundle.stage_tree(self.root, self.spec, stage)
+        cache = os.path.join(self.root, "sums.json")
+        bundle.write_sums(stage, cache)
+        with open(os.path.join(stage, "SHA256SUMS")) as f:
+            first = f.read()
+        with open(cache) as f:
+            data = json.load(f)
+        data["gen/frame.png"][2] = "cached"                       # an unchanged file keeps its cached hash
+        with open(cache, "w") as f:
+            json.dump(data, f)
+        bundle.write_sums(stage, cache)
+        with open(os.path.join(stage, "SHA256SUMS")) as f:
+            self.assertIn("cached  gen/frame.png", f.read())
+        write(os.path.join(stage, "gen", "frame.png"), "changed")  # a changed one is hashed again
+        bundle.write_sums(stage, cache)
+        with open(os.path.join(stage, "SHA256SUMS")) as f:
+            self.assertNotIn("cached", f.read())
+        self.assertIn("gen/frame.png", first)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -433,6 +433,8 @@ def main():
     ap.add_argument("--target", choices=sorted(TARGET_ARCH))
     ap.add_argument("--out", default="dist")
     ap.add_argument("--skip-setup", action="store_true")
+    ap.add_argument("--fast", action="store_true", help="test loop: the bundler keeps its staged tree and Godot import in OUT/cache/ and only "
+                    "syncs what changed (platforms/game-bundles.md, \"Fast rebuild\"); with a folder clone and --skip-setup a rebuild is a repack")
     ap.add_argument("--pup-zip", metavar="ZIP", help="the game's PuP Pack zip (a path or URL): the game's builder makes the media derived from it "
                     "(clips, letters, HD DMD art) here, offline, and ships them in the bundle; the machine that runs the game makes nothing")
     ap.add_argument("--publish", metavar="WEBDAV_URL")
@@ -502,8 +504,10 @@ def main():
         for opt, val in (("--target", target), ("--version", version), ("--label", a.label), ("--pup-zip", a.pup_zip)):
             if val and (a.dry_run or opt in helptext):
                 cmd += [opt, val]
+        if a.fast and (a.dry_run or "--fast" in helptext):
+            cmd.append("--fast")
     elif description_of(repo):
-        cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else []) + (["--label", a.label] if a.label else [])
+        cmd = [sys.executable, "-m", "mpf_godot", "bundle", description_of(repo), "--root", repo, "--target", target, "--out", out] + (["--version", version] if version else []) + (["--label", a.label] if a.label else []) + (["--fast"] if a.fast else [])
     else:
         die("the repository has no scripts/package/build_bundle.py and no package description (" + ", ".join(DESCRIPTIONS) + "), and no recipe says how to build it "
             "(for your own MPF code without a build step: common/games/make_bundle.py)")

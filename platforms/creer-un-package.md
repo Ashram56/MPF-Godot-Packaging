@@ -81,6 +81,22 @@ Un jeu qui génère médias/config ou a des étapes avant le build les place **d
 `scripts/package/build_bundle.py`, qui écrit le spec et appelle `mpf_godot bundle`) ; la plateforme n'en connaît rien. Le jeu porte aussi
 `scripts/package/game_package.json` (sa description de package).
 
+### Rebuild rapide pendant les tests : `--fast`
+
+Quand le dépôt du jeu contient déjà tous ses médias (rien n'est généré), refaire le package n'est qu'un **réemballage** : seul l'import
+Godot travaille vraiment. Avec `--fast`, l'arbre préparé et son import Godot sont **gardés** dans `dist/cache/<id>-<cible>/` ; chaque build
+ne copie que les fichiers changés (taille ou date), supprime ceux qui ont disparu, Godot ne réimporte que les médias modifiés, les SHA256
+des fichiers inchangés sont repris, et l'archive est faite en `xz -0` (PNG et OGG sont déjà compressés).
+
+```sh
+python -m mpf_godot bundle bundle_spec.json --target all --label test --fast --out dist
+python3 common/games/build_game_package.py ~/mon-jeu --skip-setup --allow-branch --fast --out dist   # même chose via l'outil complet
+```
+
+Le premier build `--fast` coûte autant qu'un build normal ; les suivants prennent quelques secondes plus l'import de ce qui a changé.
+Garder `--target all` (une cible unique élague l'import gardé et force un réimport complet). Le package livré se fait toujours sans
+`--fast`, depuis main. Détails : [game-bundles.md](game-bundles.md#fast-rebuild---fast-the-test-loop).
+
 ## 5. Réglages, add-ons, PuP : ce qui est déclaré
 
 - **Réglages** : un fichier JSON `groups` + `options` ; chaque option (`id`, `group`, `label`, `type` bool/choice/integer/number/string, `default`…)

@@ -108,6 +108,8 @@ Options: `--repo FOLDER` uses a clone you already made *as it is* (your branch, 
 `--repo URL` another remote, `--ref BRANCH_OR_TAG`, `--version 1.4.0 --label serum-zedmd` (name: `<id>-<version>-<label>-linux-<target>`; the commit is only in bundle.json), `--target arm64|x86_64|all`
 (default `all`: one archive for every machine, no binary inside), `--skip-setup` when the workspace is already prepared (rebuilds
 take minutes instead of the first run's 30 to 60), `--dry-run` to see the commands.
+**Test loop:** `--skip-setup --fast` on a folder clone makes each rebuild a repack: the bundler keeps its staged tree and Godot import
+in `OUT/cache/` and only syncs and reimports what changed ([game-bundles.md](../../platforms/game-bundles.md#fast-rebuild---fast-the-test-loop)).
 
 **Which branch.** The package is built from the game's **merged default branch**: the tool fetches `origin`, and refuses a commit that is not in it (or a clone with
 local changes) unless you add `--allow-branch` for a test package. It prints `source: <branch> at <commit>`. A bundle built from an older work branch
