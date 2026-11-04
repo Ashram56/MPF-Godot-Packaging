@@ -564,9 +564,10 @@ def main():
     if a.delta_only:
         if not a.publish:
             die("--delta-only needs --publish")
-        staged = sorted((os.path.join(out, d) for d in os.listdir(out) if os.path.isfile(os.path.join(out, d, "bundle.json"))
-                         and os.path.isfile(os.path.join(out, d, "SHA256SUMS")) and os.path.getmtime(os.path.join(out, d, "bundle.json")) >= started - 1),
-                        key=os.path.getmtime)
+        cands = [os.path.join(out, d) for d in os.listdir(out)] + [os.path.join(out, "stage", d) for d in
+                                                                  (os.listdir(os.path.join(out, "stage")) if os.path.isdir(os.path.join(out, "stage")) else [])]
+        staged = sorted((c for c in cands if os.path.isfile(os.path.join(c, "bundle.json")) and os.path.isfile(os.path.join(c, "SHA256SUMS"))
+                         and os.path.getmtime(os.path.join(c, "bundle.json")) >= started - 1), key=os.path.getmtime)
         if not staged:
             die(f"--delta-only: the game's builder left no staged folder in {out} (it must take --no-archive)")
         with open(os.path.join(staged[-1], "bundle.json"), encoding="utf-8") as f:
