@@ -371,12 +371,16 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100):
             milliseconds took hours for a game of 50,000 files when done one after the other: they go 100 at a time."""
             sha = f["sha256"]
             target = gbase + f"objects/{sha[:2]}/{sha}.xz"
-            for _ in range(3):
-                if req("HEAD", target) == 200:
-                    return 0
-                with open(os.path.join(out, "objects", sha[:2], sha + ".xz"), "rb") as fh:
-                    if req("PUT", target, fh.read()) in (200, 201, 204):
-                        return 1
+            for k in range(6):
+                try:
+                    if req("HEAD", target) == 200:
+                        return 0
+                    with open(os.path.join(out, "objects", sha[:2], sha + ".xz"), "rb") as fh:
+                        if req("PUT", target, fh.read()) in (200, 201, 204):
+                            return 1
+                except OSError:                     # ConnectionReset and the like: wait and try again, the rest of the build is kept
+                    pass
+                time.sleep(min(2 ** k, 20))         # also HTTP 423 (two uploads crossing)
             die(f"upload of object {sha[:12]} failed")
         with concurrent.futures.ThreadPoolExecutor(max(1, jobs)) as ex:
             res = list({f["sha256"]: f for f in doc["files"]}.values())
