@@ -367,8 +367,7 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100, sta
         # which objects the server has: asked first (HEAD, 100 at a time) so that only the missing ones are compressed
         t0 = time.time()
         wanted = sorted(set(D.sums_of(top).values()))
-        for pre in sorted({x[:2] for x in wanted}):
-            mkcol(gbase + f"objects/{pre}/")
+        exists = set()                  # prefix folders the server has: MKCOL (0.4 s each, 256 of them) only for the ones that are missing
 
         def listed(pre):
             """The objects of one prefix folder in a single PROPFIND (one request per 2 characters instead of one HEAD per object: 45,000 HEADs
@@ -379,7 +378,12 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100, sta
                 except OSError:
                     time.sleep(min(2 ** k, 10))
                     continue
-                return set(re.findall(r"([0-9a-f]{64})\.xz", body.decode("utf-8", "replace"))) if code == 207 else None
+                if code == 404:
+                    return set()          # no such folder yet: nothing there, MKCOL before the first upload
+                if code == 207:
+                    exists.add(pre)
+                    return set(re.findall(r"([0-9a-f]{64})\.xz", body.decode("utf-8", "replace")))
+                return None
             return None
 
         def has(sha):
@@ -400,7 +404,7 @@ def publish_delta(req, mkcol, root, folder, archive, meta, branch, jobs=100, sta
         say(f"delta: {len(known)} of {len(wanted)} objects already on the server ({time.time() - t0:.0f} s)")
         fj, _ = D.export(top, out, branch, known)
         doc = json.load(open(fj))
-        for pre in sorted({f["sha256"][:2] for f in doc["files"]}):
+        for pre in sorted({f["sha256"][:2] for f in doc["files"] if f["sha256"] not in known} - exists):
             mkcol(gbase + f"objects/{pre}/")
 
         def one(f):
