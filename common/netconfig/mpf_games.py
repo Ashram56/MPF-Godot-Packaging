@@ -48,6 +48,8 @@ class JobError(Exception):
 
 def job_set(**kw):
     prev = (JOB.get("state"), JOB.get("msg"))
+    if "pct" not in kw and kw.get("state") and kw["state"] != prev[0]:
+        JOB["pct"] = None                      # a new job: no progress known until a step reports it (pct, 0-100)
     JOB.update(kw)
     JOB["at"] = int(time.time() * 1000)        # the page keeps a finished job on screen until it is dismissed (keyed by this)
     if (JOB.get("state"), JOB.get("msg")) != prev and JOB.get("msg"):
@@ -1164,7 +1166,7 @@ def set_autostart(on):
 
 
 def screens_state(game):
-    """[{"id", "label", "index"}] the windows a format 2 game declares and the monitor each is on now."""
+    """[{"id", "label", "index", "enabled"}] the windows a format 2 game declares and the monitor each is on now."""
     b = read_bundle(game) or {}
     if not K.is_v2(b):
         return []
@@ -1172,7 +1174,8 @@ def screens_state(game):
         values = K.effective(game, b)
     except ValueError:
         return []
-    return [{"id": w["id"], "label": str(w.get("label") or w["id"]), "index": int(values.get(w["setting"]) or 0)} for w in SC.windows(b)]
+    return [{"id": w["id"], "label": str(w.get("label") or w["id"]), "index": int(values.get(w["setting"]) or 0),
+             "enabled": values.get(w["enabled"], True) not in (False, "false", "0", 0) if w.get("enabled") else True} for w in SC.windows(b)]
 
 
 def screen_set(game, window, index):

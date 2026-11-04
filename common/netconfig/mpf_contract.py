@@ -14,7 +14,7 @@ A format 2 `bundle.json` holds no command and names no script to run: no `run`, 
   `MPF_PUP_PACK` and its own `pup.manifest` (a list of the pack's files and how to show them, never a file of the pack);
 - add-ons (DMD only): folders of the bundle listed in `addons`, each switched on by a setting, passed in `MPF_ADDONS`; the setting
   `dmd.look` is the look chosen on the page's DMD card (`"setting": "dmd.look", "when": "hd"`);
-- `screens`: [{"id", "label", "setting"}], the game's windows; `setting` is the integer option holding the window's monitor index. The page's
+- `screens`: [{"id", "label", "setting", "enabled"?}], the game's windows (`enabled`: a bool setting that turns the window off, e.g. a topper nobody has; the preview skips it); `setting` is the integer option holding the window's monitor index. The page's
   "Screens" card sets it (mpf_screens.py) and the generic settings form no longer shows it;
 - `profiles.<board>.dmd_looks`: the looks of `dmd.looks` this board may use (a Pi 4: `["classic"]`).
 """
@@ -90,6 +90,8 @@ def problems(b, root=None):
             for w in (b.get("screens") or []) if isinstance(b.get("screens"), list) else []:
                 if isinstance(w, dict) and w.get("setting") and (w["setting"] not in ids or ids[w["setting"]].get("type") != "integer"):
                     bad.append(f"`screens`: `{w['setting']}` is not an integer setting of the schema")
+                if isinstance(w, dict) and w.get("enabled") and (w["enabled"] not in ids or ids[w["enabled"]].get("type") != "bool"):
+                    bad.append(f"`screens`: `enabled: {w['enabled']}` is not a bool setting of the schema")
         except ValueError as e:
             bad.append(str(e))
     return bad
