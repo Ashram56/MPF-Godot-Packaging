@@ -430,6 +430,9 @@ def main(argv=None):
     p.add_argument("--no-archive", action="store_true")
     p.add_argument("--fast", action="store_true",
                    help="test loop: keep the staged tree and Godot import in OUT/cache/ and only sync what changed; xz -0 archive")
+    p.add_argument("--import-cache", metavar="URL",
+                   help="WebDAV folder that keeps Godot's import per medium (WEBDAV_PASS, WEBDAV_USER=claude in the environment): "
+                        "fetched before the import, so Godot only imports the media nobody imported before; new ones are sent after")
     args = p.parse_args(argv)
     spec_path = os.path.abspath(args.spec)
     root = os.path.abspath(args.root) if args.root else os.path.dirname(spec_path)
@@ -473,9 +476,25 @@ def main(argv=None):
     if spec.get("force_vram"):
         say("   {} .import files set to VRAM compression".format(force_vram(stage, spec["force_vram"])))
     set_texture_formats(os.path.join(game, "project.godot"), formats)
+    cache = None
+    if args.import_cache:
+        from mpf_godot import import_cache as ic
+        cache = ic.ImportCache(args.import_cache, tc.GODOT_VERSION, formats, os.path.join(game, "project.godot"))
+        t1 = time.time()
+        try:
+            hits, misses = cache.restore(stage, game_rel)
+            say("   import cache: {} media found, {} to import ({:.0f} s)".format(hits, misses, time.time() - t1))
+        except OSError as e:
+            say("   WARNING: import cache unreachable ({}): Godot imports everything".format(e))
+            cache = None
     t1 = time.time()
-    godot_import(game, tc.godot_path(), passes=1 if warm else 2)
+    godot_import(game, tc.godot_path(), passes=1 if warm or (cache and cache.hits) else 2)   # also with no miss: Godot rebuilds its caches (32 s)
     say("   Godot import {:.0f} s".format(time.time() - t1))
+    if cache is not None:
+        try:
+            say("   import cache: {} objects uploaded".format(cache.store(stage, game_rel)))
+        except OSError as e:
+            say("   WARNING: import cache not updated: {}".format(e))
     if not count_compressed(game):
         say("   WARNING: no VRAM-compressed texture was imported: the bundle has no S3TC/ETC2 variants. Textures need "
             "compress/mode=2 in their .import files (spec keys import_seed for untracked ones, force_vram for tracked ones)")

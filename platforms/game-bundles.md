@@ -135,6 +135,27 @@ python3 common/games/build_game_package.py ~/my-game --skip-setup --allow-branch
 
 Measured on a SAM recreation (8 265 PNG, 1 603 OGG, 144 MB of media; 4-core cloud sandbox): a normal build takes about 4 min (Godot import 3 min in two passes, `xz -6` 36 s, 167 MB); a cold `--fast` build 3 min 20 s (the same import, `xz -0` 8 s, 177 MB); a warm `--fast` rebuild **16 s** (sync under 1 s, Godot import 7 s with one PNG changed and reimported, archive 8 s).
 
+### Import cache (`--import-cache URL`, a clean machine without the 3 min import)
+
+`--fast` keeps the import on one disk. A clean sandbox or a CI runner has none, so every build there pays the full Godot import.
+`--import-cache` keeps Godot's import **on a WebDAV folder**, one small object per medium, and fetches it instead of redoing it:
+
+```sh
+export WEBDAV_PASS=...            # WEBDAV_USER defaults to "claude"; never printed or committed
+python -m mpf_godot bundle bundle_spec.json --target all --label test --import-cache https://HOST/FOLDER
+```
+
+- **Key** of a medium: sha256 of its content, the `[params]` of its `.import` (the import settings; the uid and paths Godot rewrites
+  are ignored), the Godot version, the texture formats of the target, and the import-related lines of `project.godot`.
+  Any change gives a new key, so a stale object is never used; the old ones stay on the server.
+- **Object**: `FOLDER/import-cache/<godot>/<xx>/<key>.tar` holding the `.import`, the `.godot/imported/*` files it lists and their
+  `.md5`. Godot decides by content (md5), so restored files are accepted without a reimport.
+- **Build**: list the server (one PROPFIND per two-character prefix), fetch the hits in parallel (keep-alive connections), run
+  `godot --import` once (it reimports only the misses and rebuilds its own small caches), upload the new objects. A medium already
+  imported in a kept `--fast` tree is not fetched. A server that cannot be reached is a warning: Godot imports everything.
+- Full import happens only when a medium, the Godot version, the formats or the import settings changed.
+- Works with or without `--fast`; the delivered bundle is identical either way.
+
 A game can have its own builder (by convention `scripts/package/build_bundle.py` in its repository) that writes the spec and
 calls this one: it copies the committed `pup.manifest` and the game's add-ons from their repository (the creator wrote them once, reading the pack then), reads no pack, never generates
 art or copies a file of the pack, and it adds no runner script, settings tool or install command (format 2). A small update is a zip of the changed files plus `REMOVED.txt`, made from two bundles' `SHA256SUMS`.
