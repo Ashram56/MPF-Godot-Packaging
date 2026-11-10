@@ -114,9 +114,10 @@ class DmdOutput(Base):
         b = {"dmd": {"looks": {"classic": ["--dmd=classic"], "hd": ["--dmd=hd"], "advanced": ["--dmd=hd", "--bikes"]}, "look": "hd"}}
         D.set_output("lcd")
         pre, user = D.plan("g", b)                    # default look of the bundle, and the page's picture of the screen DMD
-        self.assertEqual((pre, user), ([], ["--dmd=hd", "--dmd-preview=" + D.PREVIEW_PNG]))
-        D.set_output(look="advanced")
+        self.assertEqual((pre, user), ([], ["--dmd=hd", "--bikes", "--dmd-preview=" + D.PREVIEW_PNG]))
+        D.set_output(look="hd")                       # on an LCD "advanced" is forced when the bundle has it, the stored look is ignored
         self.assertEqual(D.plan("g", b)[1][:2], ["--dmd=hd", "--bikes"])
+        D.set_output(look="")
         D.set_output("zedmd", look="advanced")        # a device shows the exact classic dots, whatever the page says
         self.assertEqual(D.plan("g", b)[1][0], "--dmd=classic")
         D.set_output("pin2dmd")
@@ -136,7 +137,11 @@ class DmdOutput(Base):
         b = {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"]}, "look": "hd"}, "profiles": {"rpi4": {"dmd_looks": ["classic"]}}}
         s = D.load()
         self.assertEqual(D.effective_look(s, b, "lcd", "rpi4"), "classic")
-        self.assertEqual(D.effective_look(s, b, "lcd", "x86"), "hd")
+        self.assertEqual(D.effective_look(s, b, "lcd", "x86"), "hd")      # no "advanced" in this bundle: the old rule
+        b["dmd"]["looks"]["advanced"] = ["--h", "--bikes"]
+        self.assertEqual(D.effective_look(s, b, "lcd", "x86"), "advanced")
+        self.assertEqual(D.effective_look(s, b, "lcd", "rpi4"), "classic")  # the board's limit still wins
+        del b["dmd"]["looks"]["advanced"]
         self.assertEqual(K.problems(dict(b, game_dir="game")), [])
         self.assertEqual(list(D.allowed_looks(b, "rpi4")), ["classic"])
 

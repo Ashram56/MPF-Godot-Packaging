@@ -986,7 +986,7 @@ function scrRender(s){const c=s.screens,sec=$('#scrSec');if(!c)return;sec.classL
  $('#scrWin').innerHTML=`<table class="mx"><tbody>${c.windows.map(w=>`<tr><th>${esc(w.label)}</th><td><select data-win="${esc(w.id)}">${Array.from({length:n},(_,i)=>`<option value="${i}"${i===w.index?' selected':''}>${i}${c.screens[i]?' · '+esc(c.screens[i].name)+' '+c.screens[i].width+'×'+c.screens[i].height:''}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table>`;
  const dev=c.dmdOutput==='pin2dmd'||c.dmdOutput==='zedmd';$('#scrDmdNote').textContent=dev?t('scrDmdOff').replace('{o}',c.dmdOutput==='zedmd'?'ZeDMD':'PIN2DMD'):''}
 document.addEventListener('change',e=>{const w=e.target.dataset&&e.target.dataset.win;if(w!==undefined&&e.target.tagName==='SELECT'){const c=window._scr;post('/api/screens',{folder:c.folder,window:w,index:e.target.value})}});
-function dmdLookFill(d){const sel=$('#dmdLook');const ls=d.looks||[];$('#dmdLookRow').classList.toggle('hide',!ls.length);
+function dmdLookFill(d){const sel=$('#dmdLook');const ls=d.looks||[];$('#dmdLookRow').classList.add('hide');
  sel.innerHTML=`<option value="">${t('dmdLookAuto')}</option>`+ls.map(l=>`<option value="${l}">${t('dmdLook_'+l)}</option>`).join('');sel.value=ls.includes(d.look)?d.look:'';
  const dev=d.output==='pin2dmd'||d.output==='zedmd'||d.output==='web';sel.disabled=dev||ls.length<2;
  $('#dmdLookNote').textContent=!ls.length?t('dmdLookNone'):dev?t('dmdLookFixed'):t('dmdLookNow').replace('{g}',d.game).replace('{l}',t('dmdLook_'+d.lookNow))}
