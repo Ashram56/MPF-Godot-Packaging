@@ -240,6 +240,8 @@ mkdir -p "$R/opt/games" && chown 1000:1000 "$R/opt/games"
 install -m 644 "$CAB/mpf-game.env" "$R/etc/default/mpf-game"
 # default sound on HDMI output 0 (the Pi 5 has no jack)
 install -m 644 "$CAB/asound.conf" "$R/etc/asound.conf"
+mkdir -p "$R/etc/X11/xorg.conf.d"
+install -m 644 "$CAB/99-vc4.conf" "$R/etc/X11/xorg.conf.d/99-vc4.conf"
 in_chroot "systemctl enable mpf-netconfig-apply.service mpf-netconfig-web.service mpf-netconfig-ap.service mpf-netconfig-inbox.service >/dev/null 2>&1"
 
 in_chroot "id pi >/dev/null 2>&1 || useradd --create-home -G sudo,video,audio,render,input,tty -p \"\$(openssl passwd -6 '$PI_PASSWORD')\" -s /bin/bash pi"
@@ -305,7 +307,7 @@ if [ -n "$EXTRAS" ]; then
             in_chroot "su - pi -c 'cd ~/MPF-Godot && bash native/dmd_bridge/build_all.sh'"
         fi
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"
-        printf '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin pi --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
+        printf '[Unit]\nStartLimitIntervalSec=0\n\n[Service]\nRestartSec=2\nExecStart=\nExecStart=-/sbin/agetty --autologin pi --noclear %%I $TERM\n' > "$R/etc/systemd/system/getty@tty1.service.d/autologin.conf"
         cat >> "$R/home/pi/.profile" <<'PROF'
 # Start X on the first console (automatic login); remove this to get a plain shell
 if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then exec startx -- -nocursor; fi
