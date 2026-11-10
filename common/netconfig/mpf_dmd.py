@@ -265,12 +265,16 @@ def allowed_looks(bundle, board_name=None):
 
 def effective_look(s, bundle, out, board_name=None):
     """The look that runs: only an LCD shows more than the exact 128x32 classic dots (PIN2DMD, ZeDMD with or without Serum, the page's
-    preview of those). On an LCD: the setting if the bundle offers it, else its `dmd.looks` default (`dmd.look`), else its first look."""
+    preview of those). On an LCD: always "advanced" when the bundle offers it (and the board allows it): the LCD DMD is the game's full one,
+    there is no intermediate HD look to choose. A bundle without "advanced" keeps the old rule: the stored setting if it offers it, else
+    its `dmd.looks` default (`dmd.look`), else its first look."""
     looks = allowed_looks(bundle, board_name)
     if not looks:
         return ""
     if out != "lcd":
         return "classic" if "classic" in looks else ""
+    if "advanced" in looks:
+        return "advanced"
     want = s.get("look") or ((bundle or {}).get("dmd") or {}).get("look")
     return want if want in looks else next(iter(looks))
 
