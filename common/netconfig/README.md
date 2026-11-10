@@ -6,7 +6,7 @@ Shared by every image (Raspberry Pi 4, Jetson Xavier NX, x86 mini PC). Standard 
 | File | Role |
 |---|---|
 | `mpf-network.txt.template` | Text file the user edits (SSID, password, country, SSH key, mode). Lives where the image can be mounted from Windows/macOS: the FAT boot partition |
-| `mpf_netconfig.py` | Entry point and network side. `apply` (read the file at boot; the Wi-Fi password is erased from it afterwards), `web` (setup page on port 8080), `ap` (access point `MPF-Setup`, password `mpf-setup`, page at http://192.168.4.1:8080 when no network came up in 90 s), `game` (what `mpf-game.service` runs), `inbox` (install what is waiting in the inbox) |
+| `mpf_netconfig.py` | Entry point and network side. `apply` (read the file at boot; the Wi-Fi password is erased from it afterwards), `web` (setup page on port 8080), `ap` (access point `MPF-Setup`, password `mpf-setup`, page at http://192.168.4.1:8080 when no network came up in 90 s; DHCP leases in /run because the production root is read-only, and port 80 redirects to the page so a phone's connectivity check gets an answer), `game` (what `mpf-game.service` runs), `inbox` (install what is waiting in the inbox) |
 | `mpf_common.py` | Settings read from the environment and `/etc/mpf-readonly.conf`, the writable-window helper for read-only mode |
 | `mpf_games.py` | Everything about games: install, versions, the active game, PuP Packs, settings, start and stop, the inbox |
 | `mpf_monitor.py` | Switch monitor (BCP client of the running game) and saved log snapshots |
