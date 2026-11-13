@@ -1,8 +1,16 @@
 # Wi-Fi of the topper Pi: fill in the name and password of your network, then keep the file on the boot partition.
 # Read once, at the first boot (netplan syntax, indent with spaces). The Pi Zero W has 2.4 GHz Wi-Fi only.
-# For a wired adapter nothing is needed: DHCP is the default.
+# The USB link to the game computer (micro-USB data port, platforms/raspberrypi/zero/README.md): fixed address, always set.
 network:
   version: 2
+  ethernets:
+    usb0:
+      match:
+        macaddress: "02:70:75:70:00:02"
+      set-name: usb0
+      dhcp4: false
+      addresses: [10.55.0.2/24]
+      optional: true
   wifis:
     wlan0:
       dhcp4: true

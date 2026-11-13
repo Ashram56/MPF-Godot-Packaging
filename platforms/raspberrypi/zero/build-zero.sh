@@ -105,9 +105,16 @@ mcopy -o -i "$BOOT" "$KIT/files/user-data" ::user-data
 mcopy -o -i "$BOOT" "$KIT/files/network-config" ::network-config
 sed "s#^media=.*#media=/var/lib/pup-topper/media#" "$REPO/mpf_godot/pup_remote/topper/pup-topper.cfg" > "$WORK/pup-topper.cfg"
 mcopy -o -i "$BOOT" "$WORK/pup-topper.cfg" ::pup-topper.cfg
+# USB link (the Zero's micro-USB data port to a USB port of the game computer): Ethernet gadget with fixed MACs, so the
+# game computer can recognise it (host/usb-link-host.sh); the Zero is 10.55.0.2 (network-config), the game computer 10.55.0.1
+mtype -i "$BOOT" ::cmdline.txt | tr -d '\r\n' > "$WORK/cmdline.txt"
+grep -q 'g_ether' "$WORK/cmdline.txt" || \
+    printf ' modules-load=dwc2,g_ether g_ether.host_addr=02:70:75:70:00:01 g_ether.dev_addr=02:70:75:70:00:02\n' >> "$WORK/cmdline.txt"
+mcopy -o -i "$BOOT" "$WORK/cmdline.txt" ::cmdline.txt
+sed -i "s#^host=.*#host=10.55.0.1#" "$WORK/pup-topper.cfg"; mcopy -o -i "$BOOT" "$WORK/pup-topper.cfg" ::pup-topper.cfg
 # Zero W: the GPU needs memory for the H.264 decoder; no Bluetooth (frees the UART and a core's time)
 mtype -i "$BOOT" ::config.txt > "$WORK/config.txt"
-grep -q '^gpu_mem=' "$WORK/config.txt" || printf '\n[all]\ngpu_mem=96\ndtoverlay=disable-bt\n' >> "$WORK/config.txt"
+grep -q '^gpu_mem=' "$WORK/config.txt" || printf '\n[all]\ngpu_mem=96\ndtoverlay=disable-bt\ndtoverlay=dwc2,dr_mode=peripheral\n' >> "$WORK/config.txt"
 mcopy -o -i "$BOOT" "$WORK/config.txt" ::config.txt
 
 log "6/6 Compress"
