@@ -1,0 +1,13 @@
+# Wi-Fi of the topper Pi: fill in the name and password of your network, then keep the file on the boot partition.
+# Read once, at the first boot (netplan syntax, indent with spaces). The Pi Zero W has 2.4 GHz Wi-Fi only.
+# For a wired adapter nothing is needed: DHCP is the default.
+network:
+  version: 2
+  wifis:
+    wlan0:
+      dhcp4: true
+      optional: true
+      regulatory-domain: FR
+      access-points:
+        "YOUR WIFI NAME":
+          password: "YOUR WIFI PASSWORD"

@@ -33,9 +33,13 @@ class Library:
     """
 
     def __init__(self, files, playlists=None, rng=None):
-        self.files = dict(files)
         self.playlists = {k.lower(): v for k, v in (playlists or {}).items()}
         self.rng = rng or random.Random()
+        self.set_files(files)
+
+    def set_files(self, files):
+        """The files changed (a download finished): the folders and the playlists' order start again."""
+        self.files = dict(files)
         self.folders = {}
         for key in self.files:
             self.folders.setdefault(os.path.dirname(key).lower(), []).append(key)
