@@ -23,7 +23,7 @@ Raspberry Pi yet.
 `platforms/raspberrypi/zero/` builds a flashable image (Raspberry Pi OS Lite 32-bit, the userland that runs on the Zero's
 ARMv6 core, plus mpv and the agent; [README](raspberrypi/zero/README.md)). Flash it, edit `network-config` (Wi-Fi) and
 `user-data` (hostname, password, SSH key) on its boot partition, power on: the topper finds the game by itself and downloads
-its videos. Nothing is installed or generated on the Pi. For any other Pi, the installer below.
+its videos. The Pi can be wired to the game computer by its micro-USB data port instead of Wi-Fi (Ethernet gadget, 10.55.0.1/10.55.0.2: [zero/README.md](raspberrypi/zero/README.md), "USB link"). Nothing is installed or generated on the Pi. For any other Pi, the installer below.
 
 ## On the Pi (installer, any Pi)
 
@@ -95,7 +95,7 @@ beside a game with the remote screens on.
 
 ## To check on the Pi
 
-0. The image on a real Pi Zero W: boot, Wi-Fi from `network-config`, the topper found by broadcast, the videos downloaded.
+0. The image on a real Pi Zero W: boot, the USB link to the game computer (`usb-link-host.sh`, `ping 10.55.0.2`) or Wi-Fi from `network-config` (then `host=auto`), the videos downloaded.
 1. Smooth playback with `--hwdec=v4l2m2m-copy` on the 3 A+ and a Zero W (try `--hwdec=no` to compare).
 2. Discovery on the cabinet's network (else set `host=`).
 3. The underlay resuming where it was after a pop-up.

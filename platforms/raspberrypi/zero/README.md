@@ -21,6 +21,29 @@ the one `apt-get install` is done here, at build time.
 The first boot sets the hostname, the user and the Wi-Fi (cloud-init, the base image's own mechanism), then the service
 `pup-topper` runs. Log: `journalctl -u pup-topper -f`. Downloaded videos: `/var/lib/pup-topper/media`.
 
+## USB link (no Wi-Fi: the Zero's micro-USB cable to the game computer)
+
+The Zero W has two micro-USB ports: the one nearest the middle of the board is the **data** port (USB OTG), the one at the end
+is power only. Plug the **data** port into a USB port of the game computer (a Raspberry Pi, a mini PC...): the cable powers the
+Zero (about 150 to 250 mA, fine for a Pi 4 or 5 port) and carries an Ethernet link, the image being an Ethernet gadget
+(`dtoverlay=dwc2`, `modules-load=dwc2,g_ether` in `cmdline.txt`, fixed MACs `02:70:75:70:00:01` for the computer's side and
+`02:70:75:70:00:02` for the Zero's). The Zero is **10.55.0.2**, the game computer **10.55.0.1**, and the agent's default is
+`host=10.55.0.1` (no broadcast needed). The Wi-Fi stays available: for it set `host=auto` in `pup-topper.cfg`.
+
+On the game computer, once, as root (needs NetworkManager or systemd-networkd, which every platform image has):
+
+```bash
+sudo bash platforms/raspberrypi/zero/host/usb-link-host.sh        # --uninstall removes it
+```
+
+It gives the USB Ethernet port with the Zero's MAC the address 10.55.0.1/24 (no gateway, no DHCP, no routing). Then in the
+game turn `[remote] enabled` on and plug the cable. Check: `ping 10.55.0.2` from the computer, `journalctl -u pup-topper -f` on
+the Zero (SSH `pi@10.55.0.2`). The game must listen on all addresses (`listen=0.0.0.0`, the default); the Pi's downloads use
+the media port 5053 over the same link.
+
+Limits: a USB port that cuts power or resets when the computer sleeps restarts the Zero (it comes back by itself); a
+powered USB hub is the fix if the computer's port is weak or shared with the audio/DMD devices.
+
 ## Build (x86_64 Linux or WSL2, root, about 8 GB, 10 to 20 minutes)
 
 ```bash
@@ -37,7 +60,7 @@ partition files are written with mtools (no loop device for FAT). `SKIP_PACKAGES
 
 Built and structure-checked in a sandbox without the mirrors (`SKIP_PACKAGES=1`): the image has the agent, service enabled,
 boot-partition files; the ARMv6 kernel 6.18 boots to userspace under QEMU `raspi0` (see below); the agent runs under qemu-user
-against a game server. **Not checked:** the mpv install and the topper on a real Zero W (hardware decode `v4l2m2m-copy`, smooth playback,
+against a game server. **Not checked:** the USB gadget link on real hardware (the cmdline/config edits are done, not booted with a host), the mpv install and the topper on a real Zero W (hardware decode `v4l2m2m-copy`, smooth playback,
 Wi-Fi association, memory).
 
 ## Boot check under QEMU (no Pi needed)
