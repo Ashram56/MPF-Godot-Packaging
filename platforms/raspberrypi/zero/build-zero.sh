@@ -11,6 +11,9 @@
 #   sudo bash platforms/raspberrypi/zero/build-zero.sh
 # Optional environment:
 #   WORK=/path     work folder (default ./work-zero, in the Linux home under WSL, never /mnt/c)
+#   APT_MIRROR=URL Raspbian mirror to use instead of raspbian.raspberrypi.com, which is plain HTTP only: for a build host that
+#                  only allows HTTPS (e.g. a sandbox behind a proxy), https://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian/
+#   APT_PROXY=URL  HTTPS proxy for apt in the image (with APT_CA=/path/ca-bundle.crt when the proxy re-signs TLS)
 #   BASE_IMAGE=URL base image (default: the pinned one below); BASE_SHA256=... its checksum (default: read from the
 #                  .sha256 next to it on the same server)
 # Output: $WORK/out/rpi-zero-topper.img.xz and .sha256 (flash it with Raspberry Pi Imager, "Use custom", or dd)
@@ -78,6 +81,15 @@ cp -L /etc/resolv.conf "$MNT/etc/resolv.conf"
 printf '#!/bin/sh\nexit 101\n' > "$MNT/usr/sbin/policy-rc.d"; chmod 755 "$MNT/usr/sbin/policy-rc.d"
 # the Pi's memcpy preload is for the real CPU: under emulation it only prints errors
 [ -f "$MNT/etc/ld.so.preload" ] && mv "$MNT/etc/ld.so.preload" "$MNT/etc/ld.so.preload.build-bak"
+if [ -n "${APT_MIRROR:-}" ] || [ -n "${APT_PROXY:-}" ]; then
+    for f in "$MNT"/etc/apt/sources.list.d/*.sources "$MNT"/etc/apt/sources.list; do
+        [ -f "$f" ] || continue
+        [ -n "${APT_MIRROR:-}" ] && sed -i "s#http://raspbian.raspberrypi.com/raspbian/#${APT_MIRROR%/}/#" "$f"
+        sed -i "s#http://archive.raspberrypi.com/#https://archive.raspberrypi.com/#" "$f"
+    done
+    [ -n "${APT_PROXY:-}" ] && echo "Acquire::https::Proxy \"$APT_PROXY\";" > "$MNT/etc/apt/apt.conf.d/99build-proxy"
+    [ -n "${APT_CA:-}" ] && { cp "$APT_CA" "$MNT/usr/local/share/build-ca.crt"; echo 'Acquire::https::CaInfo "/usr/local/share/build-ca.crt";' >> "$MNT/etc/apt/apt.conf.d/99build-proxy"; }
+fi
 if [ -z "${SKIP_PACKAGES:-}" ]; then   # SKIP_PACKAGES=1: the build test without the Raspbian mirrors (no mpv in the result)
     in_chroot "apt-get update -qq"
     in_chroot "apt-get install -y -qq --no-install-recommends mpv python3 libdrm2 libgbm1 libegl1 libgles2 libv4l-0t64"
@@ -95,7 +107,10 @@ in_chroot "systemctl disable userconfig.service rpi-eeprom-update.service blueto
 in_chroot "python3 -m py_compile /opt/pup-topper/topper.py /opt/pup-topper/screen_rules.py && rm -rf /opt/pup-topper/__pycache__"
 [ -f "$MNT/etc/ld.so.preload.build-bak" ] && mv "$MNT/etc/ld.so.preload.build-bak" "$MNT/etc/ld.so.preload"
 mv -f "$MNT/etc/resolv.conf.build-bak" "$MNT/etc/resolv.conf" 2>/dev/null || true
-rm -f "$MNT/usr/sbin/policy-rc.d" "$MNT/usr/bin/qemu-arm-static"
+rm -f "$MNT/usr/sbin/policy-rc.d" "$MNT/usr/bin/qemu-arm-static" "$MNT/etc/apt/apt.conf.d/99build-proxy" "$MNT/usr/local/share/build-ca.crt"
+# the image's own sources go back to the Raspberry Pi hosts (the Pi has plain HTTP access)
+sed -i "s#https://archive.raspberrypi.com/#http://archive.raspberrypi.com/#" "$MNT"/etc/apt/sources.list.d/*.sources 2>/dev/null || true
+[ -n "${APT_MIRROR:-}" ] && sed -i "s#${APT_MIRROR%/}/#http://raspbian.raspberrypi.com/raspbian/#" "$MNT"/etc/apt/sources.list.d/*.sources 2>/dev/null || true
 LC_ALL=C chroot "$MNT" /usr/bin/dpkg-query -W -f='${Package}\t${Version}\n' > "$OUT/packages-zero.tsv" 2>/dev/null || true
 cleanup; trap - EXIT
 
