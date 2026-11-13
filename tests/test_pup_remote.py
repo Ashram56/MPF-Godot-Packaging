@@ -234,6 +234,75 @@ class TestServer(unittest.TestCase):
                 self.assertIsNone(await topper.discover(port, timeout=0.2, target="127.0.0.1"))
         asyncio.run(scenario())
 
+    def test_media_download(self):
+        """The game serves its files; the topper downloads what is new, resumes a partial one, drops what is gone, and
+        plays the downloaded file after the welcome. A key outside the list is never read."""
+        import tempfile
+        async def scenario(pack, media):
+            os.makedirs(os.path.join(pack, "TopperModes"))
+            data = os.urandom(300_000)
+            with open(os.path.join(pack, "TopperModes", "Hero.mp4"), "wb") as f:
+                f.write(data)
+            secret = os.path.join(os.path.dirname(pack), "secret.txt")
+            with open(secret, "w") as f:
+                f.write("no")
+            server = remote.RemoteServer(SCREENS, {}, game="g", host="127.0.0.1", port=0, ping_seconds=0.2,
+                                         media={"TopperModes/Hero.mp4": os.path.join(pack, "TopperModes", "Hero.mp4")},
+                                         media_port=0)
+            await server.start()
+            self.assertEqual({"port": server.media_port}, server.welcome([13])["media"])
+            loop = asyncio.get_running_loop()
+            # a path outside the list is a 404, also with ..
+            import urllib.request, urllib.error
+            for bad in ("/media/../secret.txt", "/media/%2e%2e/secret.txt", "/etc/passwd"):
+                with self.assertRaises(urllib.error.HTTPError):
+                    await loop.run_in_executor(None, lambda b=bad: urllib.request.urlopen("http://127.0.0.1:%d%s" % (server.media_port, b)))
+            # a partial file resumes
+            os.makedirs(os.path.join(media, "TopperModes"))
+            with open(os.path.join(media, "TopperModes", "Hero.mp4.part"), "wb") as f:
+                f.write(data[:100_000])
+            self.assertTrue(await loop.run_in_executor(None, topper.sync_media, "127.0.0.1", server.media_port, media))
+            with open(os.path.join(media, "TopperModes", "Hero.mp4"), "rb") as f:
+                self.assertEqual(data, f.read())
+            self.assertFalse(os.path.exists(os.path.join(media, "TopperModes", "Hero.mp4.part")))
+            self.assertFalse(await loop.run_in_executor(None, topper.sync_media, "127.0.0.1", server.media_port, media))
+            lib = topper.load_library(media)
+            self.assertEqual(os.path.join(media, "TopperModes/Hero.mp4"), lib.path("TopperModes/Hero.mp4"))
+            # the full link: the topper starts empty, downloads, then plays the file
+            os.remove(os.path.join(media, "manifest.json"))
+            os.remove(os.path.join(media, "TopperModes", "Hero.mp4"))
+            server.send({"screen": 13, "playlist": "TopperModes", "file": "Hero", "priority": 3, "mode": "Loop"})
+            mpv = FakeMpv()
+            display = topper.Display(mpv, topper.load_library(media))
+            opts = topper.load_config(None, {"host": "127.0.0.1", "port": str(server.port), "timeout": "1", "media": media})
+            link = asyncio.ensure_future(topper.session(opts, display, [13, 14]))
+            for _ in range(100):
+                await asyncio.sleep(0.05)
+                if mpv.path:
+                    break
+            self.assertEqual(os.path.join(media, "TopperModes/Hero.mp4"), mpv.path)
+            # the game stops listing it: removed on the Pi
+            os.remove(os.path.join(pack, "TopperModes", "Hero.mp4"))
+            self.assertTrue(await loop.run_in_executor(None, topper.sync_media, "127.0.0.1", server.media_port, media))
+            self.assertFalse(os.path.exists(os.path.join(media, "TopperModes", "Hero.mp4")))
+            server.close()
+            await asyncio.wait_for(link, 3)
+        with tempfile.TemporaryDirectory() as d:
+            asyncio.run(scenario(os.path.join(d, "pack"), os.path.join(d, "media")))
+
+    def test_topper_media(self):
+        import tempfile
+        from collections import namedtuple
+        from mpf_godot.pup_remote import media
+        T = namedtuple("T", "screen active playlist")
+        with tempfile.TemporaryDirectory() as d:
+            for rel in ("TopperModes/Hero.mp4", "TopperModes/notes.txt", "Background - Topper/Title.mp4", "Drain/D1.mp4", "TopperOff/x.mp4"):
+                os.makedirs(os.path.join(d, os.path.dirname(rel)), exist_ok=True)
+                open(os.path.join(d, rel), "w").close()
+            files = media.topper_media(d, SCREENS, [T(13, True, "topperModes"), T(14, False, "TopperOff"), T(2, True, "Drain")])
+            self.assertEqual(["Background - Topper/Title.mp4", "TopperModes/Hero.mp4"], sorted(files))
+            self.assertEqual({}, media.topper_media(os.path.join(d, "none"), SCREENS, []))
+
 
 class socket_port:
     """A free UDP port nobody answers on."""

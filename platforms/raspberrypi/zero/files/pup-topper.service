@@ -1,0 +1,17 @@
+[Unit]
+Description=PuP topper (PuP screens 13 and 14 from the game)
+After=cloud-init.service network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+SupplementaryGroups=video render
+# the videos downloaded from the game; systemd makes the folder, owned by the user
+StateDirectory=pup-topper
+# settings on the boot partition (pup-topper.cfg), editable from any computer
+ExecStart=/usr/bin/python3 /opt/pup-topper/topper.py --config /boot/firmware/pup-topper.cfg
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

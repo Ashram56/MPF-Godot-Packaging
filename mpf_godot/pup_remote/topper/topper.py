@@ -22,6 +22,8 @@ import shlex
 import socket
 import sys
 import tempfile
+import urllib.parse
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)                                                        # installed: next to this file
@@ -37,6 +39,7 @@ DEFAULTS = {
     "name": "topper",
     "screens": "13,14",             # underlay, then pop-up layer
     "media": "~/pup-topper/media",
+    "download": "true",             # download the videos from the game (its media port); false: the folder is filled by hand
     "fit": "fill",                  # fit (black bars), fill (crop), stretch
     "align": "0.5",                 # vertical place of a fitted video: 0 top, 0.5 centre, 1 bottom
     "audio": "false",               # the cabinet plays the sound
@@ -72,6 +75,74 @@ def load_library(media_dir, playlists=None):
                 path = os.path.join(root, name)
                 files[os.path.relpath(path, media_dir).replace(os.sep, "/")] = path
     return screen_rules.Library(files, playlists)
+
+
+# ---------------------------------------------------------------------- the videos, downloaded from the game
+
+def sync_media(host, port, media_dir, timeout=30, progress=None):
+    """Download the game's media into media_dir (blocking; run it in a thread): what the game's /manifest.json lists and
+    media_dir/manifest.json does not already hold with the same size and time. A file is written as NAME.part (a partial
+    one resumes with a Range request) and renamed when whole. Files the game no longer lists are removed. Returns True
+    when something changed."""
+    base = "http://%s:%d" % (host, port)
+    with urllib.request.urlopen(base + "/manifest.json", timeout=timeout) as r:
+        remote = json.load(r).get("files", {})
+    local_path = os.path.join(media_dir, "manifest.json")
+    try:
+        with open(local_path, encoding="utf-8") as f:
+            local = json.load(f).get("files", {})
+    except (OSError, ValueError):
+        local = {}
+    os.makedirs(media_dir, exist_ok=True)
+    changed = False
+    root = os.path.realpath(media_dir)
+    for key, want in sorted(remote.items()):
+        dest = os.path.realpath(os.path.join(media_dir, key))
+        if not dest.startswith(root + os.sep):
+            log.warning("ignored %r: outside the media folder", key)
+            continue
+        have = local.get(key, {})
+        if (os.path.isfile(dest) and have.get("size") == want["size"] and have.get("mtime") == want["mtime"]
+                and os.path.getsize(dest) == want["size"]):
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        part = dest + ".part"
+        done = os.path.getsize(part) if os.path.exists(part) else 0
+        if done > want["size"] or have.get("mtime") != want["mtime"] and done:
+            done = 0                        # not the same file any more: start again
+        log.info("download %s (%.1f MB)%s", key, want["size"] / 1e6, " from %.1f MB" % (done / 1e6) if done else "")
+        req = urllib.request.Request(base + "/media/" + urllib.parse.quote(key))
+        if done:
+            req.add_header("Range", "bytes=%d-" % done)
+        if done < want["size"]:
+            with urllib.request.urlopen(req, timeout=timeout) as r, open(part, "ab" if done else "wb") as out:
+                while True:
+                    chunk = r.read(1 << 18)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+        if os.path.getsize(part) != want["size"]:
+            os.remove(part)
+            raise OSError("%s: incomplete download" % key)
+        os.replace(part, dest)
+        os.utime(dest, (want["mtime"], want["mtime"]))
+        local[key] = {"out": key, "size": want["size"], "mtime": want["mtime"]}
+        changed = True
+        if progress:
+            progress(key)
+    for key in [k for k in local if k not in remote]:
+        try:
+            os.remove(os.path.join(media_dir, key))
+        except OSError:
+            pass
+        del local[key]
+        changed = True
+    if changed or not os.path.exists(local_path):
+        tmp = local_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"files": local}, f)
+        os.replace(tmp, local_path)
+    return changed
 
 
 # ---------------------------------------------------------------------- mpv
@@ -245,6 +316,10 @@ class Display:
         if top is not restart and kept and kept[0] == top.key:
             start = kept[1]
         path = self.library.path(top.key)
+        if not path:
+            log.info("no video %s here yet", top.key)
+            self.player.clear()
+            return
         if restart is None and top.loop and path == self.player.path:
             return                      # already on screen (the game came back): no restart
         log.info("play %s%s", top.key, " from %.1f s" % start if start else "")
@@ -283,6 +358,20 @@ async def discover(port, timeout=2.0, target="255.255.255.255"):
         transport.close()
 
 
+async def fetch_media(host, port, opts, display, numbers, welcome):
+    """Download what the game serves, then show it: the screens start again once with the new files."""
+    media = os.path.expanduser(opts["media"])
+    try:
+        changed = await asyncio.to_thread(sync_media, host, port, media)
+    except (OSError, ValueError) as e:
+        log.warning("media download from %s:%d failed: %s", host, port, e)
+        return
+    if changed:
+        display.library.set_files(load_library(media).files)
+        log.info("%d media files in %s", len(display.library.files), media)
+        display.setup(welcome.get("screens", {}), welcome.get("playlists", {}), numbers, welcome.get("current", []))
+
+
 async def session(opts, display, numbers):
     """One connection to the game, until it closes or goes quiet."""
     port = int(opts["port"])
@@ -295,6 +384,7 @@ async def session(opts, display, numbers):
         host = opts["host"]
     reader, writer = await asyncio.open_connection(host, port)
     log.info("connected to the game at %s:%d", host, port)
+    fetching = None
     hello = {"type": "hello", "name": opts["name"], "screens": numbers, "version": VERSION}
     writer.write(json.dumps(hello).encode() + b"\n")
     try:
@@ -306,12 +396,19 @@ async def session(opts, display, numbers):
             kind = msg.get("type")
             if kind == "welcome":
                 display.setup(msg.get("screens", {}), msg.get("playlists", {}), numbers, msg.get("current", []))
+                if msg.get("media") and opts.get("download", "true").lower() in ("1", "true", "yes", "on"):
+                    if fetching:
+                        fetching.cancel()
+                    fetching = asyncio.ensure_future(
+                        fetch_media(host, int(msg["media"]["port"]), opts, display, numbers, msg))
             elif kind == "play":
                 display.command(msg.get("cmd", {}))
     except asyncio.TimeoutError:
         log.warning("the game went quiet")
         return True
     finally:
+        if fetching:
+            fetching.cancel()
         writer.close()
 
 
