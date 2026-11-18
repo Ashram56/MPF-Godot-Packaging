@@ -1,7 +1,6 @@
 [Unit]
 Description=PuP topper (PuP screens 13 and 14 from the game)
-After=cloud-init.service network-online.target
-Wants=network-online.target
+After=network.target
 
 [Service]
 User=pi

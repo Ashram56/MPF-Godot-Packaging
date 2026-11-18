@@ -103,6 +103,8 @@ install -m 644 "$REPO/mpf_godot/pup_remote/topper/topper.py" "$REPO/mpf_godot/pu
 install -m 644 "$KIT/files/pup-topper.service" "$MNT/etc/systemd/system/pup-topper.service"
 in_chroot "systemctl enable pup-topper.service ssh >/dev/null 2>&1"
 # a topper needs none of these on a 512 MB single core
+# the boot must not wait for a network (no Wi-Fi configured, USB link only): the agent retries by itself
+in_chroot "systemctl disable NetworkManager-wait-online.service systemd-networkd-wait-online.service >/dev/null 2>&1 || true"
 in_chroot "systemctl disable userconfig.service rpi-eeprom-update.service bluetooth.service hciuart.service triggerhappy.service apt-daily.timer apt-daily-upgrade.timer man-db.timer >/dev/null 2>&1 || true"
 in_chroot "python3 -m py_compile /opt/pup-topper/topper.py /opt/pup-topper/screen_rules.py && rm -rf /opt/pup-topper/__pycache__"
 [ -f "$MNT/etc/ld.so.preload.build-bak" ] && mv "$MNT/etc/ld.so.preload.build-bak" "$MNT/etc/ld.so.preload"
