@@ -60,9 +60,32 @@ def load(option):
     return None if t1 is None else t1 - t0
 
 
+def loop_gap(option, remain=1.0):
+    """Looping (loop-file=inf): seek to `remain` s before the end, then time to the next playback-restart (the loop's
+    seek back to the start) minus `remain`: the extra time the loop costs."""
+    cmd("set_property", "loop-file", "inf")
+    load(option)
+    cmd("set_property", "pause", True)
+    cmd("get_property", "duration")
+    dur = None
+    for ev in events():
+        if ev.get("request_id") == 0 and "data" in ev:
+            dur = ev["data"]
+            break
+    cmd("seek", max(dur - remain, 0), "absolute")
+    wait("playback-restart")
+    cmd("set_property", "pause", False)
+    t0 = time.time()
+    t1 = wait("playback-restart", 30)
+    return None if t1 is None else t1 - t0 - remain
+
+
 try:
     for option in ("hwdec=v4l2m2m-copy", "hwdec=no", "hwdec=v4l2m2m-copy", "hwdec=no"):
         times = [load(option) for _ in range(4)]
         print("%-20s %s s" % (option, " ".join("%.2f" % t if t else "timeout" for t in times)), flush=True)
+    for option in ("hwdec=v4l2m2m-copy", "hwdec=no"):
+        gaps = [loop_gap(option) for _ in range(3)]
+        print("%-20s loop gap %s s" % (option, " ".join("%.2f" % g if g is not None else "timeout" for g in gaps)), flush=True)
 finally:
     proc.terminate()
