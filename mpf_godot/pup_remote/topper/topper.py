@@ -164,6 +164,8 @@ class Mpv:
         self._proc = None
         self._writer = None
         self._queue = []
+        self.moved = time.monotonic()           # last time the playback position changed (or a file was opened)
+        self.eof = True
         self.heard = time.monotonic()           # last line from mpv: the watchdog's proof of life
         m = re.search(r"--hwdec=(\S+)", opts["mpv_args"])
         self.hwdec = m.group(1) if m else "no"
@@ -228,6 +230,12 @@ class Mpv:
                 if self._proc and self._proc.returncode is None:
                     self._proc.kill()
                 os._exit(1)
+            if self.path and not self.eof and time.monotonic() - self.moved > 6.0:
+                # answers the pings but the picture does not advance: the decoder or the display is stuck
+                log.error("mpv answers but %s does not advance (at %.1f s): restarting", os.path.basename(self.path), self.position)
+                if self._proc and self._proc.returncode is None:
+                    self._proc.kill()
+                os._exit(1)
             self._send(["get_property", "pid"])
 
     async def _read(self, reader):
@@ -242,10 +250,14 @@ class Mpv:
             except ValueError:
                 continue
             if msg.get("event") == "property-change" and msg.get("name") == "time-pos":
-                self.position = msg.get("data") or 0.0
+                pos = msg.get("data") or 0.0
+                if pos != self.position:
+                    self.moved = time.monotonic()
+                self.position = pos
             elif msg.get("event") == "property-change" and msg.get("name") == "eof-reached":
                 # keep-open: the last frame stays on screen at the end (no black); the next video replaces it
-                if msg.get("data") is True and self.on_eof:
+                self.eof = msg.get("data") is True
+                if self.eof and self.on_eof:
                     self.on_eof()
 
     def _send(self, command):
@@ -257,6 +269,7 @@ class Mpv:
     def play(self, path, loop, volume, start=0.0):
         self.path = path
         self.position = start
+        self.moved, self.eof = time.monotonic(), False
         self._send(["set_property", "loop-file", "inf" if loop else "no"])
         self._send(["set_property", "start", "%.3f" % start if start > 0 else "none"])
         self._send(["set_property", "volume", round(max(0.0, min(volume, 1.0)) * 100)])
