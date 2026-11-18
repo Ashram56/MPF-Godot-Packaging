@@ -7,7 +7,9 @@ import socket
 import time
 
 PROPS = ["path", "time-pos", "duration", "pause", "core-idle", "eof-reached", "loop-file", "hwdec-current", "paused-for-cache",
-         "estimated-vf-fps", "frame-drop-count", "decoder-frame-drop-count", "video-params/w", "video-params/h", "idle-active"]
+         "estimated-vf-fps", "frame-drop-count", "decoder-frame-drop-count", "video-params/w", "video-params/h", "idle-active",
+         "container-fps", "display-fps", "video-sync", "vsync-ratio", "mistimed-frame-count", "vo-delayed-frame-count",
+         "vo-drop-frame-count", "avsync", "cache-speed"]
 socks = sorted(glob.glob("/tmp/pup-topper-mpv-*.sock"))
 if not socks:
     raise SystemExit("no topper mpv socket")
