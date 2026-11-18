@@ -67,6 +67,10 @@ class Library:
         self._last[playlist] = keys[i]
         return keys[i]
 
+    def count(self, playlist):
+        """How many files a playlist has here."""
+        return len(self.folders.get(str(playlist).lower(), []))
+
     def path(self, key):
         return self.files.get(key, "")
 
@@ -166,8 +170,10 @@ class Screen:
         if not key:
             self._stop_media()
             return
-        # a background named by its file loops that file; a playlist background moves to its next file
-        self._start(key, bool(self.bg["file"]), self.library.volume_of({"playlist": self.bg["playlist"]}))
+        # a background named by its file loops that file; a playlist background moves to its next file, except a
+        # playlist of one file, which loops it (no restart of the decoder, so no black frame, at each end)
+        loop = bool(self.bg["file"]) or self.library.count(self.bg["playlist"]) == 1
+        self._start(key, loop, self.library.volume_of({"playlist": self.bg["playlist"]}))
 
     def _start(self, key, loop, volume):
         self._serial += 1
