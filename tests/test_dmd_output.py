@@ -126,7 +126,10 @@ class DmdOutput(Base):
 
     def test_a_look_the_bundle_lacks_falls_back(self):
         D.set_output("lcd", look="advanced")
-        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"]}}})[1][0], "--c")
+        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"]}}})[1][0], "--h")   # LCD: hd, not the dots
+        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"]}, "look": "classic"}})[1][0], "--c")  # the bundle's own default wins
+        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"], "other": ["--o"]}}})[1][0], "--c")  # "other" is not a look
+        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"]}}})[1][0], "--c")                   # only classic offered
         self.assertEqual(D.plan("g", {}), ([], []))   # no looks declared: nothing added
         with self.assertRaises(ValueError):
             D.set_output(look="fancy")

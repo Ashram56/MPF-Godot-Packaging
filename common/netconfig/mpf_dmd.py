@@ -265,14 +265,21 @@ def allowed_looks(bundle, board_name=None):
 
 def effective_look(s, bundle, out, board_name=None):
     """The look that runs: only an LCD shows more than the exact 128x32 classic dots (PIN2DMD, ZeDMD with or without Serum, the page's
-    preview of those). On an LCD: the setting if the bundle offers it, else its `dmd.looks` default (`dmd.look`), else its first look."""
+    preview of those). On an LCD: the setting if the bundle offers it, else its `dmd.looks` default (`dmd.look`), else "hd", else any
+    look but the classic dots, else (only classic offered) classic: never the dot DMD on an LCD when a better look exists."""
     looks = allowed_looks(bundle, board_name)
     if not looks:
         return ""
     if out != "lcd":
         return "classic" if "classic" in looks else ""
     want = s.get("look") or ((bundle or {}).get("dmd") or {}).get("look")
-    return want if want in looks else next(iter(looks))
+    if want in looks:
+        return want
+    default = ((bundle or {}).get("dmd") or {}).get("look")
+    for k in (default, "hd"):
+        if k in looks:
+            return k
+    return next((k for k in looks if k != "classic"), "classic" if "classic" in looks else next(iter(looks)))
 
 
 def look_args(s, bundle, out):
