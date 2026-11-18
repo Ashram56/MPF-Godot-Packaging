@@ -18,10 +18,13 @@ import configparser
 import json
 import logging
 import os
+import re
 import shlex
 import socket
+import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 
@@ -45,6 +48,9 @@ DEFAULTS = {
     "audio": "false",               # the cabinet plays the sound
     "mpv": "mpv",
     "mpv_args": "--vo=gpu --gpu-context=drm --hwdec=v4l2m2m-copy",
+    "rotate": "0",                  # 0, 90, 180 or 270: the video turned for a screen mounted sideways
+    "keep_open": "0",               # 1 = the last frame stays at the end of a video (mpv keep-open); 0 = mpv closes it
+    "loop_hwdec": "",               # decoder of a looping video: "" = the one of mpv_args, "no" = software
     "window": "false",              # true: a desktop window (testing) instead of the whole screen
     "window_size": "960x281",
     "timeout": "15",                # seconds without a ping from the game before it is taken as gone
@@ -159,17 +165,34 @@ class Mpv:
         self._proc = None
         self._writer = None
         self._queue = []
+        self.moved = time.monotonic()           # last time the playback position changed (or a file was opened)
+        self.eof = True
+        self.keep_open = opts["keep_open"].lower() in ("1", "true", "yes", "on")
+        self.heard = time.monotonic()           # last line from mpv: the watchdog's proof of life
+        m = re.search(r"--hwdec=(\S+)", opts["mpv_args"])
+        self.hwdec = m.group(1) if m else "no"
+        self.indexed = self._minor() >= 38          # mpv 0.38 added the playlist index before loadfile's options
+
+    def _minor(self):
+        try:
+            out = subprocess.run([self.opts["mpv"], "--version"], capture_output=True, text=True, timeout=10).stdout
+            m = re.search(r"mpv 0\.(\d+)", out)
+            return int(m.group(1)) if m else 99
+        except (OSError, subprocess.SubprocessError):
+            return 99
 
     def args(self):
         o = self.opts
         args = [o["mpv"], "--idle=yes", "--input-ipc-server=" + self.socket, "--force-window=yes",
-                "--no-osc", "--osd-level=0", "--no-input-default-bindings", "--no-terminal", "--keep-open=no",
+                "--no-osc", "--osd-level=0", "--no-input-default-bindings", "--no-terminal", "--keep-open=" + ("always" if self.keep_open else "no"),
                 "--image-display-duration=inf", "--really-quiet",
                 "--video-align-y=%.3f" % (float(o["align"]) * 2.0 - 1.0)]
         if o["fit"] == "fill":
             args.append("--panscan=1.0")
         elif o["fit"] == "stretch":
             args.append("--keepaspect=no")
+        if o["rotate"] not in ("", "0"):
+            args.append("--video-rotate=" + o["rotate"])
         if o["audio"].lower() not in ("1", "true", "yes", "on"):
             args.append("--aid=no")
         if o["window"].lower() in ("1", "true", "yes", "on"):
@@ -188,10 +211,34 @@ class Mpv:
             await asyncio.sleep(0.1)
         reader, self._writer = await asyncio.open_unix_connection(self.socket)
         self._send(["observe_property", 1, "time-pos"])
+        self._send(["observe_property", 2, "eof-reached"])
         for cmd in self._queue:
             self._send(cmd)
         self._queue.clear()
         asyncio.ensure_future(self._read(reader))
+        asyncio.ensure_future(self._watchdog())
+
+    async def _watchdog(self, every=2.0, limit=10.0):
+        """mpv answers a ping every few seconds; silent for `limit` s means its decoder or IPC is wedged (the
+        screen froze): kill it and exit, the service restarts both."""
+        while True:
+            await asyncio.sleep(every)
+            if self._proc is not None and self._proc.returncode is not None:
+                log.error("mpv exited (%s)", self._proc.returncode)
+                os._exit(1)
+            silent = time.monotonic() - self.heard
+            if silent > limit:
+                log.error("mpv silent for %.0f s: restarting", silent)
+                if self._proc and self._proc.returncode is None:
+                    self._proc.kill()
+                os._exit(1)
+            if self.path and not self.eof and time.monotonic() - self.moved > 6.0:
+                # answers the pings but the picture does not advance: the decoder or the display is stuck
+                log.error("mpv answers but %s does not advance (at %.1f s): restarting", os.path.basename(self.path), self.position)
+                if self._proc and self._proc.returncode is None:
+                    self._proc.kill()
+                os._exit(1)
+            self._send(["get_property", "pid"])
 
     async def _read(self, reader):
         while True:
@@ -199,14 +246,27 @@ class Mpv:
             if not line:
                 log.error("mpv quit")
                 os._exit(1)                     # the service restarts us, and mpv with us
+            self.heard = time.monotonic()
             try:
                 msg = json.loads(line)
             except ValueError:
                 continue
             if msg.get("event") == "property-change" and msg.get("name") == "time-pos":
-                self.position = msg.get("data") or 0.0
-            elif msg.get("event") == "end-file" and msg.get("reason") == "eof" and self.on_eof:
-                self.on_eof()
+                pos = msg.get("data") or 0.0
+                if pos != self.position:
+                    self.moved = time.monotonic()
+                self.position = pos
+            elif msg.get("event") == "end-file":
+                self.eof = True
+                if msg.get("reason") == "eof" and not self.keep_open and self.on_eof:
+                    self.on_eof()
+            elif msg.get("event") == "start-file":
+                self.eof = False
+            elif msg.get("event") == "property-change" and msg.get("name") == "eof-reached":
+                # keep-open: the last frame stays on screen at the end (no black); the next video replaces it
+                self.eof = msg.get("data") is True
+                if self.eof and self.keep_open and self.on_eof:
+                    self.on_eof()
 
     def _send(self, command):
         if self._writer is None:
@@ -217,10 +277,17 @@ class Mpv:
     def play(self, path, loop, volume, start=0.0):
         self.path = path
         self.position = start
+        self.moved, self.eof = time.monotonic(), False
         self._send(["set_property", "loop-file", "inf" if loop else "no"])
         self._send(["set_property", "start", "%.3f" % start if start > 0 else "none"])
         self._send(["set_property", "volume", round(max(0.0, min(volume, 1.0)) * 100)])
-        self._send(["loadfile", path, "replace"])
+        # a hardware decoder restarts at each loop of a short video and shows a black frame: loops use loop_hwdec, the
+        # other videos the hwdec of mpv_args. Per-file option: changing the property would restart the decoder of the
+        # video that is playing (a pause after each video)
+        # (sent only when it differs from mpv_args: the plain loadfile is what ran reliably before)
+        want = (self.opts["loop_hwdec"] or self.hwdec) if loop else self.hwdec
+        extra = ["hwdec=" + want] if want != self.hwdec else []
+        self._send(["loadfile", path, "replace"] + ([-1] + extra if self.indexed and extra else extra))
 
     def clear(self):
         self.path = ""

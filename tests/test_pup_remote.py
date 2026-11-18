@@ -57,6 +57,15 @@ class TestScreenRules(unittest.TestCase):
         return screen_rules.Screen(13, library(), self.out, self.timers, popup=popup, bg_playlist=bg[0],
                                    bg_file=bg[1])
 
+    def test_playlist_of_one_file_loops(self):
+        """A background playlist with one file loops it (no restart of the decoder at each end); two files alternate."""
+        s = self.screen(bg=("Background - Topper", ""))
+        s.start_background()
+        self.assertEqual(("start", "Background - Topper/Title.mp4", True), self.out.log[-1])
+        s = self.screen(bg=("TopperModes", ""))
+        s.start_background()
+        self.assertFalse(self.out.log[-1][2])
+
     def test_background_then_priority(self):
         s = self.screen()
         s.start_background()
