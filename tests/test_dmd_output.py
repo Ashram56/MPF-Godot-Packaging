@@ -169,6 +169,15 @@ class DmdOutput(Base):
         self.assertIn("--dmd-cycles=true", K.plan(g, b)["godot_args"])
         D.set_output("lcd", look="classic")
         self.assertNotIn("--dmd-cycles=true", K.plan(g, b)["godot_args"])
+        import mpf_games as G
+        monkey = G.read_bundle
+        G.read_bundle = lambda game: b
+        try:
+            self.assertEqual([o["id"] for o in G.settings_schema(g)["options"]], [])      # hidden in DOT
+            D.set_output("lcd", look="advanced")
+            self.assertEqual([o["id"] for o in G.settings_schema(g)["options"]], ["bikes"])
+        finally:
+            G.read_bundle = monkey
 
     def test_preview_image(self):
         self.addCleanup(setattr, D, "PREVIEW_PNG", D.PREVIEW_PNG)
