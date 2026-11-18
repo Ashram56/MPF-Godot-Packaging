@@ -24,6 +24,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 
@@ -163,6 +164,7 @@ class Mpv:
         self._proc = None
         self._writer = None
         self._queue = []
+        self.heard = time.monotonic()           # last line from mpv: the watchdog's proof of life
         m = re.search(r"--hwdec=(\S+)", opts["mpv_args"])
         self.hwdec = m.group(1) if m else "no"
         self.indexed = self._minor() >= 38          # mpv 0.38 added the playlist index before loadfile's options
@@ -210,6 +212,23 @@ class Mpv:
             self._send(cmd)
         self._queue.clear()
         asyncio.ensure_future(self._read(reader))
+        asyncio.ensure_future(self._watchdog())
+
+    async def _watchdog(self, every=2.0, limit=10.0):
+        """mpv answers a ping every few seconds; silent for `limit` s means its decoder or IPC is wedged (the
+        screen froze): kill it and exit, the service restarts both."""
+        while True:
+            await asyncio.sleep(every)
+            if self._proc is not None and self._proc.returncode is not None:
+                log.error("mpv exited (%s)", self._proc.returncode)
+                os._exit(1)
+            silent = time.monotonic() - self.heard
+            if silent > limit:
+                log.error("mpv silent for %.0f s: restarting", silent)
+                if self._proc and self._proc.returncode is None:
+                    self._proc.kill()
+                os._exit(1)
+            self._send(["get_property", "pid"])
 
     async def _read(self, reader):
         while True:
@@ -217,6 +236,7 @@ class Mpv:
             if not line:
                 log.error("mpv quit")
                 os._exit(1)                     # the service restarts us, and mpv with us
+            self.heard = time.monotonic()
             try:
                 msg = json.loads(line)
             except ValueError:
