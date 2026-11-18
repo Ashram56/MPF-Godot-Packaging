@@ -118,7 +118,20 @@ cleanup; trap - EXIT
 
 log "5/6 Boot partition: Wi-Fi, hostname, agent settings (no loop device: mtools)"
 BOOT="$IMG@@$((B_START*512))"
-mcopy -o -i "$BOOT" "$KIT/files/user-data" ::user-data
+# permanent SSH keys: the repository's platforms/authorized_keys (one public key per line), shared by every image
+UD="$(mktemp)"; cp "$KIT/files/user-data" "$UD"
+KEYS_FILE="${AUTHORIZED_KEYS:-$REPO/platforms/authorized_keys}"
+if [ -s "$KEYS_FILE" ] && grep -q '^ssh-' "$KEYS_FILE"; then
+    python3 - "$UD" "$KEYS_FILE" <<'PY'
+import sys
+ud, keys = sys.argv[1:3]
+lines = [k.strip() for k in open(keys) if k.strip().startswith("ssh-") or k.strip().startswith("ecdsa-")]
+text = open(ud).read().replace("  # ssh_authorized_keys:\n  # - ssh-ed25519 AAAA... you@your-pc\n",
+                               "  ssh_authorized_keys:\n" + "".join("  - %s\n" % k for k in lines))
+open(ud, "w").write(text)
+PY
+fi
+mcopy -o -i "$BOOT" "$UD" ::user-data
 mcopy -o -i "$BOOT" "$KIT/files/network-config" ::network-config
 sed "s#^media=.*#media=/var/lib/pup-topper/media#" "$REPO/mpf_godot/pup_remote/topper/pup-topper.cfg" > "$WORK/pup-topper.cfg"
 mcopy -o -i "$BOOT" "$WORK/pup-topper.cfg" ::pup-topper.cfg
