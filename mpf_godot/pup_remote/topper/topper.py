@@ -21,6 +21,7 @@ import os
 import re
 import shlex
 import socket
+import subprocess
 import sys
 import tempfile
 import urllib.parse
@@ -164,6 +165,15 @@ class Mpv:
         self._queue = []
         m = re.search(r"--hwdec=(\S+)", opts["mpv_args"])
         self.hwdec = m.group(1) if m else "no"
+        self.indexed = self._minor() >= 38          # mpv 0.38 added the playlist index before loadfile's options
+
+    def _minor(self):
+        try:
+            out = subprocess.run([self.opts["mpv"], "--version"], capture_output=True, text=True, timeout=10).stdout
+            m = re.search(r"mpv 0\.(\d+)", out)
+            return int(m.group(1)) if m else 99
+        except (OSError, subprocess.SubprocessError):
+            return 99
 
     def args(self):
         o = self.opts
@@ -225,12 +235,13 @@ class Mpv:
         self.path = path
         self.position = start
         self._send(["set_property", "loop-file", "inf" if loop else "no"])
-        # a hardware decoder restarts at each loop of a short video and shows a black frame: loops use loop_hwdec,
-        # the other videos the hwdec of mpv_args
-        self._send(["set_property", "hwdec", self.opts["loop_hwdec"] if loop else self.hwdec])
         self._send(["set_property", "start", "%.3f" % start if start > 0 else "none"])
         self._send(["set_property", "volume", round(max(0.0, min(volume, 1.0)) * 100)])
-        self._send(["loadfile", path, "replace"])
+        # a hardware decoder restarts at each loop of a short video and shows a black frame: loops use loop_hwdec, the
+        # other videos the hwdec of mpv_args. Per-file option: changing the property would restart the decoder of the
+        # video that is playing (a pause after each video)
+        option = "hwdec=" + (self.opts["loop_hwdec"] if loop else self.hwdec)
+        self._send(["loadfile", path, "replace"] + ([-1] if self.indexed else []) + [option])
 
     def clear(self):
         self.path = ""
