@@ -79,9 +79,9 @@ KEYS = {"id": str, "name": str, "description": str, "icon": str, "game_dir": str
         "optional": list, "never": list, "never_names": list, "import_seed": list, "force_vram": list, "platform_addons": list,
         "requires": dict, "run": dict, "options": dict, "pup": dict, "keep_on_update": list, "monitor": dict, "profiles": dict,
         "gozen": dict, "extra": dict, "version": str, "label": str, "source_commits": dict, "precheck": list,
-        "format": int, "mpf": dict, "dmd": dict, "addons": list, "settings": dict}
+        "format": int, "mpf": dict, "dmd": dict, "addons": list, "settings": dict, "screens": list}
 # format 2 (platforms/game-bundles.md): files and facts only; these keys go into bundle.json as they are
-V2_KEYS = ("game_dir", "description", "icon", "mpf", "dmd", "pup", "addons", "settings", "profiles", "monitor")
+V2_KEYS = ("game_dir", "description", "icon", "mpf", "dmd", "pup", "addons", "settings", "profiles", "monitor", "screens")
 
 
 def validate_spec(spec):

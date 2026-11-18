@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Time from loadfile to the first frame (mpv's playback-restart) on the Zero, hardware decoder against software, in one
+long-lived mpv (as the topper agent runs it), no screen output.  Run on the Zero:  python3 loadtime.py [FILE]"""
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+FILE = sys.argv[1] if len(sys.argv) > 1 else "/var/lib/pup-topper/media/Background - Topper/TronLegacyLogo.mp4"
+sock = os.path.join(tempfile.gettempdir(), "loadtime-%d.sock" % os.getpid())
+proc = subprocess.Popen(["mpv", "--no-config", "--idle=yes", "--vo=null", "--ao=null", "--no-terminal", "--keep-open=no",
+                         "--hwdec=v4l2m2m-copy", "--input-ipc-server=" + sock])
+for _ in range(300):
+    if os.path.exists(sock):
+        break
+    time.sleep(0.1)
+s = socket.socket(socket.AF_UNIX)
+s.connect(sock)
+s.settimeout(30)
+buf = b""
+
+
+def events():
+    global buf
+    while True:
+        while b"\n" in buf:
+            line, buf = buf.split(b"\n", 1)
+            try:
+                yield json.loads(line)
+            except ValueError:
+                pass
+        buf += s.recv(65536)
+
+
+def cmd(*c):
+    s.sendall(json.dumps({"command": list(c)}).encode() + b"\n")
+
+
+def wait(name, limit=30):
+    end = time.time() + limit
+    for ev in events():
+        if ev.get("event") == name:
+            return time.time()
+        if time.time() > end:
+            return None
+
+
+m = re.search(r"mpv 0\.(\d+)", subprocess.run(["mpv", "--version"], capture_output=True, text=True).stdout)
+INDEX = [-1] if (int(m.group(1)) >= 38 if m else True) else []
+
+
+def load(option):
+    t0 = time.time()
+    cmd("loadfile", FILE, "replace", *INDEX, option)
+    t1 = wait("playback-restart")
+    return None if t1 is None else t1 - t0
+
+
+def loop_gap(option, remain=1.0):
+    """Looping (loop-file=inf): seek to `remain` s before the end, then time to the next playback-restart (the loop's
+    seek back to the start) minus `remain`: the extra time the loop costs."""
+    cmd("set_property", "loop-file", "inf")
+    load(option)
+    cmd("set_property", "pause", True)
+    cmd("get_property", "duration")
+    dur = None
+    for ev in events():
+        if ev.get("request_id") == 0 and "data" in ev:
+            dur = ev["data"]
+            break
+    cmd("seek", max(dur - remain, 0), "absolute")
+    wait("playback-restart")
+    cmd("set_property", "pause", False)
+    t0 = time.time()
+    t1 = wait("playback-restart", 30)
+    return None if t1 is None else t1 - t0 - remain
+
+
+try:
+    for option in ("hwdec=v4l2m2m-copy", "hwdec=no", "hwdec=v4l2m2m-copy", "hwdec=no"):
+        times = [load(option) for _ in range(4)]
+        print("%-20s %s s" % (option, " ".join("%.2f" % t if t else "timeout" for t in times)), flush=True)
+    for option in ("hwdec=v4l2m2m-copy", "hwdec=no"):
+        gaps = [loop_gap(option) for _ in range(3)]
+        print("%-20s loop gap %s s" % (option, " ".join("%.2f" % g if g is not None else "timeout" for g in gaps)), flush=True)
+finally:
+    proc.terminate()

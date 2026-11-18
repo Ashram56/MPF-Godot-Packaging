@@ -9,7 +9,7 @@
 #     curl -fsSL https://raw.githubusercontent.com/Ashram56/MPF-Godot-Packaging/main/mpf_godot/pup_remote/topper/install.sh | bash
 #
 # Again to update; `bash install.sh --uninstall` removes it (the videos stay in ~/pup-topper/media).
-# Then, on the game computer, the game copies its topper videos here (platforms/pup-remote-topper.md).
+# Then the Pi downloads its videos from the game at each connection (platforms/pup-remote-topper.md, "Videos").
 set -euo pipefail
 
 REF="${PLATFORM_REF:-main}"
@@ -88,5 +88,5 @@ echo
 echo "Done. The topper starts at boot and finds the game on the network."
 echo "Next, on the game computer:"
 echo "  1. turn the game's remote PuP screens on (platforms/pup-remote-topper.md)"
-echo "  2. copy the topper videos to $USER_NAME@$(hostname).local (the game's topper media tool)"
+echo "  2. nothing to copy: the topper downloads its videos from the game at each connection"
 echo "Its log: journalctl -u pup-topper -f    Settings: sudo nano $CFG, then sudo systemctl restart pup-topper"

@@ -18,10 +18,15 @@ import configparser
 import json
 import logging
 import os
+import re
 import shlex
 import socket
+import subprocess
 import sys
 import tempfile
+import time
+import urllib.parse
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)                                                        # installed: next to this file
@@ -37,11 +42,15 @@ DEFAULTS = {
     "name": "topper",
     "screens": "13,14",             # underlay, then pop-up layer
     "media": "~/pup-topper/media",
+    "download": "true",             # download the videos from the game (its media port); false: the folder is filled by hand
     "fit": "fill",                  # fit (black bars), fill (crop), stretch
     "align": "0.5",                 # vertical place of a fitted video: 0 top, 0.5 centre, 1 bottom
     "audio": "false",               # the cabinet plays the sound
     "mpv": "mpv",
     "mpv_args": "--vo=gpu --gpu-context=drm --hwdec=v4l2m2m-copy",
+    "rotate": "0",                  # 0, 90, 180 or 270: the video turned for a screen mounted sideways
+    "keep_open": "0",               # 1 = the last frame stays at the end of a video (mpv keep-open); 0 = mpv closes it
+    "loop_hwdec": "",               # decoder of a looping video: "" = the one of mpv_args, "no" = software
     "window": "false",              # true: a desktop window (testing) instead of the whole screen
     "window_size": "960x281",
     "timeout": "15",                # seconds without a ping from the game before it is taken as gone
@@ -74,6 +83,74 @@ def load_library(media_dir, playlists=None):
     return screen_rules.Library(files, playlists)
 
 
+# ---------------------------------------------------------------------- the videos, downloaded from the game
+
+def sync_media(host, port, media_dir, timeout=30, progress=None):
+    """Download the game's media into media_dir (blocking; run it in a thread): what the game's /manifest.json lists and
+    media_dir/manifest.json does not already hold with the same size and time. A file is written as NAME.part (a partial
+    one resumes with a Range request) and renamed when whole. Files the game no longer lists are removed. Returns True
+    when something changed."""
+    base = "http://%s:%d" % (host, port)
+    with urllib.request.urlopen(base + "/manifest.json", timeout=timeout) as r:
+        remote = json.load(r).get("files", {})
+    local_path = os.path.join(media_dir, "manifest.json")
+    try:
+        with open(local_path, encoding="utf-8") as f:
+            local = json.load(f).get("files", {})
+    except (OSError, ValueError):
+        local = {}
+    os.makedirs(media_dir, exist_ok=True)
+    changed = False
+    root = os.path.realpath(media_dir)
+    for key, want in sorted(remote.items()):
+        dest = os.path.realpath(os.path.join(media_dir, key))
+        if not dest.startswith(root + os.sep):
+            log.warning("ignored %r: outside the media folder", key)
+            continue
+        have = local.get(key, {})
+        if (os.path.isfile(dest) and have.get("size") == want["size"] and have.get("mtime") == want["mtime"]
+                and os.path.getsize(dest) == want["size"]):
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        part = dest + ".part"
+        done = os.path.getsize(part) if os.path.exists(part) else 0
+        if done > want["size"] or have.get("mtime") != want["mtime"] and done:
+            done = 0                        # not the same file any more: start again
+        log.info("download %s (%.1f MB)%s", key, want["size"] / 1e6, " from %.1f MB" % (done / 1e6) if done else "")
+        req = urllib.request.Request(base + "/media/" + urllib.parse.quote(key))
+        if done:
+            req.add_header("Range", "bytes=%d-" % done)
+        if done < want["size"]:
+            with urllib.request.urlopen(req, timeout=timeout) as r, open(part, "ab" if done else "wb") as out:
+                while True:
+                    chunk = r.read(1 << 18)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+        if os.path.getsize(part) != want["size"]:
+            os.remove(part)
+            raise OSError("%s: incomplete download" % key)
+        os.replace(part, dest)
+        os.utime(dest, (want["mtime"], want["mtime"]))
+        local[key] = {"out": key, "size": want["size"], "mtime": want["mtime"]}
+        changed = True
+        if progress:
+            progress(key)
+    for key in [k for k in local if k not in remote]:
+        try:
+            os.remove(os.path.join(media_dir, key))
+        except OSError:
+            pass
+        del local[key]
+        changed = True
+    if changed or not os.path.exists(local_path):
+        tmp = local_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"files": local}, f)
+        os.replace(tmp, local_path)
+    return changed
+
+
 # ---------------------------------------------------------------------- mpv
 
 class Mpv:
@@ -88,17 +165,34 @@ class Mpv:
         self._proc = None
         self._writer = None
         self._queue = []
+        self.moved = time.monotonic()           # last time the playback position changed (or a file was opened)
+        self.eof = True
+        self.keep_open = opts["keep_open"].lower() in ("1", "true", "yes", "on")
+        self.heard = time.monotonic()           # last line from mpv: the watchdog's proof of life
+        m = re.search(r"--hwdec=(\S+)", opts["mpv_args"])
+        self.hwdec = m.group(1) if m else "no"
+        self.indexed = self._minor() >= 38          # mpv 0.38 added the playlist index before loadfile's options
+
+    def _minor(self):
+        try:
+            out = subprocess.run([self.opts["mpv"], "--version"], capture_output=True, text=True, timeout=10).stdout
+            m = re.search(r"mpv 0\.(\d+)", out)
+            return int(m.group(1)) if m else 99
+        except (OSError, subprocess.SubprocessError):
+            return 99
 
     def args(self):
         o = self.opts
         args = [o["mpv"], "--idle=yes", "--input-ipc-server=" + self.socket, "--force-window=yes",
-                "--no-osc", "--osd-level=0", "--no-input-default-bindings", "--no-terminal", "--keep-open=no",
+                "--no-osc", "--osd-level=0", "--no-input-default-bindings", "--no-terminal", "--keep-open=" + ("always" if self.keep_open else "no"),
                 "--image-display-duration=inf", "--really-quiet",
                 "--video-align-y=%.3f" % (float(o["align"]) * 2.0 - 1.0)]
         if o["fit"] == "fill":
             args.append("--panscan=1.0")
         elif o["fit"] == "stretch":
             args.append("--keepaspect=no")
+        if o["rotate"] not in ("", "0"):
+            args.append("--video-rotate=" + o["rotate"])
         if o["audio"].lower() not in ("1", "true", "yes", "on"):
             args.append("--aid=no")
         if o["window"].lower() in ("1", "true", "yes", "on"):
@@ -117,10 +211,34 @@ class Mpv:
             await asyncio.sleep(0.1)
         reader, self._writer = await asyncio.open_unix_connection(self.socket)
         self._send(["observe_property", 1, "time-pos"])
+        self._send(["observe_property", 2, "eof-reached"])
         for cmd in self._queue:
             self._send(cmd)
         self._queue.clear()
         asyncio.ensure_future(self._read(reader))
+        asyncio.ensure_future(self._watchdog())
+
+    async def _watchdog(self, every=2.0, limit=10.0):
+        """mpv answers a ping every few seconds; silent for `limit` s means its decoder or IPC is wedged (the
+        screen froze): kill it and exit, the service restarts both."""
+        while True:
+            await asyncio.sleep(every)
+            if self._proc is not None and self._proc.returncode is not None:
+                log.error("mpv exited (%s)", self._proc.returncode)
+                os._exit(1)
+            silent = time.monotonic() - self.heard
+            if silent > limit:
+                log.error("mpv silent for %.0f s: restarting", silent)
+                if self._proc and self._proc.returncode is None:
+                    self._proc.kill()
+                os._exit(1)
+            if self.path and not self.eof and time.monotonic() - self.moved > 6.0:
+                # answers the pings but the picture does not advance: the decoder or the display is stuck
+                log.error("mpv answers but %s does not advance (at %.1f s): restarting", os.path.basename(self.path), self.position)
+                if self._proc and self._proc.returncode is None:
+                    self._proc.kill()
+                os._exit(1)
+            self._send(["get_property", "pid"])
 
     async def _read(self, reader):
         while True:
@@ -128,14 +246,27 @@ class Mpv:
             if not line:
                 log.error("mpv quit")
                 os._exit(1)                     # the service restarts us, and mpv with us
+            self.heard = time.monotonic()
             try:
                 msg = json.loads(line)
             except ValueError:
                 continue
             if msg.get("event") == "property-change" and msg.get("name") == "time-pos":
-                self.position = msg.get("data") or 0.0
-            elif msg.get("event") == "end-file" and msg.get("reason") == "eof" and self.on_eof:
-                self.on_eof()
+                pos = msg.get("data") or 0.0
+                if pos != self.position:
+                    self.moved = time.monotonic()
+                self.position = pos
+            elif msg.get("event") == "end-file":
+                self.eof = True
+                if msg.get("reason") == "eof" and not self.keep_open and self.on_eof:
+                    self.on_eof()
+            elif msg.get("event") == "start-file":
+                self.eof = False
+            elif msg.get("event") == "property-change" and msg.get("name") == "eof-reached":
+                # keep-open: the last frame stays on screen at the end (no black); the next video replaces it
+                self.eof = msg.get("data") is True
+                if self.eof and self.keep_open and self.on_eof:
+                    self.on_eof()
 
     def _send(self, command):
         if self._writer is None:
@@ -146,10 +277,17 @@ class Mpv:
     def play(self, path, loop, volume, start=0.0):
         self.path = path
         self.position = start
+        self.moved, self.eof = time.monotonic(), False
         self._send(["set_property", "loop-file", "inf" if loop else "no"])
         self._send(["set_property", "start", "%.3f" % start if start > 0 else "none"])
         self._send(["set_property", "volume", round(max(0.0, min(volume, 1.0)) * 100)])
-        self._send(["loadfile", path, "replace"])
+        # a hardware decoder restarts at each loop of a short video and shows a black frame: loops use loop_hwdec, the
+        # other videos the hwdec of mpv_args. Per-file option: changing the property would restart the decoder of the
+        # video that is playing (a pause after each video)
+        # (sent only when it differs from mpv_args: the plain loadfile is what ran reliably before)
+        want = (self.opts["loop_hwdec"] or self.hwdec) if loop else self.hwdec
+        extra = ["hwdec=" + want] if want != self.hwdec else []
+        self._send(["loadfile", path, "replace"] + ([-1] + extra if self.indexed and extra else extra))
 
     def clear(self):
         self.path = ""
@@ -245,6 +383,10 @@ class Display:
         if top is not restart and kept and kept[0] == top.key:
             start = kept[1]
         path = self.library.path(top.key)
+        if not path:
+            log.info("no video %s here yet", top.key)
+            self.player.clear()
+            return
         if restart is None and top.loop and path == self.player.path:
             return                      # already on screen (the game came back): no restart
         log.info("play %s%s", top.key, " from %.1f s" % start if start else "")
@@ -283,6 +425,20 @@ async def discover(port, timeout=2.0, target="255.255.255.255"):
         transport.close()
 
 
+async def fetch_media(host, port, opts, display, numbers, welcome):
+    """Download what the game serves, then show it: the screens start again once with the new files."""
+    media = os.path.expanduser(opts["media"])
+    try:
+        changed = await asyncio.to_thread(sync_media, host, port, media)
+    except (OSError, ValueError) as e:
+        log.warning("media download from %s:%d failed: %s", host, port, e)
+        return
+    if changed:
+        display.library.set_files(load_library(media).files)
+        log.info("%d media files in %s", len(display.library.files), media)
+        display.setup(welcome.get("screens", {}), welcome.get("playlists", {}), numbers, welcome.get("current", []))
+
+
 async def session(opts, display, numbers):
     """One connection to the game, until it closes or goes quiet."""
     port = int(opts["port"])
@@ -295,6 +451,7 @@ async def session(opts, display, numbers):
         host = opts["host"]
     reader, writer = await asyncio.open_connection(host, port)
     log.info("connected to the game at %s:%d", host, port)
+    fetching = None
     hello = {"type": "hello", "name": opts["name"], "screens": numbers, "version": VERSION}
     writer.write(json.dumps(hello).encode() + b"\n")
     try:
@@ -306,12 +463,19 @@ async def session(opts, display, numbers):
             kind = msg.get("type")
             if kind == "welcome":
                 display.setup(msg.get("screens", {}), msg.get("playlists", {}), numbers, msg.get("current", []))
+                if msg.get("media") and opts.get("download", "true").lower() in ("1", "true", "yes", "on"):
+                    if fetching:
+                        fetching.cancel()
+                    fetching = asyncio.ensure_future(
+                        fetch_media(host, int(msg["media"]["port"]), opts, display, numbers, msg))
             elif kind == "play":
                 display.command(msg.get("cmd", {}))
     except asyncio.TimeoutError:
         log.warning("the game went quiet")
         return True
     finally:
+        if fetching:
+            fetching.cancel()
         writer.close()
 
 

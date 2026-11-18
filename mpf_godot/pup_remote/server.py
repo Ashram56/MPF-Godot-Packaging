@@ -13,14 +13,22 @@ Protocol, one JSON object per line, on TCP port 5052 by default:
   last SetBG and the running looping play of each screen]}, then every new command;
 - game -> display: {"type": "play", "cmd": {screen, playlist, file, mode, priority, length, volume}};
 - game -> display: {"type": "ping"} every ping_seconds, so a display can tell the game is gone.
+
+Videos: nothing is installed on the display. The game serves the media files it was given (`media`: pack path -> file,
+the topper's playlists of the unpacked PuP Pack, read in place) over plain HTTP on `media_port` (default 5053), and the
+welcome carries {"media": {"port"}}. GET /manifest.json -> {"version": 1, "files": {pack path: {"size", "mtime"}}};
+GET /media/<pack path> -> the file (one Range, to resume a download). The display fetches what is missing or changed.
 """
 import asyncio
 import json
 import logging
+import os
+import urllib.parse
 
 log = logging.getLogger("mpf_godot.pup_remote")
 
 PORT = 5052
+MEDIA_PORT = 5053
 VERSION = 1
 DISCOVER = b"PUP_DISCOVER"
 POPUP_SCREENS = (12, 14)                 # the pop-up (top) layer of the backglass and the topper (pup_player.gd)
@@ -44,10 +52,14 @@ class _Discovery(asyncio.DatagramProtocol):
 
 class RemoteServer:
 
-    def __init__(self, screens, playlists, game="", host="0.0.0.0", port=PORT, ping_seconds=5.0, discovery=True):
-        """screens: pupfiles.load_screens(); playlists: pupfiles.load_playlists()."""
+    def __init__(self, screens, playlists, game="", host="0.0.0.0", port=PORT, ping_seconds=5.0, discovery=True,
+                 media=None, media_port=MEDIA_PORT):
+        """screens: pupfiles.load_screens(); playlists: pupfiles.load_playlists(); media: {pack path: file} the displays
+        download (None: no media server, the displays have their own videos); media_port: its TCP port (0: any)."""
         self.screens, self.playlists, self.game = screens, playlists, game
         self.host, self.port, self.ping_seconds, self.discovery = host, port, ping_seconds, discovery
+        self.media, self.media_port = dict(media) if media else None, media_port
+        self._media_server = None
         self.clients = {}                   # StreamWriter -> {"name", "screens"}
         self.bg = {}                        # screen -> its last SetBG command
         self.loop_cmd = {}                  # screen -> its running looping play (a mode's loop), until stopped
@@ -67,6 +79,10 @@ class RemoteServer:
                     lambda: _Discovery(self), local_addr=(self.host, self.port), allow_broadcast=True)
             except OSError as e:
                 log.warning("remote PuP screens: no discovery on UDP %d (%s); displays need host= set", self.port, e)
+        if self.media is not None:
+            self._media_server = await asyncio.start_server(self._media_client, self.host, self.media_port)
+            self.media_port = self._media_server.sockets[0].getsockname()[1]
+            log.info("remote PuP screens: %d media files served on port %d", len(self.media), self.media_port)
         self._ping = asyncio.ensure_future(self._pinger())
         log.info("remote PuP screens: listening on %s:%d", self.host, self.port)
 
@@ -77,6 +93,8 @@ class RemoteServer:
             self._udp.close()
         if self._server:
             self._server.close()
+        if self._media_server:
+            self._media_server.close()
         for writer in list(self.clients):
             writer.close()
         self.clients.clear()
@@ -139,8 +157,68 @@ class RemoteServer:
                 log.info("remote PuP display at %s left", peer)
             writer.close()
 
+    # ------------------------------------------------------------------ media (HTTP)
+
+    def manifest(self):
+        files = {}
+        for key, path in sorted(self.media.items()):
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            files[key] = {"size": st.st_size, "mtime": int(st.st_mtime)}
+        return {"version": 1, "files": files}
+
+    async def _media_client(self, reader, writer):
+        """One HTTP/1.1 request per connection: GET /manifest.json or GET /media/<pack path> (optional Range: bytes=N-)."""
+        try:
+            head = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 10)
+            lines = head.decode("latin-1").split("\r\n")
+            parts = lines[0].split(" ")
+            headers = {l.split(":", 1)[0].strip().lower(): l.split(":", 1)[1].strip() for l in lines[1:] if ":" in l}
+            if len(parts) < 2 or parts[0] != "GET":
+                return await self._http(writer, 405, b"GET only")
+            target = urllib.parse.unquote(parts[1].split("?", 1)[0])
+            if target == "/manifest.json":
+                return await self._http(writer, 200, json.dumps(self.manifest(), separators=(",", ":")).encode(),
+                                        "application/json")
+            key = target[len("/media/"):] if target.startswith("/media/") else None
+            path = self.media.get(key) if key else None          # only what the game listed: no path is ever built from the URL
+            if not path or not os.path.isfile(path):
+                return await self._http(writer, 404, b"not found")
+            size, start = os.path.getsize(path), 0
+            rng = headers.get("range", "")
+            if rng.startswith("bytes=") and rng.endswith("-") and rng[6:-1].isdigit():
+                start = min(int(rng[6:-1]), size)
+            head_lines = [b"HTTP/1.1 206 Partial Content" if start else b"HTTP/1.1 200 OK",
+                          b"Content-Type: application/octet-stream", b"Accept-Ranges: bytes",
+                          b"Content-Length: %d" % (size - start), b"Connection: close"]
+            if start:
+                head_lines.append(b"Content-Range: bytes %d-%d/%d" % (start, size - 1, size))
+            writer.write(b"\r\n".join(head_lines) + b"\r\n\r\n")
+            loop = asyncio.get_running_loop()
+            with open(path, "rb") as f:
+                f.seek(start)
+                while True:
+                    chunk = await loop.run_in_executor(None, f.read, 1 << 20)
+                    if not chunk:
+                        break
+                    writer.write(chunk)
+                    await writer.drain()
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ConnectionError, OSError):
+            pass
+        finally:
+            writer.close()
+
+    async def _http(self, writer, status, body, ctype="text/plain"):
+        reason = {200: "OK", 404: "Not Found", 405: "Method Not Allowed"}[status]
+        writer.write(("HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n"
+                      % (status, reason, ctype, len(body))).encode() + body)
+        await writer.drain()
+
     def welcome(self, screens):
-        return {"type": "welcome", "version": VERSION, "game": self.game,
+        media = {"media": {"port": self.media_port}} if self._media_server else {}
+        return {"type": "welcome", "version": VERSION, "game": self.game, **media,
                 "screens": {str(s): {"bg_playlist": self.screens.get(s, {}).get("playlist", ""),
                                      "bg_file": self.screens.get(s, {}).get("file", ""),
                                      "popup": s in POPUP_SCREENS} for s in screens},

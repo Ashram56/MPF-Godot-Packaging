@@ -1,0 +1,21 @@
+#cloud-config
+# First-boot settings of the topper Pi (cloud-init reads this file once, from the boot partition, visible from
+# Windows/macOS after flashing). Change the hostname, the password or add your SSH key BEFORE the first boot;
+# later changes of this file are ignored (use `sudo nano` on the Pi). Indent with spaces, never tabs.
+
+hostname: pup-topper
+manage_etc_hosts: true
+timezone: Europe/Paris
+
+users:
+- name: pi
+  groups: [sudo, video, render, audio, input]
+  shell: /bin/bash
+  lock_passwd: false
+  # password "raspberry": change it with `openssl passwd -6 'your password'` and paste the result here
+  passwd: "$6$mpfpuptopper$zOlCYK9IX/0AKOAgjIupAwjiiZeOmQVdtrARyrfNta64.JI4MkQL.DTQvE/1NBuHGIQ6NNIB9X/hLbjQY5N12/"
+  sudo: ALL=(ALL) NOPASSWD:ALL
+  # ssh_authorized_keys:
+  # - ssh-ed25519 AAAA... you@your-pc
+
+ssh_pwauth: true
