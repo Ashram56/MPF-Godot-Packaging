@@ -18,6 +18,7 @@ import configparser
 import json
 import logging
 import os
+import re
 import shlex
 import socket
 import sys
@@ -45,6 +46,8 @@ DEFAULTS = {
     "audio": "false",               # the cabinet plays the sound
     "mpv": "mpv",
     "mpv_args": "--vo=gpu --gpu-context=drm --hwdec=v4l2m2m-copy",
+    "rotate": "0",                  # 0, 90, 180 or 270: the video turned for a screen mounted sideways
+    "loop_hwdec": "no",             # decoder of a looping video (the backgrounds): "no" = software, no black frame at each loop
     "window": "false",              # true: a desktop window (testing) instead of the whole screen
     "window_size": "960x281",
     "timeout": "15",                # seconds without a ping from the game before it is taken as gone
@@ -159,6 +162,8 @@ class Mpv:
         self._proc = None
         self._writer = None
         self._queue = []
+        m = re.search(r"--hwdec=(\S+)", opts["mpv_args"])
+        self.hwdec = m.group(1) if m else "no"
 
     def args(self):
         o = self.opts
@@ -170,6 +175,8 @@ class Mpv:
             args.append("--panscan=1.0")
         elif o["fit"] == "stretch":
             args.append("--keepaspect=no")
+        if o["rotate"] not in ("", "0"):
+            args.append("--video-rotate=" + o["rotate"])
         if o["audio"].lower() not in ("1", "true", "yes", "on"):
             args.append("--aid=no")
         if o["window"].lower() in ("1", "true", "yes", "on"):
@@ -218,6 +225,9 @@ class Mpv:
         self.path = path
         self.position = start
         self._send(["set_property", "loop-file", "inf" if loop else "no"])
+        # a hardware decoder restarts at each loop of a short video and shows a black frame: loops use loop_hwdec,
+        # the other videos the hwdec of mpv_args
+        self._send(["set_property", "hwdec", self.opts["loop_hwdec"] if loop else self.hwdec])
         self._send(["set_property", "start", "%.3f" % start if start > 0 else "none"])
         self._send(["set_property", "volume", round(max(0.0, min(volume, 1.0)) * 100)])
         self._send(["loadfile", path, "replace"])
