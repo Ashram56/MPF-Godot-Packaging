@@ -49,6 +49,7 @@ DEFAULTS = {
     "mpv": "mpv",
     "mpv_args": "--vo=gpu --gpu-context=drm --hwdec=v4l2m2m-copy",
     "rotate": "0",                  # 0, 90, 180 or 270: the video turned for a screen mounted sideways
+    "keep_open": "0",               # 1 = the last frame stays at the end of a video (mpv keep-open); 0 = mpv closes it
     "loop_hwdec": "",               # decoder of a looping video: "" = the one of mpv_args, "no" = software
     "window": "false",              # true: a desktop window (testing) instead of the whole screen
     "window_size": "960x281",
@@ -166,6 +167,7 @@ class Mpv:
         self._queue = []
         self.moved = time.monotonic()           # last time the playback position changed (or a file was opened)
         self.eof = True
+        self.keep_open = opts["keep_open"].lower() in ("1", "true", "yes", "on")
         self.heard = time.monotonic()           # last line from mpv: the watchdog's proof of life
         m = re.search(r"--hwdec=(\S+)", opts["mpv_args"])
         self.hwdec = m.group(1) if m else "no"
@@ -182,7 +184,7 @@ class Mpv:
     def args(self):
         o = self.opts
         args = [o["mpv"], "--idle=yes", "--input-ipc-server=" + self.socket, "--force-window=yes",
-                "--no-osc", "--osd-level=0", "--no-input-default-bindings", "--no-terminal", "--keep-open=always",
+                "--no-osc", "--osd-level=0", "--no-input-default-bindings", "--no-terminal", "--keep-open=" + ("always" if self.keep_open else "no"),
                 "--image-display-duration=inf", "--really-quiet",
                 "--video-align-y=%.3f" % (float(o["align"]) * 2.0 - 1.0)]
         if o["fit"] == "fill":
@@ -254,10 +256,16 @@ class Mpv:
                 if pos != self.position:
                     self.moved = time.monotonic()
                 self.position = pos
+            elif msg.get("event") == "end-file":
+                self.eof = True
+                if msg.get("reason") == "eof" and not self.keep_open and self.on_eof:
+                    self.on_eof()
+            elif msg.get("event") == "start-file":
+                self.eof = False
             elif msg.get("event") == "property-change" and msg.get("name") == "eof-reached":
                 # keep-open: the last frame stays on screen at the end (no black); the next video replaces it
                 self.eof = msg.get("data") is True
-                if self.eof and self.on_eof:
+                if self.eof and self.keep_open and self.on_eof:
                     self.on_eof()
 
     def _send(self, command):
@@ -276,8 +284,10 @@ class Mpv:
         # a hardware decoder restarts at each loop of a short video and shows a black frame: loops use loop_hwdec, the
         # other videos the hwdec of mpv_args. Per-file option: changing the property would restart the decoder of the
         # video that is playing (a pause after each video)
-        option = "hwdec=" + ((self.opts["loop_hwdec"] or self.hwdec) if loop else self.hwdec)
-        self._send(["loadfile", path, "replace"] + ([-1] if self.indexed else []) + [option])
+        # (sent only when it differs from mpv_args: the plain loadfile is what ran reliably before)
+        want = (self.opts["loop_hwdec"] or self.hwdec) if loop else self.hwdec
+        extra = ["hwdec=" + want] if want != self.hwdec else []
+        self._send(["loadfile", path, "replace"] + ([-1] + extra if self.indexed and extra else extra))
 
     def clear(self):
         self.path = ""
