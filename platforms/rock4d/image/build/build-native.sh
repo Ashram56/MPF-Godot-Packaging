@@ -167,6 +167,13 @@ for f in Image initrd.img rk3576-rock-4d.dtb extlinux/extlinux.conf; do
     [ -s "$FWDIR/$f" ] || { echo "missing /boot/firmware/$f"; ls -laR "$FWDIR"; exit 1; }
 done
 KVER="$(ls "$R/lib/modules" | head -1)"
+# audio: Debian's kernel has no Rockchip SAI driver (HDMI sound): the module from sai-module-build.sh, loaded at every boot
+if [ -z "${SAI_KO:-}" ] && [ -f "$KIT/sai-out/snd-soc-rockchip-sai.ko" ]; then SAI_KO="$KIT/sai-out/snd-soc-rockchip-sai.ko"; fi
+if [ -n "${SAI_KO:-}" ]; then
+    install -D -m 644 "$SAI_KO" "$R/lib/modules/$KVER/extra/snd-soc-rockchip-sai.ko"
+    echo snd-soc-rockchip-sai > "$R/etc/modules-load.d/rockchip-sai.conf"
+    in_chroot "depmod -a $KVER"
+fi
 for m in rockchip-vdec panfrost rockchipdrm dw_mmc-rockchip sdhci-of-dwcmshc dwmac-rk; do
     find "$R/lib/modules/$KVER" \( -name "$m.ko*" -o -name "${m//-/_}.ko*" \) | grep -q . || { echo "kernel module $m is missing in $KVER"; exit 1; }
 done

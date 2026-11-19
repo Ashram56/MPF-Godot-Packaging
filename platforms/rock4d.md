@@ -37,3 +37,10 @@ the module needs an out-of-tree driver (AIC8800 for instance) Wi-Fi will not app
 `rock4d-debian13-sd.img.xz`, 845 MB, sha256 `11e30558749b9f3c8a9f29bd76fd1a83eb3782670d189e9004c72a35c8f107fb`, kernel 7.2.12+deb13, U-Boot
 2026.10~rc5 (`u-boot-rockchip.bin` sha256 `e52f06be...d9da`), GoZen sha256 `104a785f...fd61` (glibc 2.38 symbols at most). Checked statically:
 GPT, U-Boot at sector 64, FAT files and extlinux menu, ext4 fsck clean, read-only fstab, services and GoZen in place.
+
+## Sound
+
+Debian's kernel has no Rockchip SAI driver (`CONFIG_SND_SOC_ROCKCHIP_SAI` is not set), so the HDMI sound card of the device tree is never
+created. [image/build/sai-module-build.sh](rock4d/image/build/sai-module-build.sh) builds `snd-soc-rockchip-sai.ko` for the image's kernel
+(`SAI_KO=` in `build-native.sh`, loaded at boot through `modules-load.d`). It must be rebuilt for every kernel update. Not run on the board.
+A USB sound card works without it (`/etc/asound.conf`).
