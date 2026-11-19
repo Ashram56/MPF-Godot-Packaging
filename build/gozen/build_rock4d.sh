@@ -28,7 +28,7 @@ git checkout -q --force "$GOZEN_REV"
 git submodule update --init --depth 1 ffmpeg godot_cpp
 git -C ffmpeg checkout -q --force . && git -C ffmpeg clean -qfd
 git checkout -q --force . && git clean -qfd -e ffmpeg -e godot_cpp
-for p in gozen gozen_v4l2m2m gozen_v4l2m2m_flush gozen_zerocopy gozen_v4l2_buffers_nv12 gozen_vaapi gozen_v4l2request; do
+for p in gozen gozen_v4l2m2m gozen_v4l2m2m_flush gozen_zerocopy gozen_v4l2_buffers_nv12 gozen_vaapi gozen_v4l2request gozen_v4l2request_chroma; do
     git apply "$ROOT/build/gozen/$p.patch"
 done
 
