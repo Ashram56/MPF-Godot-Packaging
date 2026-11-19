@@ -3,7 +3,7 @@
 
 The page (mpf_web, mpf_monitor, mpf_ota ...) can be updated without touching the read-only system: a "web package" is a folder
 `<MPF_WEB_DIR>/<id>/` (default /data/platform) holding the mpf_*.py files and `manifest.json`; the link `<MPF_WEB_DIR>/current` names
-the one in use. This launcher is what mpf-netconfig-web.service runs. It uses the package only if all of these hold, and otherwise
+the one in use. This launcher is what mpf-netconfig-web.service (`web`) and mpf-game.service (`game`) run, so a platform update (mpf_dmd, mpf_games ...) also reaches the game launch. It uses the package only if all of these hold, and otherwise
 runs the image's own copy, so a bad package never leaves the machine without its page:
   - `manifest.json` has `"api"` equal to API below (the contract between the image and the page: bump it when the page needs
     something the image does not have: a new unit, a new path, a new tool);
@@ -74,7 +74,8 @@ def choose():
 
 
 def main(argv):
-    guard()
+    if not argv or argv[0] == "web":   # only the page confirms a package: the game's restarts must not count as failed starts
+        guard()
     folder, man = choose()
     os.environ["MPF_WEB_PACKAGE"] = (man or {}).get("id", "image")
     print(f"mpf_launch: {'package ' + man['id'] if man else 'image copy'} ({folder})", flush=True)

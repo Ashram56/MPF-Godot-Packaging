@@ -13,7 +13,7 @@ A format 2 `bundle.json` holds no command and names no script to run: no `run`, 
 - PuP Pack: the author's zip, unpacked as it is into the library and linked at `<game>/.platform/pup`; the game reads it from
   `MPF_PUP_PACK` and its own `pup.manifest` (a list of the pack's files and how to show them, never a file of the pack);
 - add-ons (DMD only): folders of the bundle listed in `addons`, each switched on by a setting, passed in `MPF_ADDONS`; the setting
-  `dmd.look` is the look chosen on the page's DMD card (`"setting": "dmd.look", "when": "hd"`);
+  `dmd.look` is the look chosen on the page's DMD card (`"setting": "dmd.look", "when": "advanced"`);
 - `screens`: [{"id", "label", "setting", "enabled"?, "title"?}], the game's windows (`enabled`: a bool setting that turns the window off, e.g. a topper nobody has; the preview skips it; `title`: a part of the window's title, so the preview captures that window and not the whole monitor); `setting` is the integer option holding the window's monitor index. The page's
   "Screens" card sets it (mpf_screens.py) and the generic settings form no longer shows it;
 - `profiles.<board>.dmd_looks`: the looks of `dmd.looks` this board may use (a Pi 4: `["classic"]`).
@@ -100,7 +100,7 @@ def problems(b, root=None):
 
 
 def dmd_problems(b):
-    """`dmd.looks`: {look: [Godot user arguments]}, the looks of the DMD the page offers on an LCD (classic, hd, advanced); `dmd.look` the default.
+    """`dmd.looks`: {look: [Godot user arguments]}, the looks of the DMD the page offers on an LCD (classic, advanced; the old `hd` is accepted and ignored: "hd" as a default or add-on condition reads as advanced); `dmd.look` the default.
     The arguments are the game's own (a look is how the game draws its DMD); `--dmd-feed=NAME` (which picture the game published for the
     page's preview) is the only reserved name allowed."""
     d = b.get("dmd")
@@ -122,7 +122,7 @@ def dmd_problems(b):
             else:
                 bad += [f"`dmd.looks.{k}` uses `{a}`: that name belongs to the platform's DMD output" for a in args
                         if reserved_arg(a) and not a.startswith("--dmd-feed=")]
-        if d.get("look") is not None and d["look"] not in looks:
+        if d.get("look") is not None and d["look"] not in looks and not (d["look"] == "hd" and "advanced" in looks):
             bad.append("`dmd.look` (the default) must be one of `dmd.looks`")
     return bad
 
@@ -294,7 +294,11 @@ def plan(game, b, board_name=None):
     hw_sets = mpf.get("hardware") or {}
     godot, ini = [], {}
     hw = None
+    import mpf_dmd as D
+    look = D.effective_look(D.load(), b, D.resolve(), board_name)
     for k, v in values.items():
+        if opts[k].get("when_look") and D.norm(opts[k]["when_look"]) != look:
+            continue          # an option that only applies with one DMD look (e.g. Tron's light cycles: HD Full only)
         t = opts[k].get("target") or {}
         if "godot_arg" in t:
             godot.append(f"{t['godot_arg']}={_arg(v)}")
@@ -311,11 +315,11 @@ def plan(game, b, board_name=None):
     if b.get("pup") and os.path.isfile(os.path.join(pup, "triggers.pup")):
         env["MPF_PUP_PACK"] = os.path.realpath(pup)
     on = []
-    import mpf_dmd as D          # the DMD look the page chose is the value of the setting "dmd.look" (an add-on can depend on it)
-    values = dict(values, **{"dmd.look": D.effective_look(D.load(), b, D.resolve(), board_name)})
+    # the DMD look the page chose is the value of the setting "dmd.look" (an add-on can depend on it)
+    values = dict(values, **{"dmd.look": look})
     for a in b.get("addons") or []:
         want = a.get("when", True)
-        if not a.get("setting") or values.get(a["setting"]) == want:
+        if not a.get("setting") or values.get(a["setting"]) == (D.norm(want) if a["setting"] == "dmd.look" else want):
             on.append(os.path.join(game, a["dir"]))
     if on:
         env["MPF_ADDONS"] = os.pathsep.join(on)

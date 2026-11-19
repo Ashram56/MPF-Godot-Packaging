@@ -20,7 +20,12 @@ EXTS = (".cROMc", ".cRZ", ".cROM")
 # "web": the same pictures a ZeDMD would get (Serum colour included) written by dmd_bridge to a file in RAM, which the setup page draws
 PREVIEW = os.environ.get("MPF_DMD_PREVIEW") or "/run/mpf-dmd/preview.rgb"
 PREVIEW_PNG = os.environ.get("MPF_DMD_PREVIEW_PNG") or "/run/mpf-dmd/preview.png"     # written by the dmd_out add-on (--dmd-preview=)
-LOOKS = ("classic", "hd", "advanced")     # classic = the ROM's 128x32 dots; hd = LCD with a vector font; advanced = LCD with the game's extras
+LOOKS = ("classic", "advanced")     # two looks only: classic = the ROM's original 128x32 dots; advanced = HD Full on an LCD (with the game's videos)
+
+
+def norm(look):
+    """The old "hd" (partial HD) no longer exists: a saved setting, a bundle default or an add-on condition that says "hd" means "advanced"."""
+    return "advanced" if look == "hd" else look
 PREVIEW_SIZES = {128 * 32 * 3: (128, 32), 192 * 64 * 3: (192, 64), 256 * 64 * 3: (256, 64)}
 PREVIEW_MAX_AGE = 5      # seconds: an older picture means the game is not running
 DEFAULT_COLOR = "#2a6cff"
@@ -41,7 +46,7 @@ def load():
     d = d if isinstance(d, dict) else {}
     out = d.get("output")
     color = d.get("color")
-    look = d.get("look")
+    look = norm(d.get("look"))
     return {"output": out if out in OUTPUTS else "auto",
             "look": look if look in LOOKS else "",
             "color": color if isinstance(color, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", color) else DEFAULT_COLOR,
@@ -60,6 +65,7 @@ def save(s):
 def set_output(output=None, color=None, look=None):
     s = load()
     if look is not None:
+        look = norm(look)
         if look not in LOOKS + ("",):
             raise ValueError("unknown DMD look")
         s["look"] = look
@@ -265,14 +271,18 @@ def allowed_looks(bundle, board_name=None):
 
 def effective_look(s, bundle, out, board_name=None):
     """The look that runs: only an LCD shows more than the exact 128x32 classic dots (PIN2DMD, ZeDMD with or without Serum, the page's
-    preview of those). On an LCD: the setting if the bundle offers it, else its `dmd.looks` default (`dmd.look`), else its first look."""
+    preview of those). On an LCD: the setting if the bundle offers it, else its `dmd.looks` default (`dmd.look`), else advanced (HD Full), else
+    classic: the dots are never chosen on an LCD when HD Full is offered. A bundle's old `hd` look is ignored (see norm)."""
     looks = allowed_looks(bundle, board_name)
     if not looks:
         return ""
     if out != "lcd":
         return "classic" if "classic" in looks else ""
-    want = s.get("look") or ((bundle or {}).get("dmd") or {}).get("look")
-    return want if want in looks else next(iter(looks))
+    default = norm(((bundle or {}).get("dmd") or {}).get("look"))
+    for k in (s.get("look"), default, "advanced", "classic"):
+        if k in looks:
+            return k
+    return next(iter(looks))
 
 
 def look_args(s, bundle, out):
