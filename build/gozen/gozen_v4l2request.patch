@@ -1,0 +1,54 @@
+diff --git a/SConstruct b/SConstruct
+index b7c7acb..4baf064 100644
+--- a/SConstruct
++++ b/SConstruct
+@@ -43,6 +43,10 @@ if "linux" in platform:
+         # extension is (the Linux install line installs them)
+         if arch == "x86_64":
+             env.Append(LIBS=["va", "va-drm"])
++        # FFmpeg built with --enable-v4l2-request (build/gozen/build_rock4d.sh): libudev is loaded when the extension is
++        if ARGUMENTS.get("v4l2request", "no") == "yes":
++            env.Append(CPPDEFINES=["GOZEN_V4L2REQUEST"])
++            env.Append(LIBS=["udev"])
+     else:
+         env.Append(LIBS=["tls", "ssl", "crypto", "vpx", "aom"])
+ 
+diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
+index b5b5255..d17527f 100644
+--- a/src/gozen_video.cpp
++++ b/src/gozen_video.cpp
+@@ -18,6 +18,12 @@ static AVBufferRef* _hw_device(AVHWDeviceType type) {
+ 	// Linux VAAPI: the first render node by default, GOZEN_VAAPI_DEVICE=/dev/dri/renderD129 picks another
+ 	CharString vaapi_device = OS::get_singleton()->get_environment("GOZEN_VAAPI_DEVICE").utf8();
+ 	const char* device_name = (type == AV_HWDEVICE_TYPE_VAAPI && vaapi_device.length() > 0) ? vaapi_device.get_data() : nullptr;
++#ifdef GOZEN_V4L2REQUEST
++	// V4L2 Request API: probes for a capable media and video device by itself; GOZEN_V4L2REQUEST_DEVICE=/dev/media1 names one
++	CharString v4l2req_device = OS::get_singleton()->get_environment("GOZEN_V4L2REQUEST_DEVICE").utf8();
++	if (type == AV_HWDEVICE_TYPE_V4L2REQUEST && v4l2req_device.length() > 0)
++		device_name = v4l2req_device.get_data();
++#endif
+ 	if (!devices[type] && !failed[type] && av_hwdevice_ctx_create(&devices[type], type, device_name, nullptr, 0) < 0) {
+ 		devices[type] = nullptr;
+ 		failed[type] = true;
+@@ -282,7 +288,9 @@ int GoZenVideo::open(const String& video_path) {
+ 	// /dev/video10 (bcm2835-codec, H.264). GOZEN_HWDEC=0 turns it off. Falls back to the software decoder when no
+ 	// hardware one is there or it fails to open.
+ 	bool hw_tried = false;
+-	if (!av_codec && OS::get_singleton()->get_environment("GOZEN_HWDEC") != "0") {
++	// GOZEN_HWDEC=v4l2request asks for the stateless decoder below only: the memory-to-memory decoders are skipped.
++	if (!av_codec && OS::get_singleton()->get_environment("GOZEN_HWDEC") != "0" &&
++			OS::get_singleton()->get_environment("GOZEN_HWDEC") != "v4l2request") {
+ 		const AVCodecDescriptor* desc = avcodec_descriptor_get(av_stream->codecpar->codec_id);
+ 		const char* hw_suffixes[] = {"_nvmpi", "_v4l2m2m"};
+ 		for (const char* suffix : hw_suffixes) {
+@@ -313,6 +321,10 @@ int GoZenVideo::open(const String& video_path) {
+ 		const AVCodec* sw_codec = avcodec_find_decoder(av_stream->codecpar->codec_id);
+ 		#ifdef _WIN32
+ 		const AVHWDeviceType types[] = {AV_HWDEVICE_TYPE_D3D11VA, AV_HWDEVICE_TYPE_DXVA2};
++#elif defined(GOZEN_V4L2REQUEST)
++		// FFmpeg built with Kwiboo's V4L2 Request API hwaccel (build/gozen/build_rock4d.sh, scons v4l2request=yes): the stateless
++		// decoders such as the Rockchip rkvdec of a ROCK 4D, frames as DRM PRIME copied to memory by _hw_download().
++		const AVHWDeviceType types[] = {AV_HWDEVICE_TYPE_V4L2REQUEST};
+ #else
+ 		const AVHWDeviceType types[] = {AV_HWDEVICE_TYPE_VAAPI};
+ #endif

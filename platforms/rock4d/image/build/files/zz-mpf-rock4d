@@ -1,0 +1,43 @@
+#!/bin/sh
+# /etc/kernel/postinst.d/zz-mpf-rock4d: after a kernel install or update (initramfs-tools has run before: "zz"), put the kernel
+# (uncompressed Image), the initramfs, the ROCK 4D device tree and the U-Boot menu on the FAT partition /boot/firmware, where the
+# board's U-Boot reads /extlinux/extlinux.conf. In production mode that partition is read-only: `sudo mpf-mode maintenance` first.
+set -e
+VER="$1"
+FW=/boot/firmware
+[ -n "$VER" ] || exit 0
+[ -r /etc/default/mpf-boot ] && . /etc/default/mpf-boot
+[ -d "$FW" ] || exit 0
+KERNEL="/boot/vmlinuz-$VER"; INITRD="/boot/initrd.img-$VER"
+DTB="/usr/lib/modules/$VER/dtb/rockchip/rk3576-rock-4d.dtb"
+[ -r "$KERNEL" ] || KERNEL="/usr/lib/modules/$VER/vmlinuz"
+for f in "$KERNEL" "$INITRD" "$DTB"; do [ -r "$f" ] || { echo "zz-mpf-rock4d: $f is missing" >&2; exit 1; }; done
+mkdir -p "$FW/extlinux"
+# U-Boot's booti takes the plain Image; Debian's vmlinuz is gzip-compressed
+if [ "$(head -c2 "$KERNEL" | od -An -tx1 | tr -d ' ')" = 1f8b ]; then gzip -dc "$KERNEL" > "$FW/Image.new"; else cp "$KERNEL" "$FW/Image.new"; fi
+cp "$INITRD" "$FW/initrd.img.new"
+cp "$DTB" "$FW/rk3576-rock-4d.dtb.new"
+# the previous kernel stays as a second menu entry
+[ -f "$FW/Image" ] && mv -f "$FW/Image" "$FW/Image.old" && mv -f "$FW/initrd.img" "$FW/initrd.img.old" && cp -f "$FW/rk3576-rock-4d.dtb" "$FW/rk3576-rock-4d.dtb.old" || true
+mv -f "$FW/Image.new" "$FW/Image"; mv -f "$FW/initrd.img.new" "$FW/initrd.img"; mv -f "$FW/rk3576-rock-4d.dtb.new" "$FW/rk3576-rock-4d.dtb"
+{
+    echo "default mpf"
+    echo "timeout 10"
+    echo "menu title MPF ROCK 4D"
+    echo
+    echo "label mpf"
+    echo "    menu label Linux $VER"
+    echo "    kernel /Image"
+    echo "    initrd /initrd.img"
+    echo "    fdt /rk3576-rock-4d.dtb"
+    echo "    append ${MPF_CMDLINE:-root=LABEL=rootfs rootwait ro console=ttyS2,1500000n8 console=tty1}"
+    if [ -f "$FW/Image.old" ]; then
+        echo
+        echo "label previous"
+        echo "    menu label Previous kernel"
+        echo "    kernel /Image.old"
+        echo "    initrd /initrd.img.old"
+        echo "    fdt /rk3576-rock-4d.dtb.old"
+        echo "    append ${MPF_CMDLINE:-root=LABEL=rootfs rootwait ro console=ttyS2,1500000n8 console=tty1}"
+    fi
+} > "$FW/extlinux/extlinux.conf"
