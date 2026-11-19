@@ -4,6 +4,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/hwcontext_drm.h>
 #include <libswscale/swscale.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,7 +34,16 @@ static int next(Dec *d, AVFrame *out, int hw) {
         int r = avcodec_receive_frame(d->cc, f);
         if (r == 0) {
             av_frame_unref(out);
-            if (hw) { if (av_hwframe_transfer_data(out, f, 0) < 0) { fprintf(stderr, "transfer failed\n"); exit(2); } }
+            if (hw) {
+                static int shown = 0;
+                if (!shown++) {
+                    const AVDRMFrameDescriptor *dd = (const AVDRMFrameDescriptor *)f->data[0];
+                    printf("  drm: objects=%d layers=%d fmt=0x%x", dd->nb_objects, dd->nb_layers, dd->layers[0].format);
+                    for (int i = 0; i < dd->layers[0].nb_planes; i++)
+                        printf(" plane%d(obj %d off %ld pitch %ld)", i, dd->layers[0].planes[i].object_index, (long)dd->layers[0].planes[i].offset, (long)dd->layers[0].planes[i].pitch);
+                    printf(" size0=%zu coded %dx%d\n", dd->objects[0].size, f->width, f->height);
+                }
+                if (av_hwframe_transfer_data(out, f, 0) < 0) { fprintf(stderr, "transfer failed\n"); exit(2); } }
             else {
                 struct SwsContext *s = sws_getContext(f->width, f->height, f->format, f->width, f->height, AV_PIX_FMT_NV12, SWS_POINT, 0, 0, 0);
                 out->format = AV_PIX_FMT_NV12; out->width = f->width; out->height = f->height; av_frame_get_buffer(out, 32);
@@ -61,14 +71,15 @@ int main(int argc, char **argv) {
     Dec sw, hw;
     if (open_dec(&sw, argv[1], 0, NULL) < 0 || open_dec(&hw, argv[1], 1, dev) < 0) { fprintf(stderr, "open failed\n"); return 2; }
     AVFrame *a = av_frame_alloc(), *b = av_frame_alloc();
-    int n = 0, bad = 0, first = -1, last = -1; double maxuv = 0;
+    int n = 0, bad = 0, first = -1, last = -1; double maxuv = 0, maxy = 0;
     while (!next(&sw, a, 0) && !next(&hw, b, 1)) {
         double dy = mad(a->data[0], a->linesize[0], b->data[0], b->linesize[0], a->width, a->height);
         double duv = mad(a->data[1], a->linesize[1], b->data[1], b->linesize[1], a->width, a->height / 2);
-        if (duv > maxuv) maxuv = duv;
+        if (duv > maxuv) maxuv = duv; if (dy > maxy) maxy = dy;
         if (dy > 4 || duv > 4) { bad++; if (first < 0) first = n; last = n; if (bad <= 5) printf("  frame %d: dY=%.1f dUV=%.1f\n", n, dy, duv); }
         n++;
     }
-    printf("%s: %d frames, %d differ (first %d, last %d), max dUV %.1f\n", argv[1], n, bad, first, last, maxuv);
+    printf("%s: %d frames, %d differ (first %d, last %d), max dY %.1f max dUV %.1f | profile %d level %d refs %d has_b %d range %d space %d field %d cpos %d coded %dx%d\n", argv[1], n, bad, first, last, maxy, maxuv,
+           hw.cc->profile, hw.cc->level, hw.cc->refs, hw.cc->has_b_frames, hw.cc->color_range, hw.cc->colorspace, hw.cc->field_order, hw.cc->chroma_sample_location, hw.cc->coded_width, hw.cc->coded_height);
     return 0;
 }
