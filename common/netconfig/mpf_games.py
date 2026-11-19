@@ -176,7 +176,7 @@ def project_dir(b):
 
 def folder_name(b):
     """`<id>@<version>`; a build of another branch than main is `<id>@<version>+<branch>`, so branches of one version live side by side."""
-    br = str(b.get("branch") or "")
+    br = re.sub(r"[^A-Za-z0-9._-]+", "-", str(b.get("branch") or ""))   # claude/project-x -> claude-project-x: a folder name has no slash
     return f"{b['id']}@{b['version']}" + (f"+{br}" if br and br != "main" else "")
 
 
