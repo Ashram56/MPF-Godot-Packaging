@@ -6,10 +6,10 @@ index b7c7acb..4baf064 100644
          # extension is (the Linux install line installs them)
          if arch == "x86_64":
              env.Append(LIBS=["va", "va-drm"])
-+        # FFmpeg built with --enable-v4l2-request (build/gozen/build_rock4d.sh): libudev is loaded when the extension is
++        # FFmpeg built with --enable-v4l2-request (build/gozen/build_rock4d.sh): libudev and libdrm are loaded when the extension is
 +        if ARGUMENTS.get("v4l2request", "no") == "yes":
 +            env.Append(CPPDEFINES=["GOZEN_V4L2REQUEST"])
-+            env.Append(LIBS=["udev"])
++            env.Append(LIBS=["udev", "drm"])
      else:
          env.Append(LIBS=["tls", "ssl", "crypto", "vpx", "aom"])
  

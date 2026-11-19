@@ -81,7 +81,7 @@ for c in H264 HEVC VP9 VP8; do
 done
 make -j"$(nproc)" >/dev/null
 make install >/dev/null
-cp -L "$LIBDIR/libudev.so.1" bin/lib/libudev.so    # scons -ludev finds it through LIBPATH ffmpeg/bin/lib
+cp -L "$LIBDIR/libudev.so.1" bin/lib/libudev.so; cp -L "$LIBDIR/libdrm.so.2" bin/lib/libdrm.so    # scons -ludev -ldrm find them through LIBPATH ffmpeg/bin/lib
 cd ..
 
 command -v scons >/dev/null || pip3 install -q scons==4.8.1 || pip3 install -q --break-system-packages scons==4.8.1
