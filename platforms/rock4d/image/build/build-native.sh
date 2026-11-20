@@ -155,7 +155,6 @@ in_chroot "apt-get install -y -qq $(echo $SYSTEM_PKGS)"   # one line: in_chroot 
 # (extlinux), on every kernel install or update. U-Boot of the board reads /extlinux/extlinux.conf there.
 install -d "$R/etc/kernel/postinst.d" "$R/etc/default"
 install -m 755 "$KIT/files/zz-mpf-rock4d" "$R/etc/kernel/postinst.d/zz-mpf-rock4d"
-install -m 644 "$KIT/files/99-rkvdec-no-runtime-pm.rules" "$R/etc/udev/rules.d/99-rkvdec-no-runtime-pm.rules"    # rkvdec decodes wrong pictures after a runtime resume (docs: rock4d.md)
 CMDLINE="root=LABEL=rootfs rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 console=ttyS2,1500000n8 console=tty1 quiet$([ "$READONLY" = 1 ] && echo ' ro')"
 echo "MPF_CMDLINE=\"$CMDLINE\"" > "$R/etc/default/mpf-boot"
 mkdir -p "$R/etc/initramfs-tools/conf.d"

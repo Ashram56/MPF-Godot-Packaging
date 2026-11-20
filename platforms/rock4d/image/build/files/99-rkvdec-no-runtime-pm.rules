@@ -1,4 +1,0 @@
-# Radxa ROCK 4D (RK3576, mainline rkvdec, kernel 7.2): the stateless H.264 decoder returns a wrong picture (luma and chroma, the whole clip)
-# on about 40 % of the openings while its runtime PM may suspend/resume the "vdec" power domain and IOMMU (autosuspend 100 ms). Measured
-# with build/gozen/hwcmp: auto 10 wrong of 25 openings, on 35 of 35 right. Keep it powered until the kernel driver is fixed.
-ACTION=="add|bind", SUBSYSTEM=="platform", KERNEL=="27b00000.video-codec", ATTR{power/control}="on"
