@@ -26,6 +26,6 @@ printf 'obj-m += snd-soc-rockchip-sai.o\nsnd-soc-rockchip-sai-objs := rockchip_s
 export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
 make -C "/usr/src/linux-headers-$KVER-arm64" M="$PWD/mod" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CONFIG_DEBUG_INFO_BTF_MODULES= modules
 aarch64-linux-gnu-strip --strip-debug mod/snd-soc-rockchip-sai.ko
-aarch64-linux-gnu-strings mod/snd-soc-rockchip-sai.ko | grep -q "^vermagic=$KVER-arm64 " || { echo "wrong vermagic"; exit 1; }
+STR="$(aarch64-linux-gnu-strings mod/snd-soc-rockchip-sai.ko)"; grep -q "^vermagic=$KVER-arm64 " <<<"$STR" || { echo "wrong vermagic"; exit 1; }
 cp mod/snd-soc-rockchip-sai.ko "$OUT/"
 (cd "$OUT" && sha256sum snd-soc-rockchip-sai.ko | tee SHA256SUMS)

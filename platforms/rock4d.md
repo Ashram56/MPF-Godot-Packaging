@@ -52,6 +52,12 @@ the module needs an out-of-tree driver (AIC8800 for instance) Wi-Fi will not app
 2026.10~rc5 (`u-boot-rockchip.bin` sha256 `e52f06be...d9da`), GoZen sha256 `104a785f...fd61` (glibc 2.38 symbols at most). Checked statically:
 GPT, U-Boot at sector 64, FAT files and extlinux menu, ext4 fsck clean, read-only fstab, services and GoZen in place.
 
+## Delivered build (2026-11-20)
+
+`rock4d-debian13-sd.img.xz`, 849 MB, sha256 `60138f5add5699071ba25004904989067e0cf9b4be9f0549c636657885dd9699`, u-boot-rockchip.bin sha256 `087f0e9d...6170`. Same as the
+build above plus: the patched rkvdec module in `updates/`, `GOZEN_HWDEC=1`, the GoZen with the libdrm fix (sha256 `828e2a08...ba4a`), the SAI audio
+module, `/var/cache` at 256m, the `mpf_games` fix. Not flashed or booted yet. WebDAV `Platform image/rock4d`.
+
 ## Sound
 
 Debian's kernel has no Rockchip SAI driver (`CONFIG_SND_SOC_ROCKCHIP_SAI` is not set), so the HDMI sound card of the device tree is never
