@@ -1,0 +1,49 @@
+diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
+--- a/src/gozen_video.cpp
++++ b/src/gozen_video.cpp
+@@ -4,6 +4,9 @@
+ #include <algorithm>
+ #include <mutex>
+ #include <string>
++#ifdef GOZEN_V4L2REQUEST
++#include <unistd.h>
++#endif
+ 
+ 
+ // Windows hardware decoding (Direct3D 11 Video, else DXVA2: every GPU vendor, no extra library): one device for
+@@ -93,6 +96,35 @@
+ 		_log_err("Couldn't copy the frame from the GPU");
+ 		return false;
+ 	}
++#ifdef GOZEN_V4L2REQUEST
++	// A decoded NV12 picture whose chroma is all zero shows as green: seen as random green flashes with the Rockchip rkvdec
++	// (the copy read the picture before the decoder's writes were visible). A real picture does not have U = V = 0 everywhere, so
++	// such a copy is repeated (the DRM frame is still held) after a short wait.
++	{
++		static int zero_copies = 0, zero_failed = 0;
++		auto chroma_empty = [](const AVFrame* f) {
++			if (f->format != AV_PIX_FMT_NV12 || !f->data[1])
++				return false;
++			for (int y = 0; y < f->height / 2; y += 8)
++				for (int x = 0; x < f->width; x += 16)
++					if (f->data[1][y * f->linesize[1] + x])
++						return false;
++			return true;
++		};
++		for (int tries = 0; tries < 5 && chroma_empty(av_hw_frame.get()); tries++) {
++			if (++zero_copies == 1 || zero_copies % 50 == 0)
++				UtilityFunctions::print("GoZen: empty chroma after the copy of a hardware frame, copying again (", zero_copies, ")");
++			usleep(3000);
++			av_frame_unref(av_hw_frame.get());
++			if (av_hwframe_transfer_data(av_hw_frame.get(), av_frame.get(), 0) < 0)
++				break;
++			if (!chroma_empty(av_hw_frame.get()))
++				break;
++			if (tries == 4 && ++zero_failed % 20 == 1)
++				UtilityFunctions::print("GoZen: chroma still empty after 5 copies (", zero_failed, ")");
++		}
++	}
++#endif
+ 	av_frame_copy_props(av_hw_frame.get(), av_frame.get());
+ 	av_frame_unref(av_frame.get());
+ 	av_frame_move_ref(av_frame.get(), av_hw_frame.get());

@@ -19,4 +19,4 @@ MPF_USER=mpf
 MPF_PERSIST="games:/opt/games ssh:/etc/ssh wpa:/etc/wpa_supplicant"
 
 # Folders that live in RAM (tmpfs, lost at power-off): "path:size". Used by the build to write /etc/fstab.
-MPF_VOLATILE="/tmp:128m /var/log:64m /var/tmp:32m /var/cache:64m /var/lib/systemd:16m /var/spool:8m"
+MPF_VOLATILE="/tmp:128m /var/log:64m /var/tmp:32m /var/cache:256m /var/lib/systemd:16m /var/spool:8m"
