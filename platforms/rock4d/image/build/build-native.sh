@@ -174,6 +174,13 @@ if [ -n "${SAI_KO:-}" ]; then
     echo snd-soc-rockchip-sai > "$R/etc/modules-load.d/rockchip-sai.conf"
     in_chroot "depmod -a $KVER"
 fi
+# video decoding: the mainline rkvdec lacks the RK3576 power-up priming decode (wrong H.264 frames after ~25 % of power-ups): the patched module
+# from rkvdec-module-build.sh goes in updates/, which depmod prefers over the kernel's own (platforms/rock4d.md, "Known fault")
+if [ -z "${RKVDEC_KO:-}" ] && [ -f "$KIT/rkvdec-out/rockchip-vdec.ko" ]; then RKVDEC_KO="$KIT/rkvdec-out/rockchip-vdec.ko"; fi
+if [ -n "${RKVDEC_KO:-}" ]; then
+    install -D -m 644 "$RKVDEC_KO" "$R/lib/modules/$KVER/updates/rockchip-vdec.ko"
+    in_chroot "depmod -a $KVER"
+fi
 for m in rockchip-vdec panfrost rockchipdrm dw_mmc-rockchip sdhci-of-dwcmshc dwmac-rk; do
     find "$R/lib/modules/$KVER" \( -name "$m.ko*" -o -name "${m//-/_}.ko*" \) | grep -q . || { echo "kernel module $m is missing in $KVER"; exit 1; }
 done
@@ -292,7 +299,8 @@ if [ -n "$EXTRAS" ]; then
         fi
         if [ -n "${GOZEN_SO:-}" ]; then   # a GoZen build with FFmpeg's v4l2-request decoder (platforms/rock4d.md, "Video")
             install -m 755 "$GOZEN_SO" "$R/home/rock/MPF-Godot/addons/gde_gozen/bin/libgozen.linux.template_release.arm64.so"
-            sed -i 's/^GOZEN_HWDEC=0/GOZEN_HWDEC=1/' "$R/etc/default/mpf-netconfig"
+            # hardware decoding only with the patched rkvdec: without it a quarter of the power-ups give wrong frames
+            if [ -f "$R/lib/modules/$KVER/updates/rockchip-vdec.ko" ]; then sed -i 's/^GOZEN_HWDEC=0/GOZEN_HWDEC=1/' "$R/etc/default/mpf-netconfig"; fi
             in_chroot "chown rock:rock /home/rock/MPF-Godot/addons/gde_gozen/bin/*"
         fi
         mkdir -p "$R/etc/systemd/system/getty@tty1.service.d"

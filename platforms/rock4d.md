@@ -25,6 +25,8 @@ constant, `dmesg` is silent; not the SRAM (RCB in RAM: 9 of 30), not the copy, n
 (not merged upstream) is built out of tree by `platforms/rock4d/image/build/rkvdec-module-build.sh` (module `rockchip-vdec.ko`
 for the image's kernel, installed in `/lib/modules/<kver>/updates/`). Do not remove `sram` or `rockchip,disable-mmu-reset` from the
 device tree to test this: the second one made the board not boot.
+Tested on the board (live `rmmod`/`insmod`, Portal.mp4, one hwcmp2 pass per power-up): patched module 0 wrong of 30, original module 7 wrong of 30 in
+the same session. `build-native.sh` installs the module (`RKVDEC_KO`, or `rkvdec-out/rockchip-vdec.ko`) and sets `GOZEN_HWDEC=1` only when it is there.
 
 ## Bootloader
 
