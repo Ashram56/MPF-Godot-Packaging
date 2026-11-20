@@ -14,6 +14,14 @@ Image: [rock4d/image/README.md](rock4d/image/README.md). Cabinet settings: [rock
 `GOZEN_V4L2REQUEST_DEVICE=/dev/mediaN` names the media node when the probe picks the wrong one.
 Only the GoZen build of the image has the decoder: a game bundle's own GoZen is replaced by it (`MPF_GOZEN_SO`).
 
+**Known fault: wrong pictures from rkvdec after runtime PM (measured 2026-11-20, kernel 7.2.12).** With the driver's runtime PM on
+(`power/control=auto`, autosuspend 100 ms, power domain `vdec` + IOMMU `27b00800`), about 40 % of the openings of a clip decode a
+wrong picture, luma and chroma, for the whole clip (the game shows it as a green tint lasting seconds or a full clip). The pictures
+repeat exactly when wrong, two streams opened together are wrong together, the DRM plane layout never changes, `dmesg` is silent.
+[build/gozen/hwcmp.c](../build/gozen/hwcmp.c) (hardware against software, frame by frame): 10 wrong of 25 openings with `auto`, 35 right of
+35 with `power/control=on`. The image keeps the VPU powered with a udev rule (`files/99-rkvdec-no-runtime-pm.rules`); the cause is
+in the kernel driver (resume of the `vdec` domain or IOMMU), to report upstream. Only the VPU stays on (idle power of one block).
+
 ## Bootloader
 
 Mainline U-Boot 2026.10~rc5 (Debian's source package; the board's defconfig is in it), Rockchip's `rk3576_ddr_*` and `rk3576_bl31_*`
