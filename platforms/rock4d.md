@@ -14,14 +14,17 @@ Image: [rock4d/image/README.md](rock4d/image/README.md). Cabinet settings: [rock
 `GOZEN_V4L2REQUEST_DEVICE=/dev/mediaN` names the media node when the probe picks the wrong one.
 Only the GoZen build of the image has the decoder: a game bundle's own GoZen is replaced by it (`MPF_GOZEN_SO`).
 
-**Known fault: wrong pictures from rkvdec (measured 2026-11-20, kernel 7.2.12, not fixed).** About 40 % of the power-ups of the
-decoder (runtime PM `vdec` power domain + IOMMU, autosuspend 100 ms) leave it in a state where every following decode is wrong, luma and
-chroma, for the whole clip (the game shows a green tint lasting seconds or a full clip). The same pictures repeat exactly when wrong,
-the state holds while the decoder stays powered (`autosuspend_delay_ms=-1`: 10 wrong of 10 openings), two streams opened together
-are wrong together, the DRM plane layout never changes, `dmesg` is silent. [build/gozen/hwcmp.c](../build/gozen/hwcmp.c) (hardware against
-software, frame by frame) measures it. Keeping the VPU powered does not fix it (it only freezes the state of that power-up). Suspect:
-the row/column buffers (RCB) which the driver takes from the on-chip SRAM `sram@3ff88000` (`sram = <&rkvdec_sram>` in the device tree; the
-driver zeroes them at open, before the power-up); test: a device tree without that property (RCB in RAM).
+**Known fault: wrong pictures from rkvdec (cause known upstream, 2026-11-20, kernel 7.2.12).** About 30-40 % of the power-ups of the
+decoder leave it in a state where every following H.264 decode is wrong, luma and chroma, for the whole clip (the game shows a green
+tint lasting seconds or a full clip); the state holds until the next power-down. Measured on the board with
+[build/gozen/hwcmp.c](../build/gozen/hwcmp.c) (hardware against software, frame by frame): 10 wrong of 25 openings, 9 wrong of 30
+power-ups; the same pictures repeat exactly when wrong, two streams opened together are wrong together, the DRM plane layout is
+constant, `dmesg` is silent; not the SRAM (RCB in RAM: 9 of 30), not the copy, not the clip. Known on the linux-rockchip list (S. Wright,
+2026-05/06, NanoPi R76S and ArmSoM Sige5, also tested on a Rock 4D): the Rockchip BSP runs a priming decode at every decoder power-up
+(`rk3576_workaround_run`), the mainline driver omits it, so the VDPU383 deblocking state is indeterminate after power-up. The patch
+(not merged upstream) is built out of tree by `platforms/rock4d/image/build/rkvdec-module-build.sh` (module `rockchip-vdec.ko`
+for the image's kernel, installed in `/lib/modules/<kver>/updates/`). Do not remove `sram` or `rockchip,disable-mmu-reset` from the
+device tree to test this: the second one made the board not boot.
 
 ## Bootloader
 
