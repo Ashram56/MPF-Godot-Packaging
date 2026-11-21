@@ -14,6 +14,7 @@ Upstream tracker: https://github.com/missionpinball/mpf/issues
 
 | Fix | Kind | Platforms | Applied by | Upstream |
 |---|---|---|---|---|
+| [A lock or scoop sends its ball straight back out before the rules can hold it](mpf/ball-device-unclaimed-ball-ejected.md) | improvement | all | the game's code; nothing to apply | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [Sounds sent with `bcp_trigger()` never reach GMC](mpf/bcp-trigger-unregistered-events.md) | improvement | all | the game's code; nothing to apply | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [`p_roc: driverboards: sternSAM` gives an unknown machine type](mpf/p-roc-driverboards-lowercased.md) | bug | all | the game's config; nothing to apply | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [No P-ROC driver for MPF on Linux, nor on Apple silicon Macs](mpf/pinproc-linux-macos.md) | packaging | Linux x86_64 and arm64 (Jetson included); macOS (Apple sili… | `install/install_linux.sh --proc`, `install/install_macos.sh --proc`, `python -m mpf_godo… | pypinproc, https://github.com/missionpinball/pypinproc/issues (wheels… |
@@ -105,4 +106,4 @@ Upstream tracker: https://github.com/claytercek/godot-native-video/issues
 
 Test projects and repro programs the reports refer to: [repro/](repro/).
 
-46 documents.
+47 documents.
