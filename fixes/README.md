@@ -43,6 +43,7 @@ Upstream tracker: https://github.com/missionpinball/mpf-gmc/issues
 | [Number keys and "/" do nothing in GMC on an AZERTY keyboard](gmc/keyboard-layout.md) | bug | all (any non-US layout: AZERTY seen; QWERTZ and others like… | `python -m mpf_godot setup`, `python -m mpf_godot patch-gmc [GMC_DIR]`; idempotent | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
 | [GMC quits when a launcher checks its port; on Windows the check never sees GMC](gmc/port-probe-quits.md) | bug (quits) / improvement (a ready sign… | all (the quit); Windows (IPv6-only listener) | the launcher (`python -m mpf_godot run GAME`) | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
 | [Every slide show rebuilds the slide's nodes: hitches on slow hardware](gmc/slide-reuse.md) | improvement | all; it matters on slow targets (measured on a Jetson Xavie… | **not applied by this repository's installer**: it needs game code (which slides to keep,… | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
+| [A trigger argument named `cmd` or `name` never reaches the Godot handler](gmc/trigger-reserved-keys.md) | pitfall (by design) | all | the game | not filed |
 
 ## Godot
 
@@ -107,4 +108,4 @@ Upstream tracker: https://github.com/claytercek/godot-native-video/issues
 
 Test projects and repro programs the reports refer to: [repro/](repro/).
 
-48 documents.
+49 documents.
