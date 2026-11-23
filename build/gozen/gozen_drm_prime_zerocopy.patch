@@ -1,5 +1,5 @@
 diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
-index 7c6fa84..6140e2c 100644
+index 7c6fa84..6075b05 100644
 --- a/src/gozen_video.cpp
 +++ b/src/gozen_video.cpp
 @@ -54,6 +54,7 @@ static enum AVPixelFormat _get_hw_format(AVCodecContext* ctx, const enum AVPixel
@@ -18,18 +18,21 @@ index 7c6fa84..6140e2c 100644
  		if (!_hw_download()) {
  			close();
  			return _log_err("Failed to copy the first frame from the GPU");
-@@ -524,7 +526,9 @@ int GoZenVideo::open(const String& video_path) {
+@@ -524,7 +526,12 @@ int GoZenVideo::open(const String& video_path) {
  
  	pixel_format = av_get_pix_fmt_name((AVPixelFormat)av_frame->format);
  #ifdef __linux__
 -	if (String(av_codec->name).ends_with("_v4l2m2m") && OS::get_singleton()->get_environment("GOZEN_ZEROCOPY") != "0" &&
 +	if (drm_prime_frames && OS::get_singleton()->get_environment("GOZEN_ZEROCOPY") != "0" && av_frame->format == AV_PIX_FMT_NV12)
-+		zero_copy = new GoZenZeroCopy(); // later frames stay DRM PRIME (hold()), the first one was copied above
++		{
++			zero_copy = new GoZenZeroCopy();
++			UtilityFunctions::print("GoZen: zero-copy on (DRM PRIME frames of ", av_codec->name, ")");
++		} // later frames stay DRM PRIME (hold()), the first one was copied above
 +	else if (String(av_codec->name).ends_with("_v4l2m2m") && OS::get_singleton()->get_environment("GOZEN_ZEROCOPY") != "0" &&
  		(av_frame->format == AV_PIX_FMT_YUV420P || av_frame->format == AV_PIX_FMT_NV12)) {
  		GozenV4L2Buffer buffer;
  		if (gozen_v4l2_frame_buffer(av_codec_ctx.get(), av_frame.get(), &buffer) == 0)
-@@ -623,6 +627,7 @@ void GoZenVideo::close() {
+@@ -623,6 +630,7 @@ void GoZenVideo::close() {
  	av_sws_frame.reset();
  	av_hw_frame.reset();
  	hw_pix_fmt = AV_PIX_FMT_NONE;
@@ -49,8 +52,11 @@ index af929c7..4934d36 100644
  
  	inline bool _log_err(String message) {
  		UtilityFunctions::printerr("GoZenVideo: ", message, "!");
+diff --git a/src/gozen_video.os b/src/gozen_video.os
+index b1b6f2f..6d84ab6 100644
+Binary files a/src/gozen_video.os and b/src/gozen_video.os differ
 diff --git a/src/gozen_zerocopy.cpp b/src/gozen_zerocopy.cpp
-index a7b1257..4a0bafb 100644
+index a7b1257..444d640 100644
 --- a/src/gozen_zerocopy.cpp
 +++ b/src/gozen_zerocopy.cpp
 @@ -3,6 +3,8 @@
@@ -204,6 +210,15 @@ index a7b1257..4a0bafb 100644
  		if (!import.image[i]) {
  			UtilityFunctions::print("GoZen: zero-copy unavailable (eglCreateImageKHR plane ", i, ": EGL error ",
  									gl->eglGetError(), "), copying frames");
+@@ -321,6 +384,8 @@ int GoZenZeroCopy::_import(const Held& held) {
+ 		return -1;
+ 	}
+ 
++	if (imports.size() < 3 || imports.size() % 8 == 0)
++		UtilityFunctions::print("GoZen: zero-copy imported a ", held.drm ? "DRM PRIME" : "V4L2", " buffer (", held.layout.width, "x", held.layout.height, ", modifier ", (int64_t)held.modifier, ", ", (int)imports.size() + 1, " in use)");
+ 	for (int i = 0; i < (int)imports.size(); i++)
+ 		if (!imports[i].used) {
+ 			imports[i] = import;
 diff --git a/src/gozen_zerocopy.hpp b/src/gozen_zerocopy.hpp
 index 4b1a0be..3c50e0b 100644
 --- a/src/gozen_zerocopy.hpp
@@ -236,3 +251,9 @@ index 4b1a0be..3c50e0b 100644
  	int _import(const Held& held);
  	void _free_import(Import& import);
  	void _unref(Held& held);
+diff --git a/src/gozen_zerocopy.os b/src/gozen_zerocopy.os
+index 96a2926..94d6b09 100644
+Binary files a/src/gozen_zerocopy.os and b/src/gozen_zerocopy.os differ
+diff --git a/src/register_types.os b/src/register_types.os
+index 0bb62a7..7032cee 100644
+Binary files a/src/register_types.os and b/src/register_types.os differ
