@@ -1,0 +1,238 @@
+diff --git a/src/gozen_video.cpp b/src/gozen_video.cpp
+index 7c6fa84..6140e2c 100644
+--- a/src/gozen_video.cpp
++++ b/src/gozen_video.cpp
+@@ -54,6 +54,7 @@ static enum AVPixelFormat _get_hw_format(AVCodecContext* ctx, const enum AVPixel
+ 
+ bool GoZenVideo::_open_hwaccel(const AVCodec* codec, AVHWDeviceType type) {
+ 	hw_pix_fmt = AV_PIX_FMT_NONE;
++	drm_prime_frames = false;
+ 	for (int i = 0;; i++) {
+ 		const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i);
+ 		if (!config)
+@@ -448,6 +449,7 @@ int GoZenVideo::open(const String& video_path) {
+ 									")");
+ 		else
+ 			UtilityFunctions::print("GoZen: the GPU cannot decode this ", av_codec->name, " video, using software");
++		drm_prime_frames = av_frame->format == hw_pix_fmt && hw_pix_fmt == AV_PIX_FMT_DRM_PRIME;
+ 		if (!_hw_download()) {
+ 			close();
+ 			return _log_err("Failed to copy the first frame from the GPU");
+@@ -524,7 +526,9 @@ int GoZenVideo::open(const String& video_path) {
+ 
+ 	pixel_format = av_get_pix_fmt_name((AVPixelFormat)av_frame->format);
+ #ifdef __linux__
+-	if (String(av_codec->name).ends_with("_v4l2m2m") && OS::get_singleton()->get_environment("GOZEN_ZEROCOPY") != "0" &&
++	if (drm_prime_frames && OS::get_singleton()->get_environment("GOZEN_ZEROCOPY") != "0" && av_frame->format == AV_PIX_FMT_NV12)
++		zero_copy = new GoZenZeroCopy(); // later frames stay DRM PRIME (hold()), the first one was copied above
++	else if (String(av_codec->name).ends_with("_v4l2m2m") && OS::get_singleton()->get_environment("GOZEN_ZEROCOPY") != "0" &&
+ 		(av_frame->format == AV_PIX_FMT_YUV420P || av_frame->format == AV_PIX_FMT_NV12)) {
+ 		GozenV4L2Buffer buffer;
+ 		if (gozen_v4l2_frame_buffer(av_codec_ctx.get(), av_frame.get(), &buffer) == 0)
+@@ -623,6 +627,7 @@ void GoZenVideo::close() {
+ 	av_sws_frame.reset();
+ 	av_hw_frame.reset();
+ 	hw_pix_fmt = AV_PIX_FMT_NONE;
++	drm_prime_frames = false;
+ 	sws_ctx.reset();
+ 
+ 	if (av_codec_ctx) {
+diff --git a/src/gozen_video.hpp b/src/gozen_video.hpp
+index af929c7..4934d36 100644
+--- a/src/gozen_video.hpp
++++ b/src/gozen_video.hpp
+@@ -113,6 +113,7 @@ class GoZenVideo : public Resource {
+ 	bool _open_decoder(const AVCodec* codec, bool hw = false);
+ 	bool _open_hwaccel(const AVCodec* codec, AVHWDeviceType type);
+ 	bool _hw_download();
++	bool drm_prime_frames = false; // the hardware decoder returns DRM PRIME frames (zero-copy candidate)
+ 
+ 	inline bool _log_err(String message) {
+ 		UtilityFunctions::printerr("GoZenVideo: ", message, "!");
+diff --git a/src/gozen_zerocopy.cpp b/src/gozen_zerocopy.cpp
+index a7b1257..4a0bafb 100644
+--- a/src/gozen_zerocopy.cpp
++++ b/src/gozen_zerocopy.cpp
+@@ -3,6 +3,8 @@
+ #ifdef __linux__
+ 
+ #include <dlfcn.h>
++#include <fcntl.h>
++#include <sys/stat.h>
+ #include <unistd.h>
+ 
+ #include <godot_cpp/classes/image.hpp>
+@@ -13,6 +15,7 @@
+ extern "C" {
+ #include <libavcodec/avcodec.h>
+ #include <libavutil/frame.h>
++#include <libavutil/hwcontext_drm.h>
+ #include <libavutil/pixfmt.h>
+ }
+ 
+@@ -39,6 +42,8 @@ constexpr EGLint EGL_LINUX_DRM_FOURCC_EXT = 0x3271;
+ constexpr EGLint EGL_DMA_BUF_PLANE0_FD_EXT = 0x3272;
+ constexpr EGLint EGL_DMA_BUF_PLANE0_OFFSET_EXT = 0x3273;
+ constexpr EGLint EGL_DMA_BUF_PLANE0_PITCH_EXT = 0x3274;
++constexpr EGLint EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT = 0x3443;
++constexpr EGLint EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT = 0x3444;
+ constexpr GLenum GL_TEXTURE_2D = 0x0DE1;
+ constexpr GLenum GL_TEXTURE_BINDING_2D = 0x8069;
+ constexpr GLenum GL_TEXTURE_MAG_FILTER = 0x2800;
+@@ -52,6 +57,8 @@ constexpr uint32_t fourcc(char a, char b, char c, char d) {
+ }
+ constexpr uint32_t DRM_FORMAT_R8 = fourcc('R', '8', ' ', ' ');
+ constexpr uint32_t DRM_FORMAT_GR88 = fourcc('G', 'R', '8', '8');
++constexpr uint32_t DRM_FORMAT_NV12_ = fourcc('N', 'V', '1', '2');
++constexpr uint64_t DRM_MOD_INVALID_ = 0x00ffffffffffffffULL;
+ 
+ struct GL {
+ 	EGLDisplay (*eglGetCurrentDisplay)();
+@@ -125,6 +132,8 @@ GoZenZeroCopy::~GoZenZeroCopy() {
+ int64_t GoZenZeroCopy::hold(const AVCodecContext* avctx, const AVFrame* frame, int generation) {
+ 	if (import_failed || !frame || frame->width <= 0 || frame->height <= 0)
+ 		return -1;
++	if (frame->format == AV_PIX_FMT_DRM_PRIME)
++		return _hold_drm(frame, generation);
+ 	bool nv12 = frame->format == AV_PIX_FMT_NV12;
+ 	if (!nv12 && frame->format != AV_PIX_FMT_YUV420P)
+ 		return -1;
+@@ -159,6 +168,47 @@ int64_t GoZenZeroCopy::hold(const AVCodecContext* avctx, const AVFrame* frame, i
+ }
+ 
+ 
++// A DRM PRIME frame (V4L2 request decoders such as the Rockchip rkvdec, Rockchip MPP): NV12 in one dma-buf. The frame
++// is referenced, so its buffer stays with the decoder's pool, and imported once per buffer (identified by the dma-buf's inode).
++int64_t GoZenZeroCopy::_hold_drm(const AVFrame* frame, int generation) {
++	const AVDRMFrameDescriptor* d = (const AVDRMFrameDescriptor*)frame->data[0];
++	if (!d || d->nb_layers < 1 || d->nb_objects < 1)
++		return -1;
++	const AVDRMLayerDescriptor& layer = d->layers[0];
++	if (layer.format != DRM_FORMAT_NV12_ || layer.nb_planes != 2 || layer.planes[0].object_index != layer.planes[1].object_index)
++		return -1; // only NV12 in one buffer (what the NV12 shader of video_playback.gd draws)
++	const AVDRMObjectDescriptor& object = d->objects[layer.planes[0].object_index];
++	struct stat st;
++	if (object.fd < 0 || fstat(object.fd, &st) != 0)
++		return -1;
++
++	Held held;
++	held.drm = true;
++	held.generation = generation;
++	held.index = (uint32_t)st.st_ino;
++	held.base = (const void*)(uintptr_t)st.st_ino;
++	held.length = object.size;
++	held.fd = object.fd;
++	held.modifier = (object.format_modifier == DRM_MOD_INVALID_) ? 0 : object.format_modifier;
++	held.layout.format = AV_PIX_FMT_NV12;
++	held.layout.width = frame->width;
++	held.layout.height = frame->height;
++	for (int i = 0; i < 2; i++) {
++		held.layout.offset[i] = (int)layer.planes[i].offset;
++		held.layout.pitch[i] = (int)layer.planes[i].pitch;
++		if (held.layout.pitch[i] <= 0)
++			return -1;
++	}
++	if (!(held.frame = av_frame_clone(frame)))
++		return -1;
++
++	std::lock_guard<std::mutex> lock(mutex);
++	held.id = next_id++;
++	pending.push_back(held);
++	return held.id;
++}
++
++
+ void GoZenZeroCopy::drop_pending() {
+ 	std::deque<Held> dropped;
+ 	{
+@@ -240,8 +290,15 @@ int GoZenZeroCopy::_import(const Held& held) {
+ 		import_failed = true;
+ 		return -1;
+ 	}
+-	GozenV4L2Buffer buffer = {nullptr, held.fd, held.type, held.index, (const uint8_t*)held.base, held.length};
+-	int dmabuf = gozen_v4l2_export(&buffer);
++	int dmabuf;
++	if (held.drm) {
++		dmabuf = fcntl(held.fd, F_DUPFD_CLOEXEC, 0); // the frame keeps its own fd; the EGLImages keep the buffer
++		if (dmabuf < 0)
++			dmabuf = -errno;
++	} else {
++		GozenV4L2Buffer buffer = {nullptr, held.fd, held.type, held.index, (const uint8_t*)held.base, held.length};
++		dmabuf = gozen_v4l2_export(&buffer);
++	}
+ 	if (dmabuf < 0) {
+ 		UtilityFunctions::print("GoZen: zero-copy unavailable (VIDIOC_EXPBUF failed: ", dmabuf, "), copying frames");
+ 		import_failed = true;
+@@ -269,20 +326,26 @@ int GoZenZeroCopy::_import(const Held& held) {
+ 	gl->glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+ 	bool ok = true;
+ 	for (int i = 0; i < import.planes && ok; i++) {
+-		const EGLint attributes[] = {EGL_WIDTH,
+-									 planes[i].width,
+-									 EGL_HEIGHT,
+-									 planes[i].height,
+-									 EGL_LINUX_DRM_FOURCC_EXT,
+-									 (EGLint)planes[i].fourcc,
+-									 EGL_DMA_BUF_PLANE0_FD_EXT,
+-									 dmabuf,
+-									 EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+-									 held.layout.offset[i],
+-									 EGL_DMA_BUF_PLANE0_PITCH_EXT,
+-									 held.layout.pitch[i],
+-									 EGL_NONE};
+-		import.image[i] = gl->eglCreateImageKHR(display, nullptr, EGL_LINUX_DMA_BUF_EXT, nullptr, attributes);
++		std::vector<EGLint> attributes = {EGL_WIDTH,
++										   planes[i].width,
++										   EGL_HEIGHT,
++										   planes[i].height,
++										   EGL_LINUX_DRM_FOURCC_EXT,
++										   (EGLint)planes[i].fourcc,
++										   EGL_DMA_BUF_PLANE0_FD_EXT,
++										   dmabuf,
++										   EGL_DMA_BUF_PLANE0_OFFSET_EXT,
++										   held.layout.offset[i],
++										   EGL_DMA_BUF_PLANE0_PITCH_EXT,
++										   held.layout.pitch[i]};
++		if (held.drm && held.modifier) { // needs EGL_EXT_image_dma_buf_import_modifiers: without it the import fails and frames are copied
++			attributes.push_back(EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT);
++			attributes.push_back((EGLint)(held.modifier & 0xffffffffu));
++			attributes.push_back(EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT);
++			attributes.push_back((EGLint)(held.modifier >> 32));
++		}
++		attributes.push_back(EGL_NONE);
++		import.image[i] = gl->eglCreateImageKHR(display, nullptr, EGL_LINUX_DMA_BUF_EXT, nullptr, attributes.data());
+ 		if (!import.image[i]) {
+ 			UtilityFunctions::print("GoZen: zero-copy unavailable (eglCreateImageKHR plane ", i, ": EGL error ",
+ 									gl->eglGetError(), "), copying frames");
+diff --git a/src/gozen_zerocopy.hpp b/src/gozen_zerocopy.hpp
+index 4b1a0be..3c50e0b 100644
+--- a/src/gozen_zerocopy.hpp
++++ b/src/gozen_zerocopy.hpp
+@@ -31,8 +31,8 @@ class GoZenZeroCopy {
+ 	GoZenZeroCopy() = default;
+ 	~GoZenZeroCopy(); // render thread (release())
+ 
+-	// Decode thread: takes a reference to frame (a V4L2 M2M frame, YUV420P or NV12 in one buffer) and returns its
+-	// id, or -1 when it is not such a frame. generation changes whenever the decoder is reopened.
++	// Decode thread: takes a reference to frame (a V4L2 M2M frame, YUV420P or NV12 in one buffer, or a DRM PRIME
++	// frame of any hardware decoder: NV12 in one dma-buf) and returns its id, or -1 when it is not such a frame. generation changes whenever the decoder is reopened.
+ 	int64_t hold(const AVCodecContext* avctx, const AVFrame* frame, int generation);
+ 	// Any thread: lets go of the frames held and not shown yet (a seek, a restart).
+ 	void drop_pending();
+@@ -64,6 +64,8 @@ class GoZenZeroCopy {
+ 		uint32_t type = 0;
+ 		Layout layout;
+ 		int import = -1; // in imports, once shown
++		bool drm = false; // a DRM PRIME frame: fd is the dma-buf of the frame itself (owned by frame), not a V4L2 queue
++		uint64_t modifier = 0; // DRM format modifier of the dma-buf (0 = linear)
+ 	};
+ 	struct Import {
+ 		int generation = 0;
+@@ -87,6 +89,7 @@ class GoZenZeroCopy {
+ 	int64_t next_id = 0;
+ 	std::atomic<bool> import_failed{false};
+ 
++	int64_t _hold_drm(const AVFrame* frame, int generation);
+ 	int _import(const Held& held);
+ 	void _free_import(Import& import);
+ 	void _unref(Held& held);
