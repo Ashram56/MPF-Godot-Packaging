@@ -71,3 +71,18 @@ It is the engine's copy path, the same for every game and board, so it belongs i
    machine with a GPU (the sandbox has none: compile only), arm64 build for the Rock 4D.
 2. Bench `--mode=held` with `GOZEN_HWDEC=1` on the Rock 4D (one video, three videos), then the game's FPS.
 3. If the checks above pass, the same patch serves VAAPI on x86 and any DRM PRIME decoder.
+
+## Measures that frame it (Rock 4D, rkvdec through v4l2request, patched module, 1080p, 240 frames)
+
+| Build, mode | Videos | fps per video | CPU ms per frame | Decode ms per frame |
+|---|---|---|---|---|
+| stock `base.so`, hardware, copy | 1 | 102.9 | 7.3 | 9.7 |
+| stock `base.so`, hardware, copy | 3 | 51.3 | 7.0 | 11.0 |
+| `tuned.so`, hardware, `next_frame_into` | 1 | 113.3 | 6.8 | 8.8 |
+| `tuned.so`, hardware, `next_frame_into` | 3 | 53.4 | 6.6 | 10.6 |
+| `tuned.so`, software, `next_frame_into` | 3 | 86.2 | 23.6 | 7.0 |
+
+Hardware decode costs 3.4 times less CPU than software; the one VPU limits three videos to about 155 fps in total
+(decode time per frame stays near 10.6 ms). No "timed out" in dmesg, no green frame (302 frames of one clip
+compared with the software decode: 0 differ). The 6.6 to 7.3 CPU ms per frame left is mostly the copy this design
+removes; the VPU time (about 9 to 11 ms per frame) stays.
