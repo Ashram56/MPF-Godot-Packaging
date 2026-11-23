@@ -86,3 +86,18 @@ Hardware decode costs 3.4 times less CPU than software; the one VPU limits three
 (decode time per frame stays near 10.6 ms). No "timed out" in dmesg, no green frame (302 frames of one clip
 compared with the software decode: 0 differ). The 6.6 to 7.3 CPU ms per frame left is mostly the copy this design
 removes; the VPU time (about 9 to 11 ms per frame) stays.
+
+## First measure of the patch (Rock 4D, headless bench `--mode=held`, no GPU: hold and drop only)
+
+`zc.so` (sha256 `0540c629…`), `GOZEN_HWDEC=1`, 1080p, 240 frames, `zero_copy=true` reported at open, no "timed out":
+
+| Videos | Zero-copy | fps per video | CPU ms per frame | Decode ms per frame |
+|---|---|---|---|---|
+| 1 | on | 164.7 | 0.33 | 6.05 |
+| 1 | off (`GOZEN_ZEROCOPY=0`) | 111.1 | 7.04 | 8.97 |
+| 3 | on | 60.2 | 0.31 | 9.52 |
+| 3 | off | 51.9 | 6.76 | 10.97 |
+
+CPU per frame falls about 21 times; throughput +48 % for one video, +16 % for three (181 against 156 fps in total,
+then the single VPU is the limit). This bench has no GPU: it does not measure the EGL import, the display or the
+picture's correctness. Those are the four hardware checks above, still open.
