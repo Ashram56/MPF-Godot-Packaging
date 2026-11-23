@@ -15,6 +15,7 @@ installer step by step, its options and every lesson learned (numbered "Findings
 | [jetson/image/README.md](jetson/image/README.md) | `platforms/jetson/image/build/`, `flash/` | a minimal Xavier NX image (L4T 35.6.4), SD card or NVMe |
 | [frame-rate-method.md](frame-rate-method.md) | any board | the checks, the V4L2 decoder, measuring and cross-building before promising a frame rate (Raspberry Pi 4 as the example) |
 | [godot-performance.md](godot-performance.md) | any slow target | GMC + Godot stalls, node pooling, a display drawn from data |
+| [render-guidelines.md](render-guidelines.md) | any slow GPU | engine and platform levers: video copy paths (GoZen, FFmpeg), decoder threads, tile-based GPU rules, per-board budget (desk analysis) |
 | [video-playback.md](video-playback.md) | all | GDE GoZen and native video: switching, the Windows build, checking the decoder |
 | [local.md](local.md) | `python -m mpf_godot local` | a cabinet's game bundle installed and played on a Windows, macOS or Linux desktop (ZeDMD through libzedmd, Serum), same code as the image |
 | [../docker/README.md](../docker/README.md) | `docker compose up` | the whole platform (setup page on 8080, the game in a browser on 6080, software decoding, DMD web preview) in a container, to test a bundle on any PC or Mac without a cabinet |
