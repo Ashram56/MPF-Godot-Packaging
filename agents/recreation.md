@@ -49,6 +49,12 @@ overlay, a model) and tells the packaging agent, which carries it to every insta
 - `tests/test_traces.py` (scenario → event kinds that match the reference trace) only ever gains kinds; a
   feature is accepted when every rule cites its ROM routine (from A's functional diagram) **and** its scenario's
   trace matches (`scripts/trace_check.py <scenario>`). A trace match alone does not accept a feature.
+- Before coding a routine A names, check that it has a caller (a jsr, a far call with its bank, or a table entry
+  holding its address). A routine with no caller is dead code: leave it out and say so. LOTR example: the Balrog
+  "right VUK hits to light 3, 7, 21, 55, 99" routine 59:503D has no caller. The Balrog really starts from Gollum's
+  cave consolation (59:6F59) and from a Mystery award.
+- Look for silent counters at the end of the shot chains. A hook at the end of a chain may count something with no
+  score and no display. LOTR's ring spotting (58:50C4 / 50F7 / 5122) is one: it shows up only in the end-of-ball bonus.
 - `pytest -q tests` green; `scripts/render_check.py` (no blank DMD); `scripts/render_diff.py` for display work
   (text pixel-exact against the reference captures); classic frames unchanged (pixel-hash tests).
 - Unit tests for paths no reference scenario reaches; RNG seeded in tests only.
