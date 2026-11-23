@@ -1,0 +1,213 @@
+--- a/src/ffmpeg.cpp
++++ b/src/ffmpeg.cpp
+@@ -1,5 +1,7 @@
+ #include "ffmpeg.hpp"
+ 
++#include <algorithm>
++
+ 
+ 
+ void FFmpeg::print_av_error(const char* message, int error) {
+@@ -8,8 +10,28 @@
+ 	UtilityFunctions::printerr(message, l_error_buffer);
+ }
+ 
++// Decoding options of the platform, read from the environment (the game's launcher sets them per board):
++//   GOZEN_THREADS=N             decoder threads of each video (default: cores - 1, at most GOZEN_THREADS_MAX_AUTO)
++//   GOZEN_SKIP_LOOP_FILTER=...  none (default) | nonref | all: H.264 deblocking skipped on the frames nothing refers to, or on all
++//   GOZEN_FAST=1                AV_CODEC_FLAG2_FAST: speed tricks that break the standard slightly
++// Several videos are decoded at once (a backglass, a topper, clips): cores - 1 frame threads per video made 3-5 videos fight
++// each other and Godot's main thread for the cores, and a frame-threaded decoder holds one more frame per thread.
++static const int GOZEN_THREADS_MAX_AUTO = 4;
++
++static String _env(const char* name) {
++	return OS::get_singleton()->get_environment(name);
++}
++
+ void FFmpeg::enable_multithreading(AVCodecContext* codec_ctx, const AVCodec* codec) {
+-	codec_ctx->thread_count = OS::get_singleton()->get_processor_count() - 1;
++	int threads = std::max(1, OS::get_singleton()->get_processor_count() - 1);
++	String wanted = _env("GOZEN_THREADS");
++	if (wanted.is_valid_int() && wanted.to_int() > 0)
++		threads = wanted.to_int();
++	else
++		threads = std::min(threads, GOZEN_THREADS_MAX_AUTO);
++	if (codec->type == AVMEDIA_TYPE_AUDIO)
++		threads = 1; // an audio stream needs no thread (and frame threads add latency to a sound that is heard at once)
++	codec_ctx->thread_count = threads;
+ 
+ 	if (codec->capabilities & AV_CODEC_CAP_FRAME_THREADS)
+ 		codec_ctx->thread_type = FF_THREAD_FRAME;
+@@ -17,6 +39,16 @@
+ 		codec_ctx->thread_type = FF_THREAD_SLICE;
+ 	else
+ 		codec_ctx->thread_count = 1; // Don't use multithreading
++
++	if (codec->type == AVMEDIA_TYPE_VIDEO) {
++		String skip = _env("GOZEN_SKIP_LOOP_FILTER").to_lower();
++		if (skip == "all")
++			codec_ctx->skip_loop_filter = AVDISCARD_ALL;
++		else if (skip == "nonref")
++			codec_ctx->skip_loop_filter = AVDISCARD_NONREF;
++		if (_env("GOZEN_FAST") == "1")
++			codec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
++	}
+ }
+ 
+ int FFmpeg::get_frame(AVFormatContext* format_ctx, AVCodecContext* codec_ctx, int stream_id, AVFrame* frame,
+--- a/src/gozen_video.cpp
++++ b/src/gozen_video.cpp
+@@ -692,6 +692,31 @@
+ 	return true;
+ }
+ 
++// Decodes the next frame into planes the caller owns: [y, u] (NV12), [y, u, v] or [y, u, v, a] (YUVA), each an Image of the size
++// and format of get_y_data() etc. (duplicate() them once). The caller recycles a few sets instead of allocating about 3 MB for
++// every frame; the video's own images are not touched. Returns false when the video is not open or a plane does not fit.
++bool GoZenVideo::next_frame_into(const Array& planes) {
++	if (!loaded)
++		return false;
++	Ref<Image> y = planes.size() > 0 ? Ref<Image>(planes[0]) : Ref<Image>();
++	Ref<Image> u = planes.size() > 1 ? Ref<Image>(planes[1]) : Ref<Image>();
++	Ref<Image> v = planes.size() > 2 ? Ref<Image>(planes[2]) : Ref<Image>();
++	Ref<Image> a = planes.size() > 3 ? Ref<Image>(planes[3]) : Ref<Image>();
++	auto fits = [](const Ref<Image>& dst, const Ref<Image>& own) {
++		return dst.is_valid() && own.is_valid() && dst->get_width() == own->get_width() &&
++			   dst->get_height() == own->get_height() && dst->get_format() == own->get_format();
++	};
++	if (!fits(y, y_data) || !fits(u, u_data) || (!nv12 && !fits(v, v_data)) || (has_alpha && !fits(a, a_data)))
++		return false;
++
++	FFmpeg::get_frame(av_format_ctx.get(), av_codec_ctx.get(), av_stream->index, av_frame.get(), av_packet.get());
++	_copy_frame_data(y.ptr(), u.ptr(), v.ptr(), a.ptr());
++	current_frame++;
++	av_frame_unref(av_frame.get());
++	av_packet_unref(av_packet.get());
++	return true;
++}
++
+ bool GoZenVideo::is_zero_copy() const {
+ #ifdef __linux__
+ 	return zero_copy && !zero_copy->failed();
+@@ -837,62 +862,52 @@
+ 	return dict;
+ }
+ 
+-void GoZenVideo::_copy_frame_data() {
++// One plane of a frame into an image's bytes: a single memcpy when the decoder's lines have no padding.
++static inline void _copy_plane(uint8_t* dst, const uint8_t* src, int linesize, int width, int rows) {
++	if (linesize == width) {
++		memcpy(dst, src, (size_t)width * rows);
++		return;
++	}
++	for (int i = 0; i < rows; i++)
++		memcpy(dst + (size_t)i * width, src + (size_t)i * linesize, width);
++}
++
++// y, u, v, a: the images the planes go to (null: this video's own y_data, u_data, v_data, a_data); see next_frame_into().
++void GoZenVideo::_copy_frame_data(Image* y, Image* u, Image* v, Image* a) {
+ 	if (!_hw_download())
+ 		return;
+ 	if (av_frame->data[0] == nullptr) {
+ 		_log("Frame is empty");
+ 		return;
+ 	}
++	if (!y)
++		y = y_data.ptr();
++	if (!u)
++		u = u_data.ptr();
++	if (!v)
++		v = v_data.ptr();
++	if (!a)
++		a = a_data.ptr();
+ 
+ 	int uv_width = (actual_resolution.x + 1) / 2;
+ 	int uv_height = (actual_resolution.y + 1) / 2;
++	const AVFrame* f = using_sws ? av_sws_frame.get() : av_frame.get();
+ 
+-	if (using_sws) {
++	if (using_sws)
+ 		sws_scale_frame(sws_ctx.get(), av_sws_frame.get(), av_frame.get());
+ 
+-		for (int i = 0; i < actual_resolution.y; i++) {
+-			memcpy(y_data->ptrw() + i * actual_resolution.x, av_sws_frame->data[0] + i * av_sws_frame->linesize[0],
+-				   actual_resolution.x);
+-		}
+-		for (int i = 0; i < uv_height; i++) {
+-			memcpy(u_data->ptrw() + i * uv_width, av_sws_frame->data[1] + i * av_sws_frame->linesize[1], uv_width);
+-			memcpy(v_data->ptrw() + i * uv_width, av_sws_frame->data[2] + i * av_sws_frame->linesize[2], uv_width);
+-		}
+-
+-		if (has_alpha) {
+-			for (int i = 0; i < actual_resolution.y; i++) {
+-				memcpy(a_data->ptrw() + i * actual_resolution.x, av_sws_frame->data[3] + i * av_sws_frame->linesize[3],
+-					   actual_resolution.x);
+-			}
+-		}
+-
+-		av_frame_unref(av_sws_frame.get());
+-	} else if (nv12) {
+-		for (int i = 0; i < actual_resolution.y; i++) {
+-			memcpy(y_data->ptrw() + i * actual_resolution.x, av_frame->data[0] + i * av_frame->linesize[0],
+-				   actual_resolution.x);
+-		}
+-		for (int i = 0; i < uv_height; i++) {
+-			memcpy(u_data->ptrw() + i * uv_width * 2, av_frame->data[1] + i * av_frame->linesize[1], uv_width * 2);
+-		}
++	_copy_plane(y->ptrw(), f->data[0], f->linesize[0], actual_resolution.x, actual_resolution.y);
++	if (nv12) {
++		_copy_plane(u->ptrw(), f->data[1], f->linesize[1], uv_width * 2, uv_height);
+ 	} else {
+-		for (int i = 0; i < actual_resolution.y; i++) {
+-			memcpy(y_data->ptrw() + i * actual_resolution.x, av_frame->data[0] + i * av_frame->linesize[0],
+-				   actual_resolution.x);
+-		}
+-		for (int i = 0; i < uv_height; i++) {
+-			memcpy(u_data->ptrw() + i * uv_width, av_frame->data[1] + i * av_frame->linesize[1], uv_width);
+-			memcpy(v_data->ptrw() + i * uv_width, av_frame->data[2] + i * av_frame->linesize[2], uv_width);
+-		}
+-
+-		if (has_alpha) {
+-			for (int i = 0; i < actual_resolution.y; i++) {
+-				memcpy(a_data->ptrw() + i * actual_resolution.x, av_frame->data[3] + i * av_frame->linesize[3],
+-					   actual_resolution.x);
+-			}
+-		}
++		_copy_plane(u->ptrw(), f->data[1], f->linesize[1], uv_width, uv_height);
++		_copy_plane(v->ptrw(), f->data[2], f->linesize[2], uv_width, uv_height);
++		if (has_alpha && a)
++			_copy_plane(a->ptrw(), f->data[3], f->linesize[3], actual_resolution.x, actual_resolution.y);
+ 	}
++
++	if (using_sws)
++		av_frame_unref(av_sws_frame.get());
+ }
+ 
+ // avcodec_flush_buffers() on a V4L2 M2M decoder (Raspberry Pi 4) leaves it answering EOF to every later request, so a
+@@ -939,6 +954,7 @@
+ 
+ 	BIND_METHOD_ARGS(seek_frame, "frame_nr");
+ 	BIND_METHOD_ARGS(next_frame, "skip");
++	BIND_METHOD_ARGS(next_frame_into, "planes");
+ 	BIND_METHOD(is_zero_copy);
+ 	BIND_METHOD(next_frame_held);
+ 	BIND_METHOD_ARGS(show_held, "id");
+--- a/src/gozen_video.hpp
++++ b/src/gozen_video.hpp
+@@ -100,7 +100,7 @@
+ #endif
+ 
+ 	// Private functions.
+-	void _copy_frame_data();
++	void _copy_frame_data(Image* y = nullptr, Image* u = nullptr, Image* v = nullptr, Image* a = nullptr);
+ 	void _clean_frame_data();
+ 
+ 	int _seek_frame(int frame_nr);
+@@ -130,6 +130,7 @@
+ 
+ 	int seek_frame(int frame_nr);
+ 	bool next_frame(bool skip = false);
++	bool next_frame_into(const Array& planes);
+ 
+ 	// Zero-copy (Raspberry Pi 4's V4L2 M2M decoder with Godot's OpenGL ES renderer; GOZEN_ZEROCOPY=0 turns it off):
+ 	// next_frame_held() decodes the next frame and keeps it in the decoder's buffer, returning its id for

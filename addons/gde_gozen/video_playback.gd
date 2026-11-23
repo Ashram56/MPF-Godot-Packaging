@@ -86,6 +86,10 @@ var _decode_task: int = -1 ## Worker task decoding the next frames into _queue (
 var _decoded: int = 0 ## The last frame number decoded (or being decoded) into _queue.
 var _queue: Array[Dictionary] = [] ## Decoded frames not shown yet, oldest first: {"frame": int, "planes": Array}.
 var _queue_mutex: Mutex = Mutex.new()
+## Plane sets (Arrays of Images, the sizes and formats of GoZen's own) decoded into by GoZenVideo.next_frame_into() and recycled once
+## uploaded, instead of a 3 MB duplicate() of every frame. Empty when the GoZen build has no next_frame_into() (older binaries).
+var _pool: Array = []
+const POOL_MAX: int = QUEUE_FRAMES + 3 ## the queue, the frame being decoded, and one or two still waiting for the render thread
 var _nv12: bool = false ## The decoder gives NV12: u_data holds U and V (RG8), there is no v plane to upload.
 ## With a separate render thread, RenderingServer.texture_2d_update() runs later, on that thread, while the next decode
 ## may already write into GoZen's images: a frame shown straight from GoZen (after a seek or restart) is then copied.
@@ -217,6 +221,9 @@ func update_video(video_instance: GoZenVideo, audio_stream: AudioStream = null) 
 ## Only run this function after manually having added a Video object to the `video` variable. A good reason for doing this is to load your video's at startup time to prevent your program for freezing for a second when loading in big video files. Some video formats load faster then others so if you are experiencing issues with long loading times, try to use this function and create the video object on startup, or try switching the video format which you are using.
 func _update_video(new_video: GoZenVideo) -> void:
 	video = new_video
+	_queue_mutex.lock()
+	_pool.clear()          # the planes of the previous video had its size
+	_queue_mutex.unlock()
 	if !is_open():
 		printerr("Video isn't open!")
 		video = null
@@ -417,7 +424,7 @@ func _process(delta: float) -> void:
 		_queue_mutex.lock()
 		while not _queue.is_empty() and int(_queue[0].frame) <= due:
 			if (audio_master or _zero_copy) and _queue.size() > 1 and int(_queue[1].frame) <= due:
-				_queue.pop_front()          # late, keeping to the sound
+				_recycle_item(_queue.pop_front())          # late, keeping to the sound
 				_skips += 1
 				continue
 			shown = _queue.pop_front()
@@ -433,6 +440,8 @@ func _process(delta: float) -> void:
 				_show_held(int(shown.held))
 			else:
 				_set_frame_image(shown.planes)
+				# back to the pool once the render thread has taken the planes (its queue runs the call after the updates)
+				RenderingServer.call_on_render_thread(_recycle_planes.bind(shown.planes))
 			next_frame_called.emit(current_frame)
 			_fill_queue()
 		elif not waiting and _frame_count > 0 and _decoded + 1 >= _frame_count:
@@ -530,17 +539,52 @@ func _decode_one(frame_nr: int) -> void:
 	if held >= 0:
 		item.held = held
 	else:
-		if not _zero_copy:
-			video.next_frame(false)
-		var planes: Array = [video.get_y_data().duplicate(), video.get_u_data().duplicate()]
-		if not _nv12:
-			planes.append(video.get_v_data().duplicate())
-		if _has_alpha:
-			planes.append(video.get_a_data().duplicate())
+		var planes: Array = _take_planes()
+		if planes.is_empty() or not video.next_frame_into(planes):
+			planes = []
+			if not _zero_copy:
+				video.next_frame(false)
+			planes = [video.get_y_data().duplicate(), video.get_u_data().duplicate()]
+			if not _nv12:
+				planes.append(video.get_v_data().duplicate())
+			if _has_alpha:
+				planes.append(video.get_a_data().duplicate())
 		item.planes = planes
 	_queue_mutex.lock()
 	_queue.append(item)
 	_queue_mutex.unlock()
+
+
+## A free plane set to decode into (made from GoZen's own images when the pool is empty), or [] when GoZen cannot decode into
+## planes of ours (a binary without next_frame_into(), or zero-copy frames).
+func _take_planes() -> Array:
+	if _zero_copy or video == null or not video.has_method("next_frame_into"):
+		return []
+	_queue_mutex.lock()
+	var planes: Array = _pool.pop_back() if not _pool.is_empty() else []
+	_queue_mutex.unlock()
+	if planes.is_empty():
+		planes = [video.get_y_data().duplicate(), video.get_u_data().duplicate()]
+		if not _nv12:
+			planes.append(video.get_v_data().duplicate())
+		if _has_alpha:
+			planes.append(video.get_a_data().duplicate())
+	return planes
+
+
+## A plane set nobody reads any more goes back to the pool (its Images are the video's size: dropped when the video changes).
+func _recycle_planes(planes: Array) -> void:
+	if planes.is_empty() or not planes[0] is Image:
+		return
+	_queue_mutex.lock()
+	if _pool.size() < POOL_MAX:
+		_pool.append(planes)
+	_queue_mutex.unlock()
+
+
+func _recycle_item(item: Dictionary) -> void:
+	if item.has("planes"):
+		_recycle_planes(item.planes)
 
 
 ## Stops decoding ahead and forgets the decoded frames (before a seek, a restart or a close).

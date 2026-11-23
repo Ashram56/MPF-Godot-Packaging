@@ -16,6 +16,7 @@
 #   build/gozen/gozen_v4l2_buffers_nv12.patch: 12 capture buffers, NV12 (GOZEN_V4L2_PIXFMT=yuv420p: three planes);
 #   SConstruct lean=yes (no libvpx/libaom/LibreSSL);
 #   build/gozen/gozen_vaapi.patch: VAAPI on Linux x86_64 (Intel Quick Sync, AMD; FFmpeg --enable-vaapi, libva-dev in the container);
+#   build/gozen/gozen_decode_tuning.patch: decoder threads capped (GOZEN_THREADS), GOZEN_SKIP_LOOP_FILTER / GOZEN_FAST, next_frame_into() decoding into reusable planes (addons/gde_gozen/video_playback.gd pools them; fixes/gde-gozen/decode-tuning.md);
 # - jetson-ffmpeg (github.com/gjrtimmer/jetson-ffmpeg) at JETSON_FFMPEG_REV patches GoZen's FFmpeg 7.1. Its
 #   decoders load libnvmpi.so at run time, so nothing NVIDIA is needed here; on the Jetson, libnvmpi is built
 #   from the same repository (platforms/jetson.md). build/gozen/nvmpi_flush.patch makes its
@@ -46,6 +47,7 @@ git apply "$ROOT/build/gozen/gozen_v4l2m2m_flush.patch"
 git apply "$ROOT/build/gozen/gozen_zerocopy.patch"
 git apply "$ROOT/build/gozen/gozen_v4l2_buffers_nv12.patch"
 git apply "$ROOT/build/gozen/gozen_vaapi.patch"
+git apply "$ROOT/build/gozen/gozen_decode_tuning.patch"
 git -C "$WORK/jetson-ffmpeg" checkout -q --force "$JETSON_FFMPEG_REV"
 git -C "$WORK/jetson-ffmpeg" apply "$ROOT/build/gozen/nvmpi_flush.patch"
 "$WORK/jetson-ffmpeg/scripts/ffpatch.sh" "$WORK/gde_gozen/ffmpeg"
