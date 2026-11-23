@@ -1,6 +1,6 @@
 extends Node
 # Decode bench, as video_playback.gd's worker does: N videos decoded on worker threads.
-# args after --:  --dir=DIR (a.mp4 b.mp4 c.mp4 d.mp4)  --n=3  --frames=240  --mode=copy|dup|into   (dup = next_frame + duplicate() of the planes, the current behaviour; into = next_frame_into() on a recycled set, needs the new GoZen)
+# args after --:  --dir=DIR (a.mp4 b.mp4 c.mp4 d.mp4)  --n=3  --frames=240  --mode=copy|dup|into|held   (dup = next_frame + duplicate() of the planes, the current behaviour; into = next_frame_into() on a recycled set, needs the new GoZen)
 func _cpu() -> float:
 	var out := []
 	OS.execute("cat", ["/proc/%d/stat" % OS.get_process_id()], out)
@@ -43,6 +43,11 @@ func _ready() -> void:
 				var a := Time.get_ticks_usec()
 				if mode == "into":
 					v.next_frame_into(set)
+					tm[0] += Time.get_ticks_usec() - a
+				elif mode == "held":
+					# zero-copy: the frame stays in the decoder's buffer (no GPU here: hold and drop only, as playback does before show_held())
+					v.next_frame_held()
+					v.drop_held()
 					tm[0] += Time.get_ticks_usec() - a
 				else:
 					v.next_frame(false)
