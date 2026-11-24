@@ -1,0 +1,24 @@
+[configuration]
+entry_symbol = "native_video_init"
+compatibility_minimum = "4.6"
+reloadable = false
+
+[libraries]
+; macOS — universal binary (arm64 + x86_64 combined via `lipo`).
+macos.debug = "libnative_video.macos.debug.dylib"
+macos.release = "libnative_video.macos.release.dylib"
+
+; Windows — Media Foundation backend, cross-compiled with Zig's bundled
+; mingw. No "lib" prefix, matching the extension's own build output.
+; Project build (M7-B10/B11): DLLs rebuilt from upstream v0.3.1 + gdzig heap.zig fix (see docs/qa/native_video_debug_report.md).
+windows.debug.x86_64 = "native_video.windows.debug.x86_64.dll"
+windows.release.x86_64 = "native_video.windows.release.x86_64.dll"
+windows.debug.x86_32 = "native_video.windows.debug.x86_32.dll"
+windows.release.x86_32 = "native_video.windows.release.x86_32.dll"
+windows.debug.arm64 = "native_video.windows.debug.arm64.dll"
+windows.release.arm64 = "native_video.windows.release.arm64.dll"
+
+; iOS builds and links but is not shipped here: Godot's iOS export
+; conventionally expects a static library / .xcframework, not a plain
+; .dylib, and only link-time (not on-device runtime) has been verified.
+; Follow-up work — see README.
