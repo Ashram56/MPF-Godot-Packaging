@@ -64,6 +64,8 @@ in `agents/` of Ashram56/MPF-Godot-Packaging:
 
 ## Rules every agent follows
 
+- **STRICT RULE: DECOMPILE EVERYTHING** (owner, 2026-11-24; full text at the top of `CLAUDE.md`). C refuses to code a feature whose board is not `complet` in the game's `docs/boards_inventory.md`, or before A's visual diagram (one ROM address per node) exists, and never builds assets (DMD images, sounds, lamp shows) from emulator captures without the owner's prior approval. Run `tools/check_strict_rule.py` of the game repository before every push.
+
 - **Feed the knowledge base back, always** ([CONTRIBUTING.md](../CONTRIBUTING.md)): every game-agnostic learning, in the same session, without being
   asked: a pull request with write access, else an issue opened directly. Say in the report which one.
 - **Route by topic.** Taking a ROM or a table apart: Stern-SAM-Decryption. Rebuilding it in MPF, Godot, GoZen, GMC, MPF itself, platforms, boards,

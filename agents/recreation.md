@@ -36,6 +36,11 @@ overlay, a model) and tells the packaging agent, which carries it to every insta
 
 ## 2. Read, in this order
 
+0. **Gate (STRICT RULE: DECOMPILE EVERYTHING, owner 2026-11-24).** Before coding a feature, check in the asset repo that `docs/boards_inventory.md`
+   shows every board it depends on as `complet`, that A's visual diagram (one ROM address per node) covers it, and that
+   `python tools/check_strict_rule.py .` passes there. Otherwise stop and send A one batched request. Never build a rule, image,
+   DMD frame or sound table from a PinMAME capture or trace; only the owner can approve that exception, beforehand.
+
 1. [sam_to_mpf_playbook.md](../knowledge/sam_to_mpf_playbook.md): architecture, build order, verification
    loop and every gotcha so far. It is this agent's main manual; this page adds scope and what changed since.
 2. The asset repo's `AGENTS.md` section 14 (what it delivers) and `rom_data/README.md` (where each fact is;
