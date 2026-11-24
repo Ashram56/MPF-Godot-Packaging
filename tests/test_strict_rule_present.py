@@ -13,7 +13,8 @@ def read(rel):
 
 class StrictRulePresent(unittest.TestCase):
     def test_claude_md_carries_the_rule(self):
-        self.assertIn(MARKER, read("CLAUDE.md"))
+        for m in (MARKER, "Never end a turn by announcing", "progress report at least every 15 minutes"):
+            self.assertIn(m, read("CLAUDE.md"))
 
     def test_agent_files_carry_the_gate(self):
         for rel in ("agents/README.md", "agents/recreation.md"):
