@@ -369,8 +369,30 @@ Each line has the LOTR value as the example.
   40 s, hits 1 s apart) so both traces share the clock; prefer the latest `_runN` of a scenario.
 - **The display is objects with parameters, not deffs**: the game CPU sends `9B <id> <params>` and the DMD CPU draws.
   A mode's running display is re-sent by the game: every 0.115 s while its value counts down, once after each
-  foreground object when static, and a foreground object holds the display ~2.35 s (observed on LOTR). Model it as
-  background providers ranked by priority, re-sent when the display is free (`LotrOS._bg_tick`).
+  foreground object when static. Model it as background providers ranked by priority, re-sent when the display is
+  free (`LotrOS._bg_tick`).
+- **Decode the effect scheduler before timing any display.** A fixed hold per foreground object (LOTR: 2.35 s,
+  observed on one effect) cut every multiball intro, and the owner saw it. The code says how long each effect holds
+  the display and which one wins: on LOTR an effect starts if its priority is not lower than the running one's,
+  else it is queued (a flag bit) or dropped (fix 0xB4CF, queue 61:6B39), and it holds the display until its script
+  ends (the sum of its sleeps: 6 s for the Two Towers intro). Have A deliver one table per effect (object,
+  priority, flags, script length; LOTR `rom_data/effect_durations.csv`, `tools/effect_durations.py`) and let the OS
+  layer apply it; keep an observed hold only for scripts whose length depends on a branch.
+- **A second audit by independent sessions, each proving its findings.** After C builds from A's specs, give each
+  group of rules to a fresh session that has the disassembler, the game in a headless harness and one brief: find
+  every place where the game differs from the ROM routine, and prove each with a runnable script; it fixes nothing.
+  On LOTR eight such sessions found about 150 differences in a game whose tests all passed, a third of them
+  errors in A's rule sheets (a branch read the wrong way, a gate applied to the wrong mode). Fix from the reports,
+  then run a second pass on the corrected game. The disassembly wins over the rule sheet; record the sheet's errors.
+- **Decode the shared routines first: gates, the common switch award, the multiball end.** Most wrong rules on LOTR
+  were not in a mode but in what every mode shares: the list of blocking tasks (one routine, fix 0xDB49, tested by
+  every start and every lamp), the award every counted switch pays and the hooks in its tail, the once-per-ball
+  "ball in play" award (seen in traces as +100,000 on a first scoop or on a third lane letter, and first coded as a
+  rule of those shots), and the end of a multiball (main task killed, a grace task, then a timer, the shots still
+  paying, the total after). Code these once in the OS layer and have every feature call them.
+- **Give the owner a picture of the rules.** Text rule sheets were unreadable for checking the game: one flow chart
+  per mode (start conditions, each shot's award, completion, end; the ROM address on each node) with a short list
+  of what to verify at the machine did the job (LOTR `docs/rules/flowchart.html`, mermaid in one HTML page).
 - **Read awards off the first switch of every trace.** A one-off award on the first switch of a ball showed in every
   trace (LOTR: +100,000 when it is a scoop) and explained most single-window score gaps once removed from the shot values.
 - **Let the rules kick the scoops**: `auto_fire_on_unexpected_ball: false` on VUKs, saucers and locks, and the OS
@@ -395,4 +417,4 @@ Each line has the LOTR value as the example.
 
 On each game's page (Tron: [Tron-Legacy-MPF `docs/agents/README.md`](https://github.com/Ashram56/Tron-Legacy-MPF/blob/main/docs/agents/README.md), "C, strict recreation"; Transformers: [Transformers-MPF](https://github.com/Ashram56/Transformers-MPF) `README.md`).
 
-Last updated 2026-11-23 (sections 4b and 5a: the rules test benches of Tron and Transformers; section 5b: the WPC sound_call priority test, a decompile review once the traces pass, the per-player play time, from Terminator 2; section 6: a Whitestar 6809 game, Lord of the Rings; mode shots from hook chains, effect ids; before: section 5b, the first WPC 6809 game, Terminator 2; section 5, what porting Transformers Pro 1.80 showed).
+Last updated 2026-11-23 (section 6: the effect scheduler, the independent audit sessions, shared routines first, flow charts for the owner; sections 4b and 5a: the rules test benches of Tron and Transformers; section 5b: the WPC sound_call priority test, a decompile review once the traces pass, the per-player play time, from Terminator 2; section 6: a Whitestar 6809 game, Lord of the Rings; mode shots from hook chains, effect ids; before: section 5b, the first WPC 6809 game, Terminator 2; section 5, what porting Transformers Pro 1.80 showed).
