@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -11,7 +12,7 @@ D = os.path.join(ROOT, "docker")
 SCRIPTS = ["entrypoint.sh", "mpf-game-run", "systemctl", "journalctl"]
 
 
-@unittest.skipUnless(shutil.which("bash"), "needs bash")
+@unittest.skipUnless(shutil.which("bash") and sys.platform.startswith("linux"), "the Docker files run on Linux with bash (Windows checks out CRLF scripts)")
 class DockerFiles(unittest.TestCase):
 
     def test_scripts_parse(self):
