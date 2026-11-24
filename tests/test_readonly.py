@@ -1,11 +1,15 @@
 """Read-only production mode (common/readonly): the scripts, the build helper and the setup page's side of it."""
 import os
-import pwd
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+
+if not sys.platform.startswith("linux"):
+    raise unittest.SkipTest("the read-only images (fstab, systemd, losetup) are built on Linux only")
+
+import pwd  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RO = os.path.join(HERE, "..", "common", "readonly")
