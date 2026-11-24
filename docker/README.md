@@ -67,5 +67,5 @@ docker run --rm -p 127.0.0.1:8080:8080 -p 127.0.0.1:6080:6080 --shm-size 1g -v m
   with the stand-in `systemctl`; the game runs as the `mpf` user.
 - `tests/test_docker.py`.
 
-**Not checked**: a real game bundle (Tron, Transformers), the DMD `web` preview with a Serum file, the frame rate on a PC, Docker
+**Not checked**: a real game bundle, the DMD `web` preview with a Serum file, the frame rate on a PC, Docker
 Desktop on Windows and macOS (Apple silicon builds for arm64).
