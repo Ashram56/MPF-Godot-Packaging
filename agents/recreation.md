@@ -317,6 +317,24 @@ What the first Williams WPC game showed (Terminator 2 L-8, in its private game r
   ramp counter, a jackpot timer, the gun target count per multiball, the high score champion kept apart). Fix each
   from the code, keep the trace floor as the guard (it rose on T2: sounds 224 to 230, displays 247 to 253 of 263
   windows), and put what stays open in `rom_differences.md`.
+- **A QA pass for a game built before the strict rule** (Transformers Pro 1.80, 2026-11-25). Run the review above
+  in QA mode: three read-only reviewers (OS and game flow, modes and multiballs, playfield scoring), each with the
+  decompile, the ROM and the game's test harness, each finding proved by the decompile and, where it can be, a probe
+  test that prints the game's value next to the ROM's; the reviewers fix nothing. Keep the reports and probes in the
+  game repository (`docs/qa/<date>/`), fix the high ones from them with one regression test each, and list the rest
+  as open with one row in `rom_differences.md`. On Transformers they found 53 differences in a game whose 24 trace
+  scenarios passed (none of the 8 fixed ones changed a trace comparison). For the strict rule's files, write
+  them honestly rather than to pass the check: the boards inventory with the real state, the functional diagram
+  from A's specs with a test that every address is a routine of the decompile, and the captures still in use as a
+  waiver register waiting for the owner.
+- **Re-cite an OS layer copied from the worked example.** The SAM OS is the same on every game but its addresses
+  are not: Transformers copied Tron's OS layer with Tron's addresses, and most of them land inside unrelated tf_180
+  functions. Check every OS citation against the new decompile's function heads (find the function each address
+  falls in) when the layer is copied, not at the end.
+- **A multiball's rules outlive its flag.** On Transformers every multiball's shot gate is "flag set or end task
+  running" (156 + 62 ticks after the drop to one ball), so jackpots still score after the drain; the add-a-ball
+  award is offered only in the first part of that window. Read the gate routine the shot handler calls, not the
+  flag the spec names.
 - **Look for the OS's per-player play time.** WPC keeps each player's seconds of play (T2: record word +34 at
   38:4c7b, +2 per 122 ticks from the ball's first switch until 915 ticks after the last one, fix:d1a1). Rules
   read it: the ball save length (5 / 3 / 2 units) and the consolation extra ball (30 s or less) on T2. A rule
@@ -400,4 +418,4 @@ Each line has the LOTR value as the example.
 
 On each game's page (Tron: [Tron-Legacy-MPF `docs/agents/README.md`](https://github.com/Ashram56/Tron-Legacy-MPF/blob/main/docs/agents/README.md), "C, strict recreation"; Transformers: [Transformers-MPF](https://github.com/Ashram56/Transformers-MPF) `README.md`).
 
-Last updated 2026-11-23 (sections 4b and 5a: the rules test benches of Tron and Transformers; section 5b: the WPC sound_call priority test, a decompile review once the traces pass, the per-player play time, from Terminator 2; section 6: a Whitestar 6809 game, Lord of the Rings; mode shots from hook chains, effect ids; before: section 5b, the first WPC 6809 game, Terminator 2; section 5, what porting Transformers Pro 1.80 showed).
+Last updated 2026-11-25 (section 5b: a QA pass for a game built before the strict rule, re-citing a copied OS layer, multiball end windows, from Transformers); earlier 2026-11-23 (sections 4b and 5a: the rules test benches of Tron and Transformers; section 5b: the WPC sound_call priority test, a decompile review once the traces pass, the per-player play time, from Terminator 2; section 6: a Whitestar 6809 game, Lord of the Rings; mode shots from hook chains, effect ids; before: section 5b, the first WPC 6809 game, Terminator 2; section 5, what porting Transformers Pro 1.80 showed).
