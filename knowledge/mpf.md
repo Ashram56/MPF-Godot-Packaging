@@ -90,4 +90,14 @@ when the table asks for physical outputs, the rules applied by the platform when
 A working implementation as custom code: Transformers-MPF `game/tf/vpx_hardware.py`.
 ```
 
-Last updated 2026-10-29 (moved here from MPF-Godot-Packaging `fixes/mpf/virtual-pinball-vpinmame-answers.md`, PR #17; routing: MPF knowledge here, platform and packaging there).
+## Holding the game over sequence of the ROM
+
+A ROM runs a long sequence after the last ball (bonus, high score entry, match, awards, GAME OVER) before attract
+returns. Register a handler on `game_ending` (and on `ball_ending` for the bonus) with the queue argument, call
+`queue.wait()` and step the sequence with delays; call `queue.clear()` at its end. MPF keeps the game object (and
+the players' scores) until then, and attract starts only after the clear. A coroutine-style generator that yields
+tick counts (`next()` from a `delay.reset` callback) reproduces a ROM task's sleeps one to one. Switch handlers
+(flippers, START) read the entry while the queue waits. LOTR: `game/lotr/game_over.py` and `os_layer._bonus_script`
+(private repository).
+
+Last updated 2026-11-24 (holding the game over sequence in the game_ending queue); earlier 2026-10-29 (moved here from MPF-Godot-Packaging `fixes/mpf/virtual-pinball-vpinmame-answers.md`, PR #17; routing: MPF knowledge here, platform and packaging there).
