@@ -245,6 +245,22 @@ Moved to [MPF-Godot-Packaging `platforms/godot-performance.md`](https://github.c
   argument; a non-number in a numeric spec prints nothing; `%,02lu` of 0 is `00`.
 - **Values come from RAM, live**: status screens reprint timers/scores every refresh (`os.deff_live`).
   A printf line left blank is a bug; make the test fail on it.
+- **Values that move need a live replay, not frames** [code + observed, Transformers 2026-11-26]: a deff that
+  scrolls, slides (copy_rect row remaps), fades (palette remaps) or dissolves a page holding a printf carries the
+  code run's value ("00") baked into every moving frame, whatever overlay draws the still ones. Replay the deff's op
+  list (agent A's lift: fill, rect, frame, copy, copy_rect, remap, invert, bitmap, bitmap_masked, text, show,
+  dissolve) in MPF's Python each 16 ms tick on 32x128 byte pages, substitute each printf by its call site with the
+  rules' value (and redo the fit-font pick, `text_printf_msg_fit_page`), compose fg/bg with the mixer (mask = fg >> 4)
+  and send the frame to GMC as one 4096-byte L8 image (hex in the slide's event args; `Image.create_from_data(128, 32,
+  false, FORMAT_L8, hex.hex_decode())`, tinted with the DMD colour), the live status panel drawn over. Pure Python
+  with bytearray slices and a 64 KB mixer table costs ~0.6 ms a tick; check it frame for frame against agent A's
+  offline renderer before wiring it (Transformers: identical on 195 op lists). The image PNGs are not enough for it:
+  a dot byte with a mask nibble other than 0xff becomes level 15 in a PNG, so ship those images' raw bytes too.
+  Transformers-MPF `game/tf/op_player.py`, `scripts/gen_media.py` LIVE_OPS.
+- **Godot runs in a cloud container** [observed, Godot 4.6.3 + GMC 1.0.0, 2026-11-26]: the official Linux build
+  downloads from GitHub and runs under `xvfb-run -a ... --rendering-driver opengl3` (Mesa llvmpipe); a one-off check
+  is a `--script res://...gd` extending SceneTree with the work in `_initialize()` and `quit()`. Texture pixel checks
+  need the real renderer: with `--headless` an `ImageTexture` built from a modified image read back unmodified.
 - **One deff, several screens**: many deffs pick a screen by argument or phase; show only the selected one.
 - **Reference captures are one run**: random choices (mystery awards, clip picks) and the status panel
   (score 00) are frozen in them. Build those deffs from the rules' arguments and draw the live panel over.
