@@ -335,6 +335,47 @@ What the first Williams WPC game showed (Terminator 2 L-8, in its private game r
   running" (156 + 62 ticks after the drop to one ball), so jackpots still score after the drain; the add-a-ball
   award is offered only in the first part of that window. Read the gate routine the shot handler calls, not the
   flag the spec names.
+- **The conversion itself, checked against the code** (Transformers, 2026-11-26). After the review of the rules, check
+  the MPF conversion (configs, generated config, shows, Python, GDScript) against the decompile, one matrix row per
+  element, by independent read-only reviewers (one scope each: devices and settings, display, lamps, sounds and
+  coils, rules), each matrix rebuilt by its probe script, verdicts `match` / `differs` / `missing` / `extra` /
+  `unverifiable`. Transformers: 3,095 rows, 330 differs and 633 missing in a game whose traces passed. Fix the high
+  rows first, one regression test each. Then, once everything is decoded, keep a final table of the MPF code
+  against the decoded code (`docs/qa/final/mpf_vs_code.csv`: id, element, mpf, rom, state_before, state,
+  correction, test), each row `fixed`, `match` (the value now cites the code instead of a trace) or
+  `open (MPF limit)` with its `rom_differences.md` row.
+- **Do not play twice what an effect's code plays.** A decoded display effect's op list (or its `timing.json`)
+  carries the sounds and lamp effects its code starts. A feature that also starts them by hand plays them twice
+  (Transformers: every battle hit sound, and a leff the deff's code starts itself). Route the start through one
+  helper that knows the op list, and keep the calls a feature plays itself with an argument out of the op list's
+  playback.
+- **Count what a loader read.** Every loader of generated data asserts how many items it read (shows, lamps per
+  show, frames per effect). Transformers' show parser read 0 of 113 shows (double-quoted colours), no leff lit a
+  lamp, and every test passed, because "no lamp" is a valid state.
+- **Replay a PinMAME trace at its own tick.** The game runs the code's tick (SAM: 16.0 ms); a PinMAME pass runs
+  late (Transformers 16.15 ms, measured on spans the code counts in ticks). In the trace replay, wait each
+  reference second for 16.0 / that tick of game time and write the game's trace back in reference seconds;
+  without it 12 score, display and audit comparisons broke when the game moved to the code's tick. Never put the
+  measured tick in the game.
+- **An effect's length is the code's, not the next start in a trace.** A background rule can request the next
+  effect while the current one, at a higher priority, still holds the display; cut it there and the game is
+  wrong. Take the length and the priority drops (the tick an effect lowers its own priority, after which the
+  waiting effect takes the display while its task runs on) from the decoded op lists.
+- **Live values are slots.** A decoded effect that prints values comes with one slot per print call site (format,
+  font, position, argument source); the game fills the slots every frame from its own state, never from frames
+  with a value baked in (Transformers' bonus pages showed the multiplier in the total slot until then).
+- **Run the OS's arbitration, not special cases.** Port the lamp effect conflict test (lamp and coil groups,
+  priority, a flag bit) and the sound start (no-repeat ring, priority, take-over flag, the sample's voice mask and
+  count) from the tables the decoder exports (Stern-SAM-Decryption `knowledge/decode_tricks_and_method.md`
+  tricks 20-21); on Transformers they explained "missing" sounds and wrong lamps that had special cases.
+- **Reproduce empty actions.** A menu item whose routine is `bx lr` does nothing in that ROM; do not draw the
+  screen its label promises (Transformers DISPLAY HELP SCREEN).
+- **Run, do not infer, and defer when stuck.** A timing that goes through several tasks comes from a run of the
+  code (the decoder's runner), not from the one routine read: Transformers' end-of-ball delay during a ball
+  search, inferred from the search alone, came 1 s early. The escalation rule and what a less capable agent
+  defers by default are in Stern-SAM-Decryption `knowledge/decode_tricks_and_method.md` section 3; for C, also
+  defer any new engine model (display queue, voice allocation, task scheduler) and any trace difference you
+  cannot explain from the code.
 - **Look for the OS's per-player play time.** WPC keeps each player's seconds of play (T2: record word +34 at
   38:4c7b, +2 per 122 ticks from the ball's first switch until 915 ticks after the last one, fix:d1a1). Rules
   read it: the ball save length (5 / 3 / 2 units) and the consolation extra ball (30 s or less) on T2. A rule
@@ -440,6 +481,6 @@ Each line has the LOTR value as the example.
 
 On each game's page (Tron: [Tron-Legacy-MPF `docs/agents/README.md`](https://github.com/Ashram56/Tron-Legacy-MPF/blob/main/docs/agents/README.md), "C, strict recreation"; Transformers: [Transformers-MPF](https://github.com/Ashram56/Transformers-MPF) `README.md`).
 
-Last updated 2026-11-25 (section 5b: a QA pass for a game built before the strict rule, re-citing a copied OS layer, multiball end windows, from Transformers); earlier 2026-11-23 (sections 4b and 5a: the rules test benches of Tron and Transformers; section 5b: the WPC sound_call priority test, a decompile review once the traces pass, the per-player play time, from Terminator 2; section 6: a Whitestar 6809 game, Lord of the Rings; mode shots from hook chains, effect ids; before: section 5b, the first WPC 6809 game, Terminator 2; section 5, what porting Transformers Pro 1.80 showed).
+Last updated 2026-11-26 (section 5b: the conversion checked against the code and the final table, effects' own sounds, loader counts, trace replay at its tick, effect lengths and live slots, arbitration, empty actions, run do not infer, from Transformers); earlier 2026-11-25 (section 5b: a QA pass for a game built before the strict rule, re-citing a copied OS layer, multiball end windows, from Transformers); earlier 2026-11-23 (sections 4b and 5a: the rules test benches of Tron and Transformers; section 5b: the WPC sound_call priority test, a decompile review once the traces pass, the per-player play time, from Terminator 2; section 6: a Whitestar 6809 game, Lord of the Rings; mode shots from hook chains, effect ids; before: section 5b, the first WPC 6809 game, Terminator 2; section 5, what porting Transformers Pro 1.80 showed).
 
 Last updated 2026-11-23 (section 6: the effect scheduler, the independent audit sessions, shared routines first, flow charts for the owner; sections 4b and 5a: the rules test benches of Tron and Transformers; section 5b: the WPC sound_call priority test, a decompile review once the traces pass, the per-player play time, from Terminator 2; section 6: a Whitestar 6809 game, Lord of the Rings; mode shots from hook chains, effect ids; before: section 5b, the first WPC 6809 game, Terminator 2; section 5, what porting Transformers Pro 1.80 showed).
