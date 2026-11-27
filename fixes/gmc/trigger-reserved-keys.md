@@ -29,3 +29,13 @@ too (`encode_event_args` and MPF both set it). Any argument called `cmd` or `nam
 
 Use other argument names for events a Godot slide reads (`sound=250`, not `cmd=250`). A check for a game: grep the
 MPF code for `events.post(` with `cmd=` or `name=` on events that GMC handlers register.
+
+## How to check
+
+Post the event with a `cmd=` argument and print `payload` in the handler: `cmd` is the event name. Rename the
+argument and the value arrives.
+
+## Upstream issue (draft, not filed)
+
+None filed: by design in GMC 1.0.0, which sets `result.cmd` and `result.name` after decoding the arguments. An
+upstream note in its documentation would be enough.
