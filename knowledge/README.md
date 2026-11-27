@@ -9,6 +9,7 @@ decompile feedback) is in [Stern-SAM-Decryption `knowledge/`](https://github.com
 | [sam_to_mpf_playbook.md](sam_to_mpf_playbook.md) | You build or maintain an MPF recreation of **any** game from ROM-derived specs. Architecture, build order, verification loop and every gotcha that cost real time. Game agnostic; Tron is only the worked example. | ~15 min |
 | [mpf.md](mpf.md) | You work on how a game talks to MPF itself: its `virtual_pinball` platform and the VPX bridge, quirks of MPF 0.80.1. | ~4 min |
 | [dmd_hd_upscaling.md](dmd_hd_upscaling.md) | You work on the optional HD display (128x32 DMD drawn at any window size). Separate from the rules work on purpose. | ~5 min |
+| [port_decompiled_code.md](port_decompiled_code.md) | You rebuild a display effect or a mode's rules: port the decompiled routine, check it against the ROM code in an emulator, instead of comparing and retouching. | ~3 min |
 | [dmd_conformance.md](dmd_conformance.md) | You check a recreation's DMD against PinMAME frame by frame (needed for a colourisation, which finds frames by their dots). | ~3 min |
 | [pup_pack_format.md](pup_pack_format.md) | You play a PinUP Player pack with the MPF game: the pack's files, trigger codes, how each maps to a game event, how a DMD capture is matched. Tool: [../tools/pup/](../tools/pup/pup_decode.py); agent: [../agents/pup_pack.md](../agents/pup_pack.md). | ~6 min |
 

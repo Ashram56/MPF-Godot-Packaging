@@ -36,6 +36,8 @@ overlay, a model) and tells the packaging agent, which carries it to every insta
 
 ## 2. Read, in this order
 
+> **Method (owner, 2026-11-27): port the decompiled routine, do not compare / modify / compare.** [knowledge/port_decompiled_code.md](../knowledge/port_decompiled_code.md).
+
 0. **Gate (STRICT RULE: DECOMPILE EVERYTHING, owner 2026-11-24).** Before coding a feature, check in the asset repo that `docs/boards_inventory.md`
    shows every board it depends on as `complet`, that A's visual diagram (one ROM address per node) covers it, and that
    `python tools/check_strict_rule.py .` passes there. Otherwise stop and send A one batched request. Never build a rule, image,
