@@ -28,9 +28,28 @@ miss then points at a precise primitive, input or timing.
 - Text drawn from font images (not the platform's font) is what makes small differences vanish.
 - A scenario's remaining misses were value state (scores, counters) and overlays, not drawing.
 
+## A cheaper first step: replay every effect's op list (worked on Transformers, 2026-11-27)
+
+When agent A has lifted every display effect's code in the emulator (one op list per effect: each draw call with its tick,
+page, image, palette, text format and call site), the game can drop all prerendered frames before porting any routine:
+replay each op list tick by tick on page buffers with the port of the drawing primitives, and give each printf the value the
+rules have for its call site now. What it takes:
+
+- **Looping effects** (a background whose code is an endless loop; the lift stopped after N ticks): find, at build time, the
+  period of the frames over the second half of the run and the earliest tick it holds from; at play time keep a copy of the
+  pages at that tick and go back to it each time the replay passes the end of the run.
+- **Effects whose drawing reads RAM** (the player's side, a mode's phase, shots left): one op list per state, lifted with that
+  RAM set, picked by the rules at start and switched while the effect runs when the state changes (at the same tick, not from
+  the start). A wrong page that nobody notices on frames shows up here: the rules must name the state.
+- **Two slides**, one for the mode's background effect and one for the foreground one, so the background keeps its own replay
+  under the foreground.
+- **Size**: gzip the op lists (about 20:1 on JSON); load each once.
+
+It is not the end state (a branch no op list ran is not drawn); porting the routines that read RAM is.
+
 ## For rules
 
 Apply the same order to a mode: read the routine, write its state machine and values with the ROM address, then run the rules test bench and the traces before
 and after. A rule that needs a hand-tuned number is a routine not yet read. Departures stay in the game's `docs/rom_differences.md`.
 
-Last updated 2026-11-27 (written from the Tron DMD port).
+Last updated 2026-11-27 (written from the Tron DMD port; op-list replay step from Transformers).
