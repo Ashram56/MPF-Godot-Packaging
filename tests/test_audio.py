@@ -241,5 +241,21 @@ class Page(Base):
             self.assertIn("audOut", urllib.request.urlopen(base + "/").read().decode())
 
 
+class TestToneDevice(unittest.TestCase):
+    def test_hw_id_becomes_plughw(self):
+        self.assertEqual(AU.aplay_device("hw:CARD=vc4hdmi0,DEV=0"), "plughw:CARD=vc4hdmi0,DEV=0")
+        self.assertEqual(AU.aplay_device("default"), "default")
+
+    @unittest.skipUnless(shutil.which("aplay"), "alsa-utils not installed")
+    def test_name_known_to_alsa(self):
+        """With no such card ALSA must complain about the card, not about an unknown PCM name (the old `plug:hw:CARD=...`)."""
+        r = subprocess.run(["aplay", "-q", "-D", AU.aplay_device("hw:CARD=NoSuchCard,DEV=0"), "/dev/null"],
+                           capture_output=True, text=True, timeout=15)
+        self.assertNotIn("Unknown PCM", r.stderr)
+        old = subprocess.run(["aplay", "-q", "-D", "plug:hw:CARD=NoSuchCard,DEV=0", "/dev/null"],
+                             capture_output=True, text=True, timeout=15)
+        self.assertIn("Unknown PCM", old.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

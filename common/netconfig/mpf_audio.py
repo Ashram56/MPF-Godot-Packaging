@@ -367,6 +367,12 @@ def prepare():
         return {}
 
 
+def aplay_device(dev):
+    """aplay's -D name for a device id: `hw:CARD=x,DEV=n` becomes `plughw:CARD=x,DEV=n` (format and rate conversion, like the plug
+    of alsa_text()); `plug:hw:CARD=...` is not a name ALSA knows ("Unknown PCM", then "No such file or directory")."""
+    return "plughw:" + dev[3:] if dev.startswith("hw:") else dev
+
+
 def test_tone(device=None, seconds=1.5):
     """Play a tone on the chosen output (or `device`) so the operator hears where it comes out. Raises ValueError with aplay's message."""
     dev = device or effective() or "default"
@@ -383,7 +389,7 @@ def test_tone(device=None, seconds=1.5):
             n = int(rate * seconds)
             w.writeframes(b"".join(struct.pack("<hh", s, s) for s in (
                 int(9000 * math.sin(2 * math.pi * 440 * i / rate) * min(1, i / 2400, (n - i) / 2400)) for i in range(n))))
-        r = run("aplay", "-q", "-D", ("plug:" + dev) if dev != "default" else dev, tmp, timeout=15)
+        r = run("aplay", "-q", "-D", aplay_device(dev), tmp, timeout=15)
     finally:
         os.unlink(tmp)
     if r.returncode:
