@@ -15,12 +15,14 @@ Upstream tracker: https://github.com/missionpinball/mpf/issues
 | Fix | Kind | Platforms | Applied by | Upstream |
 |---|---|---|---|---|
 | [A lock or scoop sends its ball straight back out before the rules can hold it](mpf/ball-device-unclaimed-ball-ejected.md) | improvement | all | the game's code; nothing to apply | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
+| [A scoop ejects its ball at once although `auto_fire_on_unexpected_ball: false`](mpf/ball-device-unexpected-ball-ejects-at-once.md) | bug | all | the game's config; nothing to apply | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [Sounds sent with `bcp_trigger()` never reach GMC](mpf/bcp-trigger-unregistered-events.md) | improvement | all | the game's code; nothing to apply | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [`p_roc: driverboards: sternSAM` gives an unknown machine type](mpf/p-roc-driverboards-lowercased.md) | bug | all | the game's config; nothing to apply | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [No P-ROC driver for MPF on Linux, nor on Apple silicon Macs](mpf/pinproc-linux-macos.md) | packaging | Linux x86_64 and arm64 (Jetson included); macOS (Apple sili… | `install/install_linux.sh --proc`, `install/install_macos.sh --proc`, `python -m mpf_godo… | pypinproc, https://github.com/missionpinball/pypinproc/issues (wheels… |
 | [P-ROC on Windows: "Could not import pinproc" without the VC++ runtime or FTDI's driver](mpf/pinproc-windows-vcredist.md) | packaging | Windows x86_64 and x86; Windows on ARM (no build at all) | `install/install_windows.ps1 -Proc` (the D2XX driver stays a manual step: FTDI's download… | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [`mpf` does not start once MPF Monitor is installed (ruamel.yaml.clib 0.2.15)](mpf/ruamel-yaml-clib-0.2.15.md) | packaging | all (Python before 3.13; ruamel.yaml does not use the C lib… | `python -m mpf_godot setup` (pip installs the pin next to MPF) | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 | [A ball plunged at once is never counted, and its drain is ignored for 10 seconds](mpf/shooter-lane-entrance-count-delay.md) | improvement | all | the game's config; nothing to apply | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
+| [The desktop game never starts: "Not enough balls", or the first ball stays in the shooter lane](mpf/smart-virtual-empty-trough.md) | packaging | all | the game's own config | none: configuration, not an MPF bug |
 | [ZeDMD does not start with MPF's zedmd platform (library fails to load, wrong architecture on a Pi)](mpf/zedmd-native-serial.md) | bug | Linux arm64 (Raspberry Pi, Jetson); any Python other than t… | a game's config: `mpf: platforms: zedmd_native: mpf_godot.zedmd_native.ZedmdNativePlatfor… | MPF, https://github.com/missionpinball/mpf/issues; status: **draft, n… |
 
 ## MPF Monitor
@@ -42,9 +44,11 @@ Upstream tracker: https://github.com/missionpinball/mpf-gmc/issues
 | [One bad BCP message stops GMC's BCP thread for good](gmc/bcp-parse-error.md) | bug | all | `python -m mpf_godot setup`, `python -m mpf_godot patch-gmc [GMC_DIR]`; idempotent | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
 | [No sound or music for the whole session: GMC's BCP thread stops at connect](gmc/bcp-partial-lines.md) | bug | all | `python -m mpf_godot setup` (patches `toolchain/addons/mpf-gmc`), `python -m mpf_godot pa… | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
 | [A slide's MPF event handler never fires: its register_trigger was sent before MPF connected](gmc/early-event-handler.md) | bug | all | the game (no patch in this repository) | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
+| [A slide's `MPF.server.add_event_handler()` never fires: the MPF event is never sent to GMC](gmc/event-handler-before-connect.md) | bug | all | the game's code | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
 | [Number keys and "/" do nothing in GMC on an AZERTY keyboard](gmc/keyboard-layout.md) | bug | all (any non-US layout: AZERTY seen; QWERTZ and others like… | `python -m mpf_godot setup`, `python -m mpf_godot patch-gmc [GMC_DIR]`; idempotent | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
 | [GMC quits when a launcher checks its port; on Windows the check never sees GMC](gmc/port-probe-quits.md) | bug (quits) / improvement (a ready sign… | all (the quit); Windows (IPv6-only listener) | the launcher (`python -m mpf_godot run GAME`) | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
 | [Every slide show rebuilds the slide's nodes: hitches on slow hardware](gmc/slide-reuse.md) | improvement | all; it matters on slow targets (measured on a Jetson Xavie… | **not applied by this repository's installer**: it needs game code (which slides to keep,… | GMC, https://github.com/missionpinball/mpf-gmc/issues; status: **draf… |
+| [A trigger argument named `cmd` or `name` never reaches the Godot handler](gmc/trigger-reserved-keys.md) | pitfall (by design) | all | the game | not filed |
 
 ## Godot
 
@@ -109,4 +113,4 @@ Upstream tracker: https://github.com/claytercek/godot-native-video/issues
 
 Test projects and repro programs the reports refer to: [repro/](repro/).
 
-50 documents.
+54 documents.
