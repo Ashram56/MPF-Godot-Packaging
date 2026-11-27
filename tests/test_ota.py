@@ -24,6 +24,7 @@ class Dav(http.server.BaseHTTPRequestHandler):
     auth = "Basic " + __import__("base64").b64encode(b"claude:secret").decode()
     seen = []
     gets = []
+    deleted = []
 
     def log_message(self, *a):
         pass
@@ -56,6 +57,27 @@ class Dav(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body.encode())))
         self.end_headers()
         self.wfile.write(body.encode())
+
+    def do_DELETE(self):
+        if not self._ok():
+            return
+        f = os.path.join(Dav.root, self.path.strip("/").replace("%20", " "))
+        Dav.deleted.append(self.path)
+        try:
+            os.remove(f)
+            self.send_response(204)
+        except OSError:
+            self.send_response(404)
+        self.end_headers()
+
+    def do_PUT(self):
+        if not self._ok():
+            return
+        data = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        open(os.path.join(Dav.root, self.path.strip("/")), "wb").write(data)
+        self.send_response(201)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self):
         if not self._ok():
@@ -252,6 +274,24 @@ class Ota(TG.Base):
         G.JOB_LOCK.acquire()
         G.run_job(O.install_item, [i for i in O.list_remote() if i["kind"] == "game"][0])
         self.assertEqual(G.JOB["state"], "error")                                      # a wrong hash in the manifest is refused
+
+    def test_a_bundle_is_removed_from_the_server_with_its_hash_and_manifest_entry(self):
+        path = self.put_bundle()
+        O.save(self.url, "claude", "secret", "")
+        file = "demo/" + os.path.basename(path)
+        json.dump({"format": 1, "items": [{"id": "demo", "name": "Demo", "version": "1.0", "arch": "all", "file": file, "size": 1, "sha256": "0" * 64},
+                                          {"id": "demo", "name": "Demo", "version": "2.0", "arch": "all", "file": "demo/other.tar.xz", "size": 1, "sha256": "0" * 64}]},
+                  open(os.path.join(self.remote, "mpf-games.json"), "w"))
+        item = [i for i in O.list_remote() if i["key"] == file][0]
+        O.delete_remote(item)
+        self.assertFalse(os.path.exists(path))
+        self.assertFalse(os.path.exists(path + ".sha256"))
+        kept = json.load(open(os.path.join(self.remote, "mpf-games.json")))["items"]
+        self.assertEqual([i["version"] for i in kept], ["2.0"])
+        O.delete_remote(item)                                       # already gone: not an error
+        O.save(self.url, "", "", "")
+        with self.assertRaises(ValueError):
+            O.delete_remote(item)                                   # no credentials, no deletion
 
     def test_manifest_with_combined_arch_and_games_it_does_not_list(self):
         """The server's manifest names one game with arch "arm64+x86_64"; the other games are only archives in their folders.

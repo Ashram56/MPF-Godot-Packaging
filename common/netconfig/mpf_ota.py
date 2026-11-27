@@ -212,6 +212,39 @@ def list_remote(cfg=None):
     return items
 
 
+def _delete_url(cfg, url):
+    try:
+        with _open(cfg, url, "DELETE"):
+            pass
+    except ValueError as e:
+        if "not found" not in str(e):         # already gone is fine
+            raise
+
+
+def delete_remote(item, cfg=None):
+    """Remove a bundle or pack from the server (the file, its .sha256 and its entry in mpf-games.json). `item` comes from list_remote()."""
+    cfg = cfg or load()
+    if not cfg.get("user"):
+        raise ValueError("deleting on the server needs the user and password of the server (Install tab)")
+    manifest = None
+    if item.get("kind") == "game":
+        try:
+            with _open(cfg, base(cfg) + MANIFEST) as r:
+                manifest = json.loads(r.read(1 << 20))
+        except ValueError:
+            manifest = None
+    _delete_url(cfg, item["url"])
+    for extra in (item.get("sha_url") or item["url"] + ".sha256", item.get("delta")):         # not "objects": the store is shared by versions
+        if extra and extra.startswith(base(cfg)) and not extra.endswith("/"):
+            _delete_url(cfg, extra)
+    if isinstance(manifest, dict) and isinstance(manifest.get("items"), list):
+        kept = [i for i in manifest["items"] if not (isinstance(i, dict) and i.get("file") == item.get("key"))]
+        if len(kept) != len(manifest["items"]):
+            body = json.dumps(dict(manifest, items=kept), indent=1).encode()
+            with _open(cfg, base(cfg) + MANIFEST, "PUT", {"Content-Type": "application/json"}, body):
+                pass
+
+
 def _download(cfg, url, dest, label):
     G.job_set(state="running", msg=f"Downloading {label}")
     got, last = 0, 0
