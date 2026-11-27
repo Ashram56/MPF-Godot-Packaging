@@ -44,6 +44,19 @@ An upstream fix would re-send `register_trigger` for every key of `registered_ha
 Run MPF + GMC, post `my_event` from MPF after the connection: with the fix the handler runs; without it nothing
 happens and GMC logs nothing.
 
+## Upstream issue (draft, not filed)
+
+**Title:** add_event_handler() before MPF connects is lost (register_trigger not re-sent on reset)
+
+**Body:**
+
+```markdown
+GMC 1.0.0. `MPF.server.add_event_handler("my_event", cb)` called in a slide's `_ready()` sends `register_trigger`
+before MPF is connected, so it is dropped, and the `reset` handler re-registers only `registered_events` and
+`auto_signals`, not the keys of `registered_handlers`. `cb` never runs.
+Proposed fix: on reset, also send `register_trigger` for every key of `registered_handlers`.
+```
+
 ## Related pitfall: `[keyboard]` entries need their kind
 
 `gmc.cfg` `[keyboard]` entries are `key=["switch", "s_name"]` (optional third element `"active"`, `"inactive"`

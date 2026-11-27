@@ -34,3 +34,7 @@ In the desktop overlay, list the trough's ball switches under `virtual_platform_
 
 Run the game under Xvfb with GMC, then send the coin, start and launch keys through XTEST (python-xlib). The log
 should show `ball_started` and then `playfield_ball_count_change` with `balls: 1`.
+
+## Upstream issue (draft, not filed)
+
+None: this is configuration, not an MPF bug (see the Upstream row above).
