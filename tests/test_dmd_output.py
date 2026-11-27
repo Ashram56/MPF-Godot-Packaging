@@ -5,6 +5,7 @@ import unittest as _unittest
 if not _sys.platform.startswith("linux"):
     raise _unittest.SkipTest("the platform page and its netconfig code run on the Linux images only")
 
+import json
 import os
 import sys
 import unittest
@@ -111,12 +112,12 @@ class DmdOutput(Base):
         self.assertEqual(D.load()["serum"], {})
 
     def test_looks_follow_the_device(self):
-        b = {"dmd": {"looks": {"classic": ["--dmd=classic"], "hd": ["--dmd=hd"], "advanced": ["--dmd=hd", "--bikes"]}, "look": "hd"}}
+        b = {"dmd": {"looks": {"classic": ["--dmd=classic"], "advanced": ["--dmd=hd", "--bikes"]}, "look": "advanced"}}
         D.set_output("lcd")
         pre, user = D.plan("g", b)                    # default look of the bundle, and the page's picture of the screen DMD
-        self.assertEqual((pre, user), ([], ["--dmd=hd", "--dmd-preview=" + D.PREVIEW_PNG]))
-        D.set_output(look="advanced")
-        self.assertEqual(D.plan("g", b)[1][:2], ["--dmd=hd", "--bikes"])
+        self.assertEqual((pre, user), ([], ["--dmd=hd", "--bikes", "--dmd-preview=" + D.PREVIEW_PNG]))
+        D.set_output(look="classic")
+        self.assertEqual(D.plan("g", b)[1][0], "--dmd=classic")
         D.set_output("zedmd", look="advanced")        # a device shows the exact classic dots, whatever the page says
         self.assertEqual(D.plan("g", b)[1][0], "--dmd=classic")
         D.set_output("pin2dmd")
@@ -124,21 +125,59 @@ class DmdOutput(Base):
         D.set_output("web")
         self.assertEqual(D.plan("g", b)[1][0], "--dmd=classic")
 
+    def test_only_two_looks_and_the_old_hd_reads_as_advanced(self):
+        D.set_output("lcd", look="hd")                # a saved or posted "hd" is HD Full now
+        self.assertEqual(D.load()["look"], "advanced")
+        old = {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"], "advanced": ["--a"]}, "look": "hd"}}
+        self.assertEqual(list(D.bundle_looks(old)), ["classic", "advanced"])
+        D.set_output(look="")
+        self.assertEqual(D.plan("g", old)[1][0], "--a")   # the bundle's old default "hd" = advanced
+        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"]}}})[1][0], "--c")   # hd only: classic
+
     def test_a_look_the_bundle_lacks_falls_back(self):
         D.set_output("lcd", look="advanced")
-        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"]}}})[1][0], "--c")
+        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"]}}})[1][0], "--c")    # only classic offered
+        D.set_output("lcd", look="classic")
+        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"], "advanced": ["--a"]}}})[1][0], "--c")   # the page's choice
+        D.set_output("lcd", look="")
+        self.assertEqual(D.plan("g", {"dmd": {"looks": {"classic": ["--c"], "advanced": ["--a"]}}})[1][0], "--a")   # no default: HD Full
         self.assertEqual(D.plan("g", {}), ([], []))   # no looks declared: nothing added
         with self.assertRaises(ValueError):
             D.set_output(look="fancy")
 
     def test_board_limits_the_looks_and_an_addon_follows_the_look(self):
         import mpf_contract as K
-        b = {"dmd": {"looks": {"classic": ["--c"], "hd": ["--h"]}, "look": "hd"}, "profiles": {"rpi4": {"dmd_looks": ["classic"]}}}
+        b = {"dmd": {"looks": {"classic": ["--c"], "advanced": ["--a"]}, "look": "advanced"}, "profiles": {"rpi4": {"dmd_looks": ["classic"]}}}
         s = D.load()
         self.assertEqual(D.effective_look(s, b, "lcd", "rpi4"), "classic")
-        self.assertEqual(D.effective_look(s, b, "lcd", "x86"), "hd")
+        self.assertEqual(D.effective_look(s, b, "lcd", "x86"), "advanced")
         self.assertEqual(K.problems(dict(b, game_dir="game")), [])
         self.assertEqual(list(D.allowed_looks(b, "rpi4")), ["classic"])
+
+    def test_option_that_needs_hd_full(self):
+        """`when_look: advanced` (Tron's light cycles): the option's argument is passed only when HD Full runs."""
+        import tempfile
+        import mpf_contract as K
+        sch = {"groups": [], "options": [{"id": "bikes", "type": "bool", "default": True, "when_look": "advanced",
+                                          "target": {"godot_arg": "--dmd-cycles"}}]}
+        g = tempfile.mkdtemp()
+        os.makedirs(os.path.join(g, "game"))
+        open(os.path.join(g, "s.json"), "w").write(json.dumps(sch))
+        b = {"format": 2, "game_dir": "game", "settings": {"schema": "s.json"},
+             "dmd": {"looks": {"classic": ["--c"], "advanced": ["--a"]}, "look": "advanced"}}
+        D.set_output("lcd", look="advanced")
+        self.assertIn("--dmd-cycles=true", K.plan(g, b)["godot_args"])
+        D.set_output("lcd", look="classic")
+        self.assertNotIn("--dmd-cycles=true", K.plan(g, b)["godot_args"])
+        import mpf_games as G
+        monkey = G.read_bundle
+        G.read_bundle = lambda game: b
+        try:
+            self.assertEqual([o["id"] for o in G.settings_schema(g)["options"]], [])      # hidden in DOT
+            D.set_output("lcd", look="advanced")
+            self.assertEqual([o["id"] for o in G.settings_schema(g)["options"]], ["bikes"])
+        finally:
+            G.read_bundle = monkey
 
     def test_preview_image(self):
         self.addCleanup(setattr, D, "PREVIEW_PNG", D.PREVIEW_PNG)

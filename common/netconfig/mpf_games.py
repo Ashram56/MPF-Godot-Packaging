@@ -296,7 +296,10 @@ def settings_schema(game):
     if K.is_v2(b):
         sch = K.schema(game, b)
         own = SC.settings(b)        # the monitor of each window is the page's "Screens" card's, not a field of this form
-        return dict(sch, options=[o for o in sch.get("options", []) if o.get("id") not in own])
+        import mpf_dmd as D
+        look = D.effective_look(D.load(), b, D.resolve())    # an option with `when_look` (Tron's light cycles) is shown only with that look
+        return dict(sch, options=[o for o in sch.get("options", []) if o.get("id") not in own
+                                  and (not o.get("when_look") or D.norm(o["when_look"]) == look)])
     try:
         return json.loads(tool(game, "list").stdout)
     except ValueError:

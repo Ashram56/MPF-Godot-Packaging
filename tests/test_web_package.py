@@ -107,3 +107,24 @@ def test_branches_main_first_then_newest_open_first(monkeypatch):
         return R(json.dumps([br(n) for n in ("a", "z-nopr", "b", "main", "c")] if "/branches" in url else pulls).encode())
     monkeypatch.setattr(WU, "_get", fake)
     assert [b["name"] for b in WU.branches("o/r")] == ["main", "c", "b", "a", "z-nopr"]
+
+
+def test_game_start_uses_the_package_and_does_not_count_as_a_page_start(tmp_path, monkeypatch):
+    """mpf-game.service runs `mpf_launch.py game`: the package's script runs, and the game's restarts never arm the page's rollback counter."""
+    pkg = tmp_path / "p-1"
+    pkg.mkdir()
+    (pkg / "mpf_netconfig.py").write_text("")
+    json.dump({"id": "p-1", "api": L.API}, open(pkg / "manifest.json", "w"))
+    (tmp_path / "current").symlink_to(pkg)
+    (tmp_path / "pending.json").write_text(json.dumps({"starts": 0}))
+    monkeypatch.setattr(L, "WEB_DIR", str(tmp_path))
+    ran = []
+    monkeypatch.setattr(os, "execv", lambda exe, args: ran.append(args))
+    for _ in range(5):
+        L.main(["game"])
+    assert [a[1:] for a in ran] == [[os.path.join(os.path.realpath(pkg), "mpf_netconfig.py"), "game"]] * 5
+    assert json.load(open(tmp_path / "pending.json"))["starts"] == 0
+    L.main(["web"])
+    assert json.load(open(tmp_path / "pending.json"))["starts"] == 1
+    svc = open(os.path.join(os.path.dirname(__file__), "..", "common", "netconfig", "mpf-game.service")).read()
+    assert "ExecStart=/usr/local/bin/mpf_launch.py game" in svc
