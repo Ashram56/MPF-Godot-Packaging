@@ -1,6 +1,6 @@
 """This repository is game agnostic: it takes a game package that the game provides and builds a bundle from it. No game's name,
 recipe, bundle spec or PuP Pack path may be in it. Where a name is allowed: `fixes/` and `platforms/` (the provenance of a finding,
-"found on game X"), this test, and the two places that carry a legacy patch tag."""
+"found on game X"), `agents/` and `knowledge/` (the method documents, which cite a worked example), `tools/pup/` and its tests, this test, and the two places that carry a legacy patch tag."""
 import os
 import re
 import subprocess
@@ -9,7 +9,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FORBIDDEN = re.compile(r"transformers|tron[ -_]?legacy|\btf_?180\b|\btf_pup\b", re.I)
 FORBIDDEN_WORD = re.compile(r"\btron\b", re.I)
-ALLOWED_PREFIXES = ("fixes/", "platforms/", "tests/test_no_game_content.py")
+ALLOWED_PREFIXES = ("fixes/", "platforms/", "agents/", "knowledge/", "tools/pup/", "tests/test_pup_", "tests/test_no_game_content.py")
 LEGACY_TAG = {"mpf_godot/gmc_patch.py", "tests/test_toolchain.py"}      # older GMC copies carry "# tron patch"; the tag must stay readable
 BINARY = (".so", ".dll", ".dylib", ".png", ".jpg", ".jpeg", ".gif", ".zip", ".xz", ".ctex", ".mp4", ".patch")
 

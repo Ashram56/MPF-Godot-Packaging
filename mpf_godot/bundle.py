@@ -193,7 +193,8 @@ def sync_tree(root, spec, stage):
         shutil.copy2(src, dst)
         copied += 1
     for base, _, names in os.walk(stage, topdown=False):
-        for name in names:
+        # sources first, then their .import: whether the source is gone must not depend on the listing order of the OS
+        for name in sorted(names, key=lambda n: n.endswith(".import")):
             rel = os.path.relpath(os.path.join(base, name), stage).replace(os.sep, "/")
             if rel in want:
                 continue
