@@ -68,6 +68,9 @@
   "monitor": {
    "type": "object"
   },
+  "screens": {
+   "type": "array"
+  },
   "profiles": {
    "type": "object"
   },

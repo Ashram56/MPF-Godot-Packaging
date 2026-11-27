@@ -33,9 +33,13 @@ class Library:
     """
 
     def __init__(self, files, playlists=None, rng=None):
-        self.files = dict(files)
         self.playlists = {k.lower(): v for k, v in (playlists or {}).items()}
         self.rng = rng or random.Random()
+        self.set_files(files)
+
+    def set_files(self, files):
+        """The files changed (a download finished): the folders and the playlists' order start again."""
+        self.files = dict(files)
         self.folders = {}
         for key in self.files:
             self.folders.setdefault(os.path.dirname(key).lower(), []).append(key)
@@ -62,6 +66,10 @@ class Library:
             i = (i + 1 + self.rng.randrange(len(keys) - 1)) % len(keys)
         self._last[playlist] = keys[i]
         return keys[i]
+
+    def count(self, playlist):
+        """How many files a playlist has here."""
+        return len(self.folders.get(str(playlist).lower(), []))
 
     def path(self, key):
         return self.files.get(key, "")
@@ -162,8 +170,10 @@ class Screen:
         if not key:
             self._stop_media()
             return
-        # a background named by its file loops that file; a playlist background moves to its next file
-        self._start(key, bool(self.bg["file"]), self.library.volume_of({"playlist": self.bg["playlist"]}))
+        # a background named by its file loops that file; a playlist background moves to its next file, except a
+        # playlist of one file, which loops it (no restart of the decoder, so no black frame, at each end)
+        loop = bool(self.bg["file"]) or self.library.count(self.bg["playlist"]) == 1
+        self._start(key, loop, self.library.volume_of({"playlist": self.bg["playlist"]}))
 
     def _start(self, key, loop, volume):
         self._serial += 1
