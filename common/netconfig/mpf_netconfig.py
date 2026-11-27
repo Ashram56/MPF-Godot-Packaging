@@ -214,6 +214,46 @@ def have_network():
     return bool(r.stdout.strip())
 
 
+def ap_configs():
+    """(hostapd.conf, dnsmasq.conf) of the setup access point.
+    The DHCP leases go to /run: the root of a production image is read-only and dnsmasq quits at once when it cannot create
+    /var/lib/misc/dnsmasq.leases (hostapd then ran alone: the phone joined, got no address and left)."""
+    hostapd = (f"interface={C.WLAN}\nssid={AP_SSID}\nhw_mode=g\nchannel=6\nwpa=2\nwpa_key_mgmt=WPA-PSK\n"
+               f"rsn_pairwise=CCMP\nwpa_passphrase={AP_PSK}\n")
+    dnsmasq = (f"interface={C.WLAN}\nbind-interfaces\ndhcp-leasefile=/run/mpf-dnsmasq.leases\n"
+               f"dhcp-range=192.168.4.10,192.168.4.50,12h\naddress=/#/{AP_ADDR}\n")
+    return hostapd, dnsmasq
+
+
+def portal_redirect(port=80):
+    """Serve a redirect to the setup page on the access point's address (daemon thread). The DNS answers every name with this
+    address, so a phone's connectivity check (http://connectivitycheck.gstatic.com/generate_204 and the like) lands here: without
+    an answer Android calls the network "no Internet" and may drop it; with a redirect it offers "Sign in to network" and opens the page."""
+    import http.server
+    import threading
+
+    target = f"http://{AP_ADDR}:{os.environ.get('MPF_WEB_PORT', '8080')}/"
+
+    class Redirect(http.server.BaseHTTPRequestHandler):
+        def _go(self):
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        do_GET = do_HEAD = do_POST = _go
+
+        def log_message(self, *a):
+            pass
+
+    try:
+        srv = http.server.ThreadingHTTPServer((AP_ADDR, port), Redirect)
+    except OSError as e:
+        print("access point: no redirect on port", port, e, file=sys.stderr)
+        return None
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
 def access_point():
     time.sleep(int(os.environ.get("MPF_AP_DELAY", "90")))
     if have_network():
@@ -222,13 +262,12 @@ def access_point():
     run("systemctl", "stop", f"wpa_supplicant@{C.WLAN}.service")
     run("ip", "addr", "flush", "dev", C.WLAN)
     run("ip", "addr", "add", f"{AP_ADDR}/24", "dev", C.WLAN)
-    open("/run/mpf-hostapd.conf", "w").write(
-        f"interface={C.WLAN}\nssid={AP_SSID}\nhw_mode=g\nchannel=6\nwpa=2\nwpa_key_mgmt=WPA-PSK\n"
-        f"rsn_pairwise=CCMP\nwpa_passphrase={AP_PSK}\n")
-    open("/run/mpf-dnsmasq.conf", "w").write(
-        f"interface={C.WLAN}\nbind-interfaces\ndhcp-range=192.168.4.10,192.168.4.50,12h\naddress=/#/{AP_ADDR}\n")
+    hostapd_conf, dnsmasq_conf = ap_configs()
+    open("/run/mpf-hostapd.conf", "w").write(hostapd_conf)
+    open("/run/mpf-dnsmasq.conf", "w").write(dnsmasq_conf)
     h = subprocess.Popen(["hostapd", "/run/mpf-hostapd.conf"])
     d = subprocess.Popen(["dnsmasq", "-k", "-C", "/run/mpf-dnsmasq.conf"])
+    portal_redirect()
     h.wait()
     d.terminate()
 
