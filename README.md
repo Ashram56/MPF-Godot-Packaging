@@ -8,7 +8,12 @@ Every fix is documented on its own in [fixes/](fixes/README.md) (problem, cause,
 platforms) with a draft issue for the upstream project. Every platform's set-up and what we learned there is in
 [platforms/](platforms/README.md); quick tips for WSL, hosts without usbipd and the Xavier NX: [platforms/tips.md](platforms/tips.md).
 All Godot / GoZen / MPF and platform findings of the Stern SAM recreations are kept here (what goes where: [CONTRIBUTING.md](CONTRIBUTING.md));
-the ROM extraction and re-coding agents are in [Stern-SAM-Decryption](https://github.com/Ashram56/Stern-SAM-Decryption).
+the ROM and VPX-table extraction agents (A and B) are in [Stern-SAM-Decryption](https://github.com/Ashram56/Stern-SAM-Decryption).
+
+**This repository is also the MPF implementation half of the Stern SAM master plan** (since 2026-11-23): the agents that rebuild a
+decoded game in MPF (C strict recreation, D VPX bridge, E improvements, F packaging, G PuP Pack) and the knowledge they read.
+Start at [agents/README.md](agents/README.md); the decryption half, which produces what those agents consume, is
+[Stern-SAM-Decryption](https://github.com/Ashram56/Stern-SAM-Decryption).
 
 Flashable images (Raspberry Pi 4, Jetson Xavier NX, x86 mini PC) share their setup page, read-only production mode and game loader in
 [common/](common/): [games and bundles, putting your own MPF code or a game in an image](common/games/README.md),
@@ -97,6 +102,9 @@ fixes and prebuilt here; [build/](build/) rebuilds them from pinned sources.
 
 | Folder | What |
 |---|---|
+| [`agents/`](agents/README.md) | the MPF implementation agents: C [strict recreation](agents/recreation.md), D [VPX bridge](agents/vpx_bridge.md), E [improvements](agents/improvement.md), F [packaging](agents/packaging.md), G [PuP Pack](agents/pup_pack.md) |
+| [`knowledge/`](knowledge/README.md) | what those agents read: the SAM to MPF playbook, MPF's own quirks, the HD DMD method, DMD conformance, the PuP Pack format |
+| [`tools/pup/`](tools/pup/pup_decode.py) | `pup_decode.py` (decode a PuP Pack, match its DMD captures) and the game-agnostic PuP runtime (`tools/pup/runtime/`) |
 | [`install/`](install/) | the one-line installers per OS, and the P-ROC driver build |
 | [`mpf_godot/`](mpf_godot/) | Python, standard library only: pins and paths (`toolchain.py`), the install (`setup_toolchain.py`), the GMC patch (`gmc_patch.py`), the launcher (`launcher.py`), Windows/OneDrive-safe file operations (`fsutil.py`) |
 | [`fixes/`](fixes/README.md) | one document per fix or improvement, each with its upstream issue draft; test projects and repro programs in `fixes/repro/` |
