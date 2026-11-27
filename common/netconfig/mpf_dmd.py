@@ -343,6 +343,11 @@ def preview_frame():
 def preview_image():
     """The PNG bytes of the screen DMD the dmd_out add-on last wrote (`--dmd-preview=`), or None when the game is not running."""
     try:
+        with open(PREVIEW_PNG + ".want", "a"):          # tells the add-on a viewer is there: it writes the PNG only then
+            os.utime(PREVIEW_PNG + ".want", None)
+    except OSError:
+        pass
+    try:
         if time.time() - os.path.getmtime(PREVIEW_PNG) > PREVIEW_MAX_AGE:
             return None
         with open(PREVIEW_PNG, "rb") as f:

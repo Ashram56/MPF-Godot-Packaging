@@ -1,0 +1,6 @@
+config_version=5
+[application]
+config/name="bench"
+run/main_scene="res://bench.tscn"
+[rendering]
+renderer/rendering_method="gl_compatibility"

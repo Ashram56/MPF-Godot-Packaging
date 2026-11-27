@@ -14,7 +14,7 @@ extends Node
 ## one colour (16 shades for the 128x32 classic dots, 8 bits for 192x64, 256x64 and the HD picture), #RRGGBB (default #ff730d, a DMD's orange). platforms/dmd_devices.md.
 
 const SIZE_ARG := "--dmd-size="        # WxH of the device: 128x32 (default), 192x64 (PIN2DMD XL), 256x64 (PIN2DMD HD, ZeDMD HD)
-const PREVIEW_ARG := "--dmd-preview="  # PATH: a PNG of the DMD picture, rewritten twice a second, for the platform's setup page
+const PREVIEW_ARG := "--dmd-preview="  # PATH: a PNG of the DMD picture, rewritten twice a second while the setup page asks (PATH.want touched), for the platform's setup page
 const FEED_NAME_ARG := "--dmd-feed="   # which picture the game published (publish()): "classic" (default, the root viewport)
 
 var WIDTH := 128
@@ -151,6 +151,13 @@ func shade_frame(image: Image) -> PackedByteArray:
 	return frame
 
 
+func _preview_wanted() -> bool:
+	# The setup page touches PATH.want while it shows the preview; with no viewer the GPU readback and PNG write (costly on a small
+	# board: ~2.5 FPS on a Rock 4D) are skipped. A page that never touches the file (older platform) gets no preview.
+	var t := FileAccess.get_modified_time(_preview_path + ".want")
+	return t > 0 and Time.get_unix_time_from_system() - t < 10.0
+
+
 func _write_preview() -> void:
 	var image := _source().get_texture().get_image()
 	var tmp := _preview_path + ".tmp"
@@ -163,7 +170,8 @@ func _process(delta: float) -> void:
 		_preview_elapsed += delta
 		if _preview_elapsed >= 0.5:
 			_preview_elapsed = 0.0
-			_write_preview()
+			if _preview_wanted():
+				_write_preview()
 	if not _send:
 		return
 	_elapsed += delta
